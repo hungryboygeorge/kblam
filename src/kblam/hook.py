@@ -76,17 +76,34 @@ def _config(root: Path | None, data: dict) -> Config:
     return load_config(cwd=Path(project) if project else _base_dir(data))
 
 
-def _absolute(raw: str, base: Path) -> str:
-    """`raw` as an absolute, normalised path, without touching the filesystem (it may hold globs)."""
+def _absolute(raw: str, base: Path, *, backslash: bool = False) -> str:
+    """`raw` as an absolute, lexically normalised path (it may hold globs). With `backslash`
+    (PowerShell), `\\` separates segments on every platform, as it does in PowerShell itself."""
     text = os.path.expanduser(os.path.expandvars(raw))
+    if backslash:
+        text = text.replace("\\", "/")
     if sys.platform == "win32":
         text = re.sub(r"^/([A-Za-z])(?=/|$)", r"\1:", text)  # Git Bash /c/Users -> c:/Users
     return os.path.normcase(os.path.normpath(os.path.join(base, text)))
 
 
-def _under(raw: str, base: Path, directory: Path) -> bool:
-    path, top = _absolute(raw, base), os.path.normcase(os.path.normpath(directory))
-    return path == top or path.startswith(top.rstrip(os.sep) + os.sep)
+def _forms(path: str) -> set[str]:
+    """`path` as written and with symlinks resolved. The root kblam finds is a resolved path, so a
+    repository reached through a symlinked directory (the hook's cwd, CLAUDE_PROJECT_DIR, or the path
+    an agent was given) would not compare equal to it lexically. realpath accepts paths that do not
+    exist and leaves glob characters alone."""
+    try:
+        return {path, os.path.normcase(os.path.realpath(path))}
+    except (OSError, ValueError):  # e.g. an embedded NUL; the lexical form still counts
+        return {path}
+
+
+def _within(path: str, directory: Path) -> bool:
+    """Whether `path` (one of _forms) is `directory` or inside it, as written or resolved."""
+    for top in _forms(os.path.normcase(os.path.normpath(directory))):
+        if path == top or path.startswith(top.rstrip(os.sep) + os.sep):
+            return True
+    return False
 
 
 # --- Bash ---------------------------------------------------------------------------------------
@@ -319,15 +336,21 @@ def _pre_tool_use(cfg: Config, data: dict) -> int:
     use = (f"{cfg.findings_dir}/ is written only by kblam put: stage the finding with kblam new <topic> "
            f"\"<title>\" or kblam edit <id>, edit the staged copy under .kblam/staging/, then kblam put it.")
 
+    def forms(path: str) -> set[str]:
+        return _forms(_absolute(path, base, backslash=tool == "PowerShell"))
+
+    def in_findings(path: str) -> bool:
+        return any(_within(form, findings) for form in forms(path))
+
     def state(path: str) -> bool:
-        """Under .kblam/ (kblam's state) and not under .kblam/staging/ (SPEC §8)."""
-        return _under(path, base, cfg.state_dir) and not _under(path, base, cfg.staging_dir)
+        """Under .kblam/ (kblam's state) and not under .kblam/staging/ (SPEC §8), as written or resolved."""
+        return any(_within(form, cfg.state_dir) and not _within(form, cfg.staging_dir) for form in forms(path))
 
     if tool in FILE_TOOLS:
         path = tool_input.get(FILE_TOOLS[tool])
         if not isinstance(path, str):
             return _note("PreToolUse", f"{tool} has no {FILE_TOOLS[tool]} string")
-        if _under(path, base, findings):
+        if in_findings(path):
             return _deny(f"kblam: {tool} of {path} denied. {use}")
         if state(path):
             return _deny(f"kblam: {tool} of {path} under .kblam/ denied. {STATE_USE}")
@@ -343,7 +366,7 @@ def _pre_tool_use(cfg: Config, data: dict) -> int:
     except ValueError:
         return 0  # unbalanced quoting: the shell will refuse it too; the Stop hook covers the rest
     reasons = []
-    hits = [t for t in targets if _under(t, base, findings)]
+    hits = [t for t in targets if in_findings(t)]
     if hits:
         reasons.append(f"kblam: this command writes under {cfg.findings_dir}/ ({', '.join(hits)}), so it is "
                        f"denied. {use}")

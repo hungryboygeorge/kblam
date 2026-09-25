@@ -7,11 +7,12 @@ rule, the place, and what to do about it.
 from __future__ import annotations
 
 import bisect
+import functools
+import math
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime
-from itertools import combinations
 from pathlib import Path, PurePosixPath
 
 from kblam.finding import (
@@ -337,8 +338,10 @@ def k3_suspect(view: KBView, focus: frozenset[str] = frozenset()) -> list[Issue]
 # --- K4 / K5 --------------------------------------------------------------------------------
 
 
+@functools.lru_cache(maxsize=None)
 def _term_pattern(term: str) -> re.Pattern:
-    """Case-insensitive, anchored at a word start, so a stem like `falsif` matches `Falsified`."""
+    """Case-insensitive, anchored at a word start, so a stem like `falsif` matches `Falsified`.
+    Cached: K4 and K5 match every term against two texts of every finding."""
     words = [re.escape(w) for w in term.split()]
     return re.compile(r"(?<!\w)" + r"\s+".join(words), re.IGNORECASE)
 
@@ -361,21 +364,40 @@ def _prose_segments(view: KBView, f: Finding) -> list[tuple[int, str]]:
     return segments
 
 
+@functools.lru_cache(maxsize=None)
+def _any_term_pattern(terms: tuple[str, ...]) -> re.Pattern:
+    """One pattern matching wherever any term's pattern matches: a single scan tells whether a text
+    has a history term at all, which most findings do not."""
+    return re.compile("|".join(f"(?:{_term_pattern(term).pattern})" for term in terms), re.IGNORECASE)
+
+
 def _history_hits(view: KBView, text: str) -> list[tuple[int, str]]:
     """(char offset, term) for every history term in text."""
+    terms = view.cfg.history_terms
+    if _any_term_pattern(terms).search(text) is None:
+        return []
     hits = []
-    for term in view.cfg.history_terms:
+    for term in terms:
         for match in _term_pattern(term).finditer(text):
             hits.append((match.start(), term))
     return sorted(hits)
 
 
+def _history_segments(view: KBView, f: Finding) -> list[tuple[int, str, list[tuple[int, str]]]]:
+    """(first file line, text, history hits) for each of _prose_segments; once per finding per view,
+    since K4 and K5 both read them."""
+    memo = view.memo.setdefault("history", {})
+    if f.path not in memo:
+        memo[f.path] = [(line, text, _history_hits(view, text)) for line, text in _prose_segments(view, f)]
+    return memo[f.path]
+
+
 def k4_history_language(view: KBView) -> list[Issue]:
     issues: list[Issue] = []
     for f in _parsed(view):
-        for first_line, text in _prose_segments(view, f):
+        for first_line, text, hits in _history_segments(view, f):
             seen = set()
-            for offset, term in _history_hits(view, text):
+            for offset, term in hits:
                 line = first_line + text.count("\n", 0, offset)
                 if (line, term) in seen:
                     continue
@@ -393,8 +415,7 @@ def k5_id_near_history(view: KBView) -> list[Issue]:
     window = view.cfg.history_id_window
     issues: list[Issue] = []
     for f in _parsed(view):
-        for first_line, text in _prose_segments(view, f):
-            hits = _history_hits(view, text)
+        for first_line, text, hits in _history_segments(view, f):
             if not hits:
                 continue
             starts = [m.start() for m in re.finditer(r"\S+", text)]
@@ -505,13 +526,38 @@ def claim_tokens(claim: str) -> frozenset[str]:
     return frozenset(WORD_TOKEN_RE.findall(text))
 
 
+def similar_pairs(sets: list[frozenset[str]], threshold: float) -> list[tuple[int, int]]:
+    """Every index pair (i < j), sorted, whose sets are both non-empty and may reach Jaccard similarity
+    `threshold`: a superset of the pairs that do, which the caller measures exactly. Comparing every
+    pair is quadratic, and validate runs under put's lock, so this uses prefix filtering.
+
+    With every set's tokens in one global order (rarest first), two sets that share at least α tokens
+    share one within the first |x| - α + 1 tokens of each (Chaudhuri et al., 2006): the first shared
+    token has at least α - 1 shared tokens after it. J(a, b) >= t needs |a ∩ b| >= t·|a ∪ b| >= t·|x|
+    for x either set, and the overlap is a whole number, so each set is indexed by the prefix that
+    α = ⌈t·|x|⌉ gives. It is taken just below t·|x| (by 1e-9, far above the float error of t·|x|
+    and of the caller's ratio for any claim length), so rounding can add a candidate, never drop one."""
+    frequency = Counter(token for tokens in sets for token in tokens)
+    index: dict[str, list[int]] = defaultdict(list)
+    pairs: set[tuple[int, int]] = set()
+    for j, tokens in enumerate(sets):
+        if not tokens:
+            continue
+        ordered = sorted(tokens, key=lambda token: (frequency[token], token))
+        overlap = max(0, math.ceil(threshold * len(ordered) - 1e-9))
+        for token in ordered[:len(ordered) - overlap + 1]:
+            for i in index[token]:
+                pairs.add((i, j))
+            index[token].append(j)
+    return sorted(pairs)
+
+
 def k9_duplicates(view: KBView, focus: frozenset[str] = frozenset()) -> list[Issue]:
     threshold = view.cfg.duplicate_similarity
     candidates = [(f, claim_tokens(f.claim)) for f in _parsed(view) if f.claim and f.file_id]
     issues = []
-    for (a, ta), (b, tb) in combinations(candidates, 2):
-        if not ta or not tb:
-            continue
+    for i, j in similar_pairs([tokens for _finding, tokens in candidates], threshold):
+        (a, ta), (b, tb) = candidates[i], candidates[j]
         similarity = len(ta & tb) / len(ta | tb)
         if similarity < threshold:
             continue
@@ -575,7 +621,41 @@ def _source_bytes(view: KBView, full: Path) -> bytes | None:
     return full.read_bytes() if full.is_file() else None
 
 
+@dataclass(frozen=True)
+class _Source:
+    """A verbatim source as K10 reads it. `text` (newlines normalised) and `lines` are None for a
+    binary source: one holding a NUL byte or not valid UTF-8."""
+    data: bytes
+    text: str | None
+    lines: list[str] | None
+
+
+def _source(view: KBView, full: Path) -> _Source | None:
+    """The source at `full`, or None if it does not exist. Read and decoded once per view, since
+    many excerpts quote one evidence file."""
+    memo = view.memo.setdefault("sources", {})
+    if full not in memo:
+        data = _source_bytes(view, full)
+        text = None
+        if data is not None and b"\0" not in data:
+            try:
+                text = normalise_newlines(data.decode("utf-8"))
+            except UnicodeDecodeError:
+                pass
+        memo[full] = None if data is None else _Source(data, text, None if text is None else text.split("\n"))
+    return memo[full]
+
+
 def verbatim_excerpts(view: KBView, f: Finding) -> list[Excerpt]:
+    """Each verbatim tag in the finding's body and its K10 result. Computed once per finding per view:
+    K4 and K5 read which excerpts are verified, K10 reads their problems."""
+    memo = view.memo.setdefault("excerpts", {})
+    if f.path not in memo:
+        memo[f.path] = _verbatim_excerpts(view, f)
+    return memo[f.path]
+
+
+def _verbatim_excerpts(view: KBView, f: Finding) -> list[Excerpt]:
     excerpts: list[Excerpt] = []
     body = f.body_lines
     for i, line in enumerate(body):
@@ -605,19 +685,15 @@ def _check_excerpt(view: KBView, tag: re.Match, start: int, end: int, excerpt: s
     full, problem = _repo_path(view, source)
     if problem:
         return failed(f"verbatim source {source} {problem}")
-    data = _source_bytes(view, full)
-    if data is None:
+    found = _source(view, full)
+    if found is None:
         return failed(f"verbatim source {source} does not exist; cite an existing file relative to the "
                       f"repository root")
-    try:
-        text = None if b"\0" in data else normalise_newlines(data.decode("utf-8"))
-    except UnicodeDecodeError:
-        text = None
-    if text is None:
+    if found.text is None:
         # Binary source: K10 does not check it (the finding's check: command does), and an
         # unchecked excerpt is not exempt from K4/K5.
         return Excerpt(start, end, None, False)
-    problem = _excerpt_problem(tag, source, excerpt, data, text)
+    problem = _excerpt_problem(tag, source, excerpt, found)
     return failed(problem) if problem else Excerpt(start, end, None, True)
 
 
@@ -630,16 +706,16 @@ def k10_verbatim(view: KBView) -> list[Issue]:
     ]
 
 
-def _excerpt_problem(tag: re.Match, source: str, excerpt: str, data: bytes, text: str) -> str | None:
+def _excerpt_problem(tag: re.Match, source: str, excerpt: str, found: _Source) -> str | None:
     copy_hint = "copy the text exactly from the source (no paraphrase, no reflowing)"
     if tag.group("offset") is not None:
         offset = int(tag.group("offset"), 16)
         for form in (excerpt, excerpt.replace("\n", "\r\n")):
-            if data.startswith(form.encode("utf-8"), offset):
+            if found.data.startswith(form.encode("utf-8"), offset):
                 return None
         return f"the excerpt does not occur verbatim at byte offset 0x{offset:X} of {source}; {copy_hint}"
 
-    lines = text.split("\n")
+    text, lines = found.text, found.lines
     total = len(lines) - (1 if text.endswith("\n") else 0)
     first = int(tag.group("first"))
     last = int(tag.group("last") or first)

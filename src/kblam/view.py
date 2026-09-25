@@ -18,6 +18,9 @@ class KBView:
     cfg: Config
     files: dict[str, bytes]                  # repo-relative POSIX path -> bytes, under cfg.findings_dir
     display: dict[str, str] = field(default_factory=dict)  # path shown in messages, when it differs
+    # Results the rules derive from these files, computed once per view (like `findings`): K4, K5 and
+    # K10 all need each finding's verbatim excerpts checked, and many excerpts quote one source.
+    memo: dict = field(default_factory=dict, repr=False, compare=False)
 
     @property
     def index_path(self) -> str:

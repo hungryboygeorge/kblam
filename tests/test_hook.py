@@ -98,6 +98,45 @@ def test_direct_write_into_findings_is_denied(kb, monkeypatch, capsys, name, key
         assert reason.endswith(POINTER)
 
 
+@pytest.fixture
+def linked(kb, tmp_path):
+    """A symlink to the repository: the hook's cwd and the agent's paths may name the repository
+    through one, while kblam finds its root as a resolved path."""
+    link = tmp_path / "link"
+    try:
+        link.symlink_to(kb.root, target_is_directory=True)
+    except OSError as exc:  # Windows without the symlink privilege
+        pytest.skip(f"cannot create a symlink here: {exc}")
+    return link
+
+
+@pytest.mark.parametrize("name, key, rel, expect", [
+    ("Write", "file_path", "findings/calibration/F-0001-motor.md", "findings/ is written only by kblam put"),
+    ("Edit", "file_path", "findings/INDEX.md", "findings/ is written only by kblam put"),
+    ("Write", "file_path", ".kblam/review.jsonl", "under .kblam/ denied"),
+])
+def test_write_through_a_symlinked_repository_is_denied(kb, linked, monkeypatch, capsys, name, key, rel, expect):
+    for cwd in (linked, kb.root):
+        for path in (str(linked / rel), rel):  # through the link, and relative to a cwd that may be the link
+            payload = {**tool(kb, name, **{key: path}), "cwd": str(cwd)}
+            assert expect in denied(call("PreToolUse", payload, monkeypatch, capsys)[1]), (cwd, path)
+
+
+def test_shell_write_through_a_symlinked_repository_is_denied(kb, linked, monkeypatch, capsys):
+    for tool_name in ("Bash", "PowerShell"):
+        payload = {**tool(kb, tool_name, command="echo x > findings/calibration/F-0001-motor.md"),
+                   "cwd": str(linked)}
+        assert "this command writes under findings/" in denied(call("PreToolUse", payload, monkeypatch, capsys)[1])
+
+
+def test_staged_edit_through_a_symlinked_repository_is_allowed(kb, linked, monkeypatch, capsys):
+    kb.write(".kblam/staging/F-0001-motor.md", finding_text("F-0001", E1))
+    payload = {**tool(kb, "Edit", file_path=str(linked / ".kblam/staging/F-0001-motor.md")), "cwd": str(linked)}
+    assert call("PreToolUse", payload, monkeypatch, capsys) == (0, None, "")
+    outside = {**tool(kb, "Write", file_path=str(linked / "src/tool.py")), "cwd": str(linked)}
+    assert call("PreToolUse", outside, monkeypatch, capsys) == (0, None, "")
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows paths are case-insensitive")
 def test_direct_write_denied_whatever_the_case(kb, monkeypatch, capsys):
     target = str(kb.root / "FINDINGS" / "calibration" / "F-0001-motor.md").upper()
