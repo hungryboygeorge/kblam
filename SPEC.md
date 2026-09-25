@@ -432,6 +432,8 @@ the calibration measured). The revision verdict fires when noul ≥ T_rev.
 | `kblam check --pending` | re-run the check of each finding with an open unchecked item |
 | `kblam audit` | ask every candidate pair and revision question with no cached answer (§6.5); what fires becomes review items |
 | `kblam validate --record` | check (as `kblam check` with no IDs) the findings not yet checked at their current fingerprint, then, on a clean result, write `tree.hash` for the current tree: the explicit way to accept a legitimate out-of-band change such as `git pull` or `git checkout` |
+| `kblam validate --commit` | as `kblam validate`, and also refuse a commit whose `kblam.toml` differs from the last commit's (or removes it) unless a person approved that version on this machine (§8 item 4); what the pre-commit hook runs |
+| `kblam approve-config` | show how `kblam.toml` differs from the last commit (from the template `kblam init` writes when no commit holds it), check it loads, and on an interactive terminal ask a person to approve it for commits on this machine; with no terminal, approve nothing and exit 1 |
 | `kblam index` | regenerate `findings/INDEX.md` from frontmatter and write `tree.hash`. Deterministic: a fixed header line, topics in sorted order, one table row per finding (ID link, title, label, scope) in ID order, no timestamps. |
 | `kblam ack <dependent> <target>` | record the target's current fingerprint in the dependent's `depends_on` after re-reading the target (K3). Edits only that value (round-trip YAML), then rewrites `tree.hash`. `--all <target>` is deliberately absent: each dependent is re-read and acked on its own. |
 | `kblam deps <id>` | list the finding's dependents and dependencies, with suspect ones marked |
@@ -467,8 +469,8 @@ where requests go, so an agent that could change it could weaken every check or 
 Items 1 and 2 deny writing it and removing it (the repository's own `kblam.toml`, not a file of that
 name elsewhere), in the same way as `.kblam/`, with the reason "kblam: <what> denied. kblam.toml sets
 the rules kblam enforces and where kblam sends the Jev API key, so only a person changes it; ask the
-user to make the change you need." plus the skill pointer. A person edits it by hand (user,
-2026-09-25).
+user to make the change you need." plus the skill pointer. A person edits it by hand and approves
+the change before committing it (item 4) (user, 2026-09-25).
 
 **Hook input and output.** `kblam hook <event>` reads Claude Code's hook JSON on stdin and always
 exits 0; the decision travels only in the JSON on stdout (research/desk-hooks-answers.md H4–H6).
@@ -558,9 +560,21 @@ being validated. Only `kblam validate --record` accepts an out-of-band change.
    An input with no `agent_type` key at all is treated as a real subagent. So is a subagent whose
    `agent_type` is the session's own agent name (H3); the hook cannot tell it apart.
 4. **git pre-commit** (a POSIX `sh` script that `kblam init` installs): `kblam --root <repo>
-   validate`, with `kblam` from `PATH`. Catches anything written outside Claude Code. If `kblam`
-   is not installed the command fails with 127 and the commit is refused. Any non-zero exit prints
-   "kblam pre-commit: commit refused (kblam validate exit N)." and the skill pointer.
+   validate --commit`, with `kblam` from `PATH`. Catches anything written outside Claude Code. If
+   `kblam` is not installed the command fails with 127 and the commit is refused. Any non-zero exit
+   prints "kblam pre-commit: commit refused (kblam validate exit N)." and the skill pointer.
+   **Configuration changes (user, 2026-09-25).** The deny hooks cannot see every write to
+   `kblam.toml` (a `git checkout` of an older version, a script), so `--commit` also compares the
+   `kblam.toml` the commit will hold (the index, read with `git cat-file`) with the last commit's. A
+   difference is refused unless a person approved exactly that version on this machine with
+   `kblam approve-config`; a commit that removes it is refused outright. Approvals are sha256 digests
+   of the file with CRLF normalised to LF (so a `core.autocrlf` working copy matches the stored
+   blob), one a line in `.kblam/config-approved`, which the deny hooks protect. `approve-config`
+   asks only on an interactive terminal, so an agent's non-interactive shell cannot approve; a
+   wrapper that supplies a terminal, or `git commit --no-verify`, still gets past it, so like the
+   other hooks this stops an agent taking a shortcut, not one set on evading it. `kblam init` records
+   an approval of the template it writes, so the first commit of an unedited `kblam.toml` needs
+   none.
 5. **Librarian agent** (optional; proposed by the user 2026-09-23; see §8.1).
 6. **Agent guidance** (§8.2): a path-scoped rule for reading findings and a skill for writing them.
    Every message that stops a write names the skill with the line "Load the kblam-write skill for

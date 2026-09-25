@@ -6,7 +6,10 @@ import argparse
 import sys
 from pathlib import Path
 
-from kblam.config import ConfigError, load_config
+from kblam import approval
+from kblam.approval import ApprovalError
+from kblam.check import parse_policy
+from kblam.config import CONFIG_NAME, ConfigError, load_config
 from kblam.finding import ID_RE
 from kblam.hook import SKILL_POINTER
 from kblam.hook import run as run_hook
@@ -42,9 +45,13 @@ def _validate(cfg, args) -> int:
     items = open_items(cfg, view)
     for item in items:
         print(item.describe())
-    if issues or items:
+    config = approval.commit_problems(cfg) if args.commit else []
+    for problem in config:
+        print(f"kblam validate: {problem}")
+    if issues or items or config:
         print(f"kblam validate: {len(issues)} error(s) in {cfg.findings_dir}/"
               + (f", {len(items)} open item(s) in .kblam/review.jsonl" if items else "")
+              + (f", and {CONFIG_NAME} needs approval before this commit" if config else "")
               + ("; tree.hash not recorded" if args.record else ""))
         return EXIT_INVALID
     if args.record:
@@ -62,6 +69,40 @@ def _cmd_validate(cfg, args) -> int:
                                                      client_factory=JevClient))
     with kb_lock(cfg, "validate --record"):
         return _validate(cfg, args)
+
+
+def _cmd_approve_config(cfg, args) -> int:
+    """A person approves this kblam.toml for commits on this machine (SPEC §8 item 4). It must load (the
+    config was loaded to get here; the [jev] settings and thresholds are checked too) and be confirmed on
+    an interactive terminal, which an agent's shell is not."""
+    parse_policy(jev_settings(cfg).thresholds)
+    current = (cfg.repo_root / CONFIG_NAME).read_bytes()
+    head = approval.committed_config(cfg, "HEAD")
+    if head is not None and approval.config_digest(head) == approval.config_digest(current):
+        print(f"kblam approve-config: {CONFIG_NAME} is as the last commit has it; a commit that leaves it "
+              f"unchanged needs no approval")
+        return EXIT_OK
+    if approval.is_approved(cfg, current):
+        print(f"kblam approve-config: this version of {CONFIG_NAME} is already approved on this machine")
+        return EXIT_OK
+    if not sys.stdin.isatty():
+        print(f"kblam approve-config: a person approves {CONFIG_NAME} at an interactive terminal, and this is "
+              f"not one, so nothing was approved. An agent asks the user to run kblam approve-config.",
+              file=sys.stderr)
+        return EXIT_INVALID
+    if head is None:
+        from kblam.init import ASSETS  # the template kblam init writes: a new file shows only its edits
+        base, label = (ASSETS / CONFIG_NAME).read_bytes(), "the template kblam init writes"
+    else:
+        base, label = head, "last commit"
+    print(approval.config_diff(base, label, current) or f"(no difference from {label})")
+    answer = input(f"Approve this {CONFIG_NAME} for commits on this machine? [y/N] ")
+    if answer.strip().lower() not in ("y", "yes"):
+        print(f"kblam approve-config: not approved; a commit that changes {CONFIG_NAME} stays refused")
+        return EXIT_INVALID
+    approval.record_approval(cfg, current)
+    print(f"kblam approve-config: approved; a commit of this version of {CONFIG_NAME} is now accepted")
+    return EXIT_OK
 
 
 def _cmd_index(cfg, args) -> int:
@@ -300,7 +341,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--record", action="store_true",
                    help="on a clean result, write .kblam/tree.hash for the current tree (accepts an "
                         "out-of-band change such as git pull); on failure nothing is written")
+    p.add_argument("--commit", action="store_true",
+                   help="also refuse a commit that changes kblam.toml without a person's approval "
+                        "(kblam approve-config); what the git pre-commit hook runs")
     p.set_defaults(func=_cmd_validate)
+    p = sub.add_parser("approve-config", help="show how kblam.toml changed and, at an interactive terminal, "
+                                              "approve it for commits on this machine")
+    p.set_defaults(func=_cmd_approve_config)
     p = sub.add_parser("index", help="regenerate findings/INDEX.md (and .kblam/tree.hash, unless findings/ "
                                      "was changed outside kblam)")
     p.set_defaults(func=_cmd_index)
@@ -372,7 +419,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         cfg = load_config(root=args.root)
         return args.func(cfg, args)
-    except (ConfigError, StoreError, LockError, JevUnavailable, ReviewError) as exc:
+    except (ConfigError, StoreError, LockError, JevUnavailable, ReviewError, ApprovalError) as exc:
         pointer = f" {SKILL_POINTER}" if args.command == "put" and not isinstance(exc, ConfigError) else ""
         print(f"kblam {args.command}: {exc}{pointer}", file=sys.stderr)
         if isinstance(exc, LockError):

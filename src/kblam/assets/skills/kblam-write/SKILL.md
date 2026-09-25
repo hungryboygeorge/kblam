@@ -14,8 +14,9 @@ writes it: a Write, Edit, shell write or removal there is denied. The one except
 `.kblam/staging/`, where your staged findings are yours to edit.
 
 `kblam.toml` sets the rules and where kblam sends its API key, so only a person changes it: writing
-or removing it is denied too. If a finding needs something it does not allow, such as a new scope,
-ask the user to add it.
+or removing it is denied too, and a commit that changes it is refused until a person approves it with
+`kblam approve-config` at a terminal. If a finding needs something it does not allow, such as a new
+scope, ask the user to add it. Never try to approve a change yourself.
 
 ## The flow
 

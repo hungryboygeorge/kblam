@@ -533,7 +533,7 @@ def test_hooks_json_calls_kblam_hook_for_each_event():
 def test_pre_commit_takes_kblam_from_path():
     pre_commit = (ASSETS / "pre-commit").read_bytes()
     assert pre_commit.startswith(b"#!/bin/sh\n") and b"\r" not in pre_commit
-    assert b'\nkblam --root "$root" validate\n' in pre_commit and b".venv" not in pre_commit
+    assert b'\nkblam --root "$root" validate --commit\n' in pre_commit and b".venv" not in pre_commit
     assert POINTER.encode() in pre_commit
 
 
