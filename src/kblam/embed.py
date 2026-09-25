@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import operator
 import sqlite3
 import struct
 import threading
@@ -52,16 +53,25 @@ def title_and_claim(finding: Finding) -> str:
     return f"{title if isinstance(title, str) else ''}\n{finding.claim}"
 
 
-def cosine(a: list[float], b: list[float]) -> float:
-    """Cosine similarity. `/api/embed` returns unit vectors, so this is a dot product; both sides are
-    normalised anyway, since the legacy `/api/embeddings` endpoint returns unnormalised ones."""
+def unit(vector: list[float]) -> list[float]:
+    """`vector` scaled to length 1; a zero vector stays zero, so its cosine with anything is 0."""
+    norm = math.sqrt(sum(x * x for x in vector))
+    return [x / norm for x in vector] if norm else list(vector)
+
+
+def dot(a: list[float], b: list[float]) -> float:
+    """The dot product, which is the cosine of two unit vectors. `map(mul)` keeps the loop in C: a check
+    scores every finding against every other, so this runs N² times over 768 numbers."""
     if len(a) != len(b):
         raise EmbedUnavailable(f"the embedding model returned vectors of {len(a)} and {len(b)} numbers")
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(y * y for y in b))
-    if not norm_a or not norm_b:
-        return 0.0
-    return sum(x * y for x, y in zip(a, b)) / (norm_a * norm_b)
+    return sum(map(operator.mul, a, b))
+
+
+def cosine(a: list[float], b: list[float]) -> float:
+    """Cosine similarity. `/api/embed` returns unit vectors, so this is a dot product; both sides are
+    normalised anyway, since the legacy `/api/embeddings` endpoint returns unnormalised ones.
+    Embedder normalises each vector once and calls dot() instead."""
+    return dot(unit(a), unit(b))
 
 
 @dataclass(frozen=True)
@@ -208,23 +218,24 @@ class Embedder:
             return {}
         query, = self._vectors_for(QUERY, [self.query_text(finding)])
         documents = self._vectors_for(DOCUMENT, [self.document_text(o) for o in others])
-        return {other.path: cosine(query, document) for other, document in zip(others, documents)}
+        return {other.path: dot(query, document) for other, document in zip(others, documents)}  # unit vectors
 
     def _key(self, role: str, text: str) -> tuple[str, str, str, str]:
         return (self.model.name, self.model.digest, role, hashlib.sha256(text.encode("utf-8")).hexdigest())
 
     def _vectors_for(self, role: str, texts: list[str]) -> list[list[float]]:
-        """The vectors of `texts`, in order: this process's memory, then the cache, then one chunked
-        request per 64 texts still missing."""
+        """The unit vectors of `texts`, in order: this process's memory, then the cache, then one
+        chunked request per 64 texts still missing. The cache keeps vectors as ollama returned them;
+        memory keeps them normalised, so each is normalised once however many checks score it."""
         keys = [self._key(role, text) for text in texts]
         missing = [(key, text) for key, text in zip(keys, texts) if key not in self._vectors]
         if missing:
             cached = self.cache.get_many([key for key, _text in missing])
-            self._vectors.update(cached)
+            self._vectors.update((key, unit(vector)) for key, vector in cached.items())
             missing = [(key, text) for key, text in missing if key not in cached]
         for start in range(0, len(missing), MAX_INPUTS):  # larger requests fail inside ollama
             chunk = missing[start:start + MAX_INPUTS]
             vectors = embed_request(self.settings.ollama_url, self.model, [text for _key, text in chunk])
-            self._vectors.update(zip((key for key, _text in chunk), vectors))
+            self._vectors.update((key, unit(vector)) for (key, _text), vector in zip(chunk, vectors))
             self.cache.put_many(list(zip((key for key, _text in chunk), vectors)))
         return [self._vectors[key] for key in keys]

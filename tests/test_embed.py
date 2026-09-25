@@ -108,6 +108,7 @@ class FakeOllama:
         self.models = {MODEL: DIGEST} if models is None else models
         self.vector_for = vector_for or histogram
         self.fail_from = fail_from
+        self.normalise = True  # /api/embed returns unit vectors; False stands in for one that does not
         self.requests: list[list[str]] = []
         self.tags_calls = 0
         self.on_request = None
@@ -122,7 +123,7 @@ class FakeOllama:
             self.on_request(list(inputs))
         if self.fail_from is not None and len(self.requests) >= self.fail_from:
             raise _Failed
-        return [unit(self.vector_for(text)) for text in inputs]
+        return [unit(self.vector_for(text)) if self.normalise else self.vector_for(text) for text in inputs]
 
     def start(self) -> FakeOllama:
         self._thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -506,6 +507,22 @@ def test_the_embedding_config_values_are_validated(kb, line, message):
     kb.write("kblam.toml", KBLAM_TOML + "\n[jev]\n" + JEV_TOML + line + "\n" + PROMPT_TOML)
     with pytest.raises(ConfigError, match=re.escape(message)):
         jev_settings(kb.cfg)
+
+
+def test_scores_are_cosines_when_ollama_returns_unnormalised_vectors(kb, ollama):
+    """The embedder normalises each vector once (memory holds unit vectors, the cache what ollama
+    returned), so a score is the cosine whether the vector came from a request or from the cache."""
+    ollama.normalise = False
+    ollama.vector_for = by_keyword(("heater", [30.0, 40.0, 0.0]), ("pump", [0.0, 5.0, 0.0]),
+                                   ("valve", [0.0, 2.0, 0.0]))
+    embed_config(kb, ollama.url)
+    kb.add("F-0001", "heater", "The heater warms the block.")
+    kb.add("F-0002", "pump", "The pump moves the coolant.")
+    kb.add("F-0003", "valve", "The valve opens at start.")
+    for _ in range(2):  # the second selection reads every vector from .kblam/embeddings.sqlite
+        selection, _label = select_with(kb, "F-0003")
+        assert {c.finding_id: round(c.similar, 12) for c in selection.candidates} == {"F-0002": 1.0, "F-0001": 0.8}
+    assert len(ollama.requests) == 2  # the first selection's query and documents; the second sent nothing
 
 
 def test_cosine_is_a_dot_product_of_normalised_vectors():
