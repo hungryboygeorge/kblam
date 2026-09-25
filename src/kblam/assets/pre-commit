@@ -1,0 +1,11 @@
+#!/bin/sh
+# kblam pre-commit hook (SPEC §8 item 4): refuse the commit while the knowledge base fails
+# `kblam validate`. `kblam init` installs it at `git rev-parse --git-path hooks/pre-commit`. kblam is
+# taken from PATH; if it is not installed the command fails with 127 and the commit is refused.
+root=$(git rev-parse --show-toplevel) || exit 1
+kblam --root "$root" validate
+status=$?
+if [ "$status" -ne 0 ]; then
+    echo "kblam pre-commit: commit refused (kblam validate exit $status). Load the kblam-write skill for how to fix this." >&2
+fi
+exit "$status"

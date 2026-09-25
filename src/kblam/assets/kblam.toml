@@ -1,0 +1,92 @@
+# kblam configuration, written by `kblam init` (SPEC §9). It is committed, so it holds nothing
+# machine-specific. The OpenRouter key is read from the environment variable named by key_env if it
+# is set, otherwise from key_file (~ is the user's home directory); it never enters the repository.
+
+[kb]
+root = "findings"
+evidence_roots = ["evidence"]  # directories that finding evidence may cite; edit for this project
+labels = ["observed", "decoded", "inferred", "unknown", "reported"]
+scopes = ["any"]               # where a finding applies; edit for this project
+reported_label = "reported"   # K11: a claim only a retired document states; "" turns those checks off
+history_dirs = ["history"]    # K11: where retired documents live; never evidence for other labels
+max_lines = 300
+max_claim_words = 250
+history_terms = ["was wrong", "were wrong", "wrong about", "supersed", "withdrawn", "retract",
+                 "refuted", "is falsified", "was falsified", "falsified by", "now known",
+                 "previous revision", "previously believed", "previously reported",
+                 "previously said", "i previously", "not previously", "no longer true",
+                 "no longer holds", "no longer valid", "no longer safe", "used to argue",
+                 "turned out", "once quoted", "do not quote", "must not be quoted",
+                 "do not revive", "removed from this list"]
+# Each term is used only in an unwanted sense in a classified corpus (SPEC §9). Add project
+# conventions here; bare "previously", "no longer" or "correction:" have legitimate uses.
+duplicate_similarity = 0.9     # K9
+history_id_window = 10         # K5, words
+lock_wait_seconds = 30         # how long new/edit/put/ack/index wait for .kblam/lock
+lock_stale_seconds = 300       # a lock older than this (or whose holder is dead) is broken
+
+# The [jev] section and its thresholds belong to the model, not the project: keep them as written.
+[jev]
+endpoint = "https://openrouter.ai/api/v1/systemone"
+model = "typesafe/jev-1.13"
+expected_served_model = "typesafe/jev-1.13-20260917"
+key_env = "OPENROUTER_API_KEY"
+key_file = "~/kblam/jev!.txt"
+max_candidates = 30
+topic_bonus = 0.2              # same-topic similarity bonus, as a fraction of the top score (SPEC §6.1)
+link_bonus = 0.15              # §6.1: shared anchor or evidence bonus, as a fraction of the top score
+embedding_model = "embeddinggemma:300m"   # SPEC §6.1; "" means BM25 always
+ollama_url = "http://127.0.0.1:11434"
+embedding_query_prefix = "task: search result | query: {text}"
+embedding_document_prefix = "title: none | text: {text}"
+quantity_rel_tolerance = 0.0
+workers = 6                    # parallel pair requests
+# The Jev questions themselves are in the [jev.prompt.*] tables at the end of this file; the
+# thresholds below record the id of the wording they were calibrated on (kblam prompt-id prints it).
+
+[jev.thresholds]      # calibrated on this default prompt (SPEC §10.6); a verdict with no entry is disabled
+served_model = "typesafe/jev-1.13-20260917"
+prompt_id = "4dda2f781f12"
+same_fact            = { p = 0.69, confidence = 0.61, mode = "reject" }
+cannot_both_be_true  = { p = 0.58, confidence = 0.46, mode = "reject" }
+restates_and_extends = { p = 0.48, confidence = 0.34, mode = "review" }
+revision             = { noul = 0.75, mode = "reject" }
+low_confidence_review = 0.3
+
+# The Jev questions (SPEC §6.2). The wording lives here, so a project can adapt it; the option
+# keys, the question types and the state shapes stay in code. Any edit to the text below changes
+# this prompt's id (`kblam prompt-id` prints it), which is what [jev.thresholds] records.
+[jev.prompt.relation]
+instructions = "`existing` and `new` each hold one finding: a `claim` and the `scope` (products, versions or components) the claim applies to. Which option describes the claim in `new` relative to the claim in `existing`?"
+
+[jev.prompt.relation.criteria.same_fact]
+what = "Everything the claim in `new` states is already stated by the claim in `existing`: the same fact in the same or in different words, or a part of it."
+not_for = "A claim in `new` that adds, changes or conflicts with a detail of the claim in `existing`."
+examples = ["'The document feeder holds up to 50 sheets' and 'Up to 50 sheets fit in the document feeder'"]
+
+[jev.prompt.relation.criteria.restates_and_extends]
+what = "The claim in `new` restates the fact in `existing` and adds detail to it: a further property, condition, cause or consequence of that same fact."
+not_for = "A claim in `new` that changes or conflicts with the claim in `existing`, or that states a different fact about the same subject."
+examples = ["'The document feeder holds up to 50 sheets' and 'The document feeder holds up to 50 sheets of 80 gsm paper; heavier paper lowers the limit'"]
+
+[jev.prompt.relation.criteria.cannot_both_be_true]
+what = "The claims are about the same subject and say things about it that cannot both hold at the same time."
+not_for = "Claims that differ only in wording, or that describe different aspects of the subject."
+examples = ["'The platen lamp is switched by the main controller' and 'The platen lamp is switched by a separate power board'"]
+
+[jev.prompt.relation.criteria.compatible_same_subject]
+what = "The claims are about the same subject, both can hold at the same time, and `new` states a different fact from `existing` rather than restating it."
+not_for = "A restatement of the fact in `existing`, or claims about different subjects."
+examples = ["'The document feeder holds up to 50 sheets' and 'The document feeder has a jam sensor at its exit roller'"]
+
+[jev.prompt.relation.criteria.unrelated]
+what = "The claims are about different subjects."
+not_for = "Claims about one subject, whether they agree, extend each other or conflict."
+examples = ["'The document feeder holds up to 50 sheets' and 'The network interface supports IPv6'"]
+
+[jev.prompt.revision]
+instructions = "Does the `claim` in `new` describe a correction or revision of an earlier claim, rather than stating a fact directly?"
+
+[jev.prompt.revision.criteria]
+true = "The claim says that an earlier claim was wrong, changed or replaced, and gives the corrected version."
+false = "The claim states a fact directly, without referring to an earlier claim."

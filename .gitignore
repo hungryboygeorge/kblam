@@ -1,0 +1,7 @@
+jev!.txt
+.kblam/
+.venv/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+.claude/agent-memory/

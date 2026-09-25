@@ -1,0 +1,48 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "kblam hook PreToolUse || echo '{\"systemMessage\": \"kblam hook PreToolUse did not run (is kblam installed?); {{kb_root}}/ is unguarded\"}'",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "kblam hook PreToolUse || echo '{\"systemMessage\": \"kblam hook PreToolUse did not run (is kblam installed?); {{kb_root}}/ is unguarded\"}'",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "kblam hook Stop || echo '{\"systemMessage\": \"kblam hook Stop did not run (is kblam installed?); {{kb_root}}/ is unguarded\"}'",
+            "timeout": 300
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "kblam hook SubagentStop || echo '{\"systemMessage\": \"kblam hook SubagentStop did not run (is kblam installed?); {{kb_root}}/ is unguarded\"}'",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}
