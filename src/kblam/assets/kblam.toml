@@ -1,6 +1,9 @@
 # kblam configuration, written by `kblam init` (SPEC §9). It is committed, so it holds nothing
-# machine-specific. The OpenRouter key is read from the environment variable named by key_env if it
-# is set, otherwise from key_file (~ is the user's home directory); it never enters the repository.
+# machine-specific. The OpenRouter key is read from the OPENROUTER_API_KEY environment variable if it
+# is set, otherwise from ~/kblam/jev!.txt (~ is the user's home directory); it never enters the
+# repository. Only ~/kblam/config.toml, on each machine, may change where the key is read from
+# (key_env, key_file), send requests to an endpoint other than OpenRouter's, or use an ollama that is
+# not on this machine: whoever can change this committed file could otherwise redirect the key.
 
 [kb]
 root = "findings"
@@ -30,8 +33,6 @@ lock_stale_seconds = 300       # a lock older than this (or whose holder is dead
 endpoint = "https://openrouter.ai/api/v1/systemone"
 model = "typesafe/jev-1.13"
 expected_served_model = "typesafe/jev-1.13-20260917"
-key_env = "OPENROUTER_API_KEY"
-key_file = "~/kblam/jev!.txt"
 max_candidates = 30
 topic_bonus = 0.2              # same-topic similarity bonus, as a fraction of the top score (SPEC §6.1)
 link_bonus = 0.15              # §6.1: shared anchor or evidence bonus, as a fraction of the top score

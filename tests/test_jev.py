@@ -420,29 +420,34 @@ def test_client_error_is_not_retried_and_key_never_leaks(jkb, capsys):
     assert KEY not in capsys.readouterr().out
 
 
-def set_key_file(kb, path) -> None:
-    """Add [jev] key_file to the fixture's config: appending at EOF would land in [jev.prompt]."""
-    toml = (kb.root / "kblam.toml").read_text(encoding="utf-8")
-    kb.write("kblam.toml", toml.replace('key_env = "OPENROUTER_API_KEY"',
-                                        f'key_env = "OPENROUTER_API_KEY"\nkey_file = "{path}"'))
+def machine_config(home, **values: str) -> None:
+    """Write the per-machine settings file, ~/kblam/config.toml, in the tests' scratch home directory."""
+    lines = "".join(f"{key} = {json.dumps(value)}\n" for key, value in values.items())
+    (home / "kblam").mkdir(exist_ok=True)
+    (home / "kblam" / "config.toml").write_text("[jev]\n" + lines, encoding="utf-8")
 
 
-def test_key_file_fallback(jkb, monkeypatch, tmp_path):
+def set_key_file(home, path) -> None:
+    """A key_file other than the default is set per machine, never in kblam.toml (SPEC §9)."""
+    machine_config(home, key_file=path)
+
+
+def test_key_file_fallback(jkb, monkeypatch, tmp_path, home):
     monkeypatch.delenv("OPENROUTER_API_KEY")
     key_file = tmp_path / "jev!.txt"
     key_file.write_text(KEY + "\n", encoding="utf-8")
-    set_key_file(jkb, key_file.as_posix())
+    set_key_file(home, key_file.as_posix())
     fake = FakeJev()
     with client(jkb, fake) as c:
         c.ask_revision(N)
     assert fake.requests[0][0].headers["authorization"] == f"Bearer {KEY}"
 
 
-def test_bad_key_file_message_hides_content(jkb, monkeypatch, tmp_path):
+def test_bad_key_file_message_hides_content(jkb, monkeypatch, tmp_path, home):
     monkeypatch.delenv("OPENROUTER_API_KEY")
     key_file = tmp_path / "key.txt"
     key_file.write_text(f"OPENROUTER_API_KEY = {KEY}\n", encoding="utf-8")
-    set_key_file(jkb, key_file.as_posix())
+    set_key_file(home, key_file.as_posix())
     with client(jkb, FakeJev()) as c:
         with pytest.raises(JevUnavailable, match="must contain only the API key") as caught:
             c.ask_revision(N)
@@ -477,6 +482,95 @@ def test_key_env_wins_over_the_key_file(jkb, home):
     with client(jkb, fake) as c:
         c.ask_revision(N)
     assert fake.requests[0][0].headers["authorization"] == f"Bearer {KEY}"
+
+
+# --- where the key comes from and where it goes: per machine, not in the committed kblam.toml ---------
+
+
+def committed(kb, key: str, value: str) -> None:
+    """The fixtures' kblam.toml with [jev] `key` set to `value`, replacing the line JEV_TOML has for it."""
+    line = f"{key} = {json.dumps(value)}\n"
+    pattern = re.compile(rf"^{key} = .*\n", re.M)
+    jev_toml = pattern.sub(line, JEV_TOML) if pattern.search(JEV_TOML) else JEV_TOML + line
+    kb.write("kblam.toml", KBLAM_TOML + NO_EMBEDDINGS + jev_toml + PROMPT_TOML)
+
+
+@pytest.mark.parametrize("key, value, message", [
+    ("endpoint", "https://collector.example/api/v1/systemone", "[jev] endpoint must be an https://openrouter.ai/ URL"),
+    ("endpoint", "http://openrouter.ai/api/v1/systemone", "[jev] endpoint must be an https://openrouter.ai/ URL"),
+    ("endpoint", "https://openrouter.ai@collector.example/api/v1/systemone",
+     "[jev] endpoint must be an https://openrouter.ai/ URL"),
+    ("key_env", "GITHUB_TOKEN", "[jev] key_env must be 'OPENROUTER_API_KEY' here, got 'GITHUB_TOKEN'"),
+    ("key_file", "~/.npmrc", "[jev] key_file must be '~/kblam/jev!.txt' here, got '~/.npmrc'"),
+    ("ollama_url", "http://ollama.example:11434", "[jev] ollama_url must name this machine here"),
+    ("ollama_url", "http://[::1:11434", "[jev] ollama_url must name this machine here"),
+])
+def test_the_committed_config_cannot_redirect_the_key_or_the_findings(kb, key, value, message):
+    """kblam.toml is committed, so it may not choose which secret is sent as the key, nor send the key or the
+    findings' text off this machine anywhere but OpenRouter; the message says where such a setting goes."""
+    committed(kb, key, value)
+    with pytest.raises(jev.ConfigError, match=re.escape(message)) as caught:
+        jev.jev_settings(kb.cfg)
+    assert f"set it per machine in ~/kblam/config.toml ([jev] {key})" in str(caught.value)
+
+
+@pytest.mark.parametrize("key, value", [
+    ("key_env", "OPENROUTER_API_KEY"),
+    ("key_file", "~/kblam/jev!.txt"),
+    ("endpoint", "https://openrouter.ai/api/v1/systemone/"),
+    ("endpoint", "https://OpenRouter.ai/api/v1/systemone"),
+    ("ollama_url", "http://localhost:11434"),
+    ("ollama_url", "http://[::1]:11434"),
+    ("ollama_url", ""),
+])
+def test_the_committed_config_keeps_its_defaults_and_local_values(kb, key, value):
+    committed(kb, key, value)
+    jev.jev_settings(kb.cfg)
+
+
+def test_the_machine_config_sets_what_kblam_toml_may_not(kb, home):
+    committed(kb, "key_env", "OPENROUTER_API_KEY")
+    machine_config(home, endpoint="http://127.0.0.1:9/api/v1/systemone", key_env="TEAM_OPENROUTER_KEY",
+                   key_file="~/keys/openrouter.txt", ollama_url="http://ollama.lan:11434/")
+    settings = jev.jev_settings(kb.cfg)
+    assert settings.base_url == "http://127.0.0.1:9/api"
+    assert (settings.key_env, settings.key_file) == ("TEAM_OPENROUTER_KEY", "~/keys/openrouter.txt")
+    assert settings.ollama_url == "http://ollama.lan:11434"
+
+
+def test_the_machine_key_env_is_the_one_sent(jkb, home, monkeypatch):
+    monkeypatch.setenv("TEAM_OPENROUTER_KEY", "sk-or-v1-TEAMKEY")
+    machine_config(home, key_env="TEAM_OPENROUTER_KEY")
+    fake = FakeJev()
+    with client(jkb, fake) as c:
+        c.ask_revision(N)
+    assert fake.requests[0][0].headers["authorization"] == "Bearer sk-or-v1-TEAMKEY"
+
+
+@pytest.mark.parametrize("values, message", [
+    ({"endpoint": "https://collector.example/v2/ask"}, "~/kblam/config.toml: [jev] endpoint must end in /v1/systemone"),
+    ({"ollama_url": "ollama.lan:11434"}, "~/kblam/config.toml: [jev] ollama_url must be an http:// or https:// URL"),
+])
+def test_a_malformed_machine_value_names_the_machine_file(kb, home, values, message):
+    committed(kb, "key_env", "OPENROUTER_API_KEY")
+    machine_config(home, **values)
+    with pytest.raises(jev.ConfigError, match=re.escape(message)):
+        jev.jev_settings(kb.cfg)
+
+
+@pytest.mark.parametrize("text, message", [
+    ('[jev]\nmodel = "typesafe/other"\n', "unknown key(s) jev.model"),
+    ('[kb]\nroot = "notes"\n', "unknown key(s) kb"),
+    ("[jev]\nkey_env = 7\n", "each a string"),
+    ('jev = "x"\n', "it holds only a [jev] table"),
+    ("[jev\n", "config.toml"),
+])
+def test_a_bad_machine_config_is_a_config_error(kb, home, text, message):
+    (home / "kblam").mkdir()
+    (home / "kblam" / "config.toml").write_text(text, encoding="utf-8")
+    with pytest.raises(jev.ConfigError, match=re.escape(message)) as caught:
+        jev.jev_settings(kb.cfg)
+    assert "~/kblam/config.toml" in str(caught.value)
 
 
 def test_unusable_answer_is_unavailable(jkb):

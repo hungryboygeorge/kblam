@@ -17,11 +17,13 @@ import random
 import sqlite3
 import threading
 import time
+import tomllib
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from typesafe_sdk import (
     RetryPolicy,
@@ -58,6 +60,15 @@ DEFAULT_JEV = {
     "workers": 6,                   # parallel pair requests
     "thresholds": {},               # §6.4; parsed by kblam.check.parse_policy
 }
+
+# Where the API key is read from and where requests go are per machine (SPEC §9). kblam.toml is committed,
+# so anyone who can change the repository, or an agent working in it, could otherwise make kblam send any
+# secret on the machine, as the API key, to any server; the Stop hook would do it with nobody running a
+# command. In kblam.toml these keys may only keep their defaults, name OpenRouter, or name a local ollama.
+MACHINE_CONFIG = "~/kblam/config.toml"          # ~ is the user's home directory, as for key_file
+MACHINE_KEYS = ("endpoint", "key_env", "key_file", "ollama_url")
+OPENROUTER_HOST = "openrouter.ai"
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 MAX_ATTEMPTS = 4                # first try plus three retries
 BACKOFF_INITIAL = 1.0           # seconds, doubled per retry
@@ -117,9 +128,16 @@ def jev_settings(cfg: Config) -> JevSettings:
             ok = isinstance(value, type(default))
         if not ok:
             raise ConfigError(f"{CONFIG_NAME}: [jev] {key} must be {type(default).__name__}, got {value!r}")
+    _check_committed(cfg.jev)
+    machine = machine_jev()
+    raw.update(machine)
+
+    def source(key: str) -> str:
+        return MACHINE_CONFIG if key in machine else CONFIG_NAME
+
     endpoint = raw["endpoint"].rstrip("/")
     if not endpoint.endswith(SYSTEM_ONE_PATH):
-        raise ConfigError(f"{CONFIG_NAME}: [jev] endpoint must end in {SYSTEM_ONE_PATH}, got {endpoint!r}")
+        raise ConfigError(f"{source('endpoint')}: [jev] endpoint must end in {SYSTEM_ONE_PATH}, got {endpoint!r}")
     if raw["max_candidates"] < 1 or raw["workers"] < 1:
         raise ConfigError(f"{CONFIG_NAME}: [jev] max_candidates and workers must be at least 1")
     if raw["quantity_rel_tolerance"] < 0:
@@ -128,7 +146,7 @@ def jev_settings(cfg: Config) -> JevSettings:
         if raw[key] < 0:
             raise ConfigError(f"{CONFIG_NAME}: [jev] {key} must be >= 0")
     if raw["ollama_url"] and not raw["ollama_url"].startswith(("http://", "https://")):
-        raise ConfigError(f"{CONFIG_NAME}: [jev] ollama_url must be an http:// or https:// URL, "
+        raise ConfigError(f"{source('ollama_url')}: [jev] ollama_url must be an http:// or https:// URL, "
                           f"got {raw['ollama_url']!r}")
     for key in ("embedding_query_prefix", "embedding_document_prefix"):
         if "{text}" not in raw[key]:
@@ -158,6 +176,63 @@ def jev_settings(cfg: Config) -> JevSettings:
         workers=raw["workers"],
         thresholds=raw["thresholds"],
     )
+
+
+def _host(url: str) -> str | None:
+    """The URL's host, lowercased and without brackets or port; None when it has none or cannot be parsed."""
+    try:
+        return urlsplit(url).hostname
+    except ValueError:  # e.g. an unclosed [ in an IPv6 host
+        return None
+
+
+def _check_committed(project: dict) -> None:
+    """The limits on kblam.toml's [jev] table (MACHINE_CONFIG says why): key_env and key_file keep their
+    defaults, the endpoint is OpenRouter's over https, and ollama runs on this machine."""
+    machine = f"set it per machine in {MACHINE_CONFIG} ([jev] {{key}}) instead, or delete the line"
+    for key in ("key_env", "key_file"):
+        if key in project and project[key] != DEFAULT_JEV[key]:
+            raise ConfigError(
+                f"{CONFIG_NAME}: [jev] {key} must be {DEFAULT_JEV[key]!r} here, got {project[key]!r}. It chooses "
+                f"which secret kblam sends as the API key, and {CONFIG_NAME} is committed, so anyone who can "
+                f"change the repository could make kblam send another one; " + machine.format(key=key))
+    endpoint = project.get("endpoint")
+    if endpoint is not None:
+        if not endpoint.startswith("https://") or _host(endpoint) != OPENROUTER_HOST:
+            raise ConfigError(
+                f"{CONFIG_NAME}: [jev] endpoint must be an https://{OPENROUTER_HOST}/ URL here, got {endpoint!r}. "
+                f"kblam sends the API key and the findings' claims to it, and {CONFIG_NAME} is committed; to use "
+                f"another endpoint on one machine, " + machine.format(key="endpoint"))
+    url = project.get("ollama_url")
+    if url and url.startswith(("http://", "https://")) and _host(url) not in LOOPBACK_HOSTS:
+        raise ConfigError(
+            f"{CONFIG_NAME}: [jev] ollama_url must name this machine here (127.0.0.1, localhost or [::1]), got "
+            f"{url!r}. kblam sends the findings' titles and claims to it, and {CONFIG_NAME} is committed; to use "
+            f"another ollama on one machine, " + machine.format(key="ollama_url"))
+
+
+def machine_jev() -> dict:
+    """The per-machine [jev] settings from MACHINE_CONFIG, if the file exists: only MACHINE_KEYS, as strings.
+    They override kblam.toml's and have none of its limits, since only this machine's user writes them."""
+    path = Path(MACHINE_CONFIG).expanduser()
+    if not path.is_file():
+        return {}
+    where = f"{MACHINE_CONFIG} ({path})"
+    try:
+        raw = tomllib.loads(path.read_text(encoding="utf-8-sig"))
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"{where}: {exc}") from None
+    except (OSError, UnicodeDecodeError) as exc:
+        reason = exc.strerror if isinstance(exc, OSError) else "not UTF-8 text"
+        raise ConfigError(f"cannot read {where}: {reason}") from None
+    shape = f"it holds only a [jev] table with some of: {', '.join(MACHINE_KEYS)}, each a string"
+    table = raw.get("jev", {})
+    unknown = sorted(set(raw) - {"jev"}) + sorted(f"jev.{k}" for k in (table if isinstance(table, dict) else {})
+                                                 if k not in MACHINE_KEYS)
+    if not isinstance(table, dict) or unknown or not all(isinstance(v, str) for v in table.values()):
+        detail = f"unknown key(s) {', '.join(unknown)}; " if unknown else ""
+        raise ConfigError(f"{where}: {detail}{shape}")
+    return dict(table)
 
 
 class _Secret:

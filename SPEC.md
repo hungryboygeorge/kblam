@@ -415,8 +415,8 @@ the calibration measured). The revision verdict fires when noul ≥ T_rev.
   `.kblam/review.jsonl`, and the next `kblam validate` fails until `kblam check --pending` succeeds.
   A question that failed before `put` took the lock is not retried under it, so an outage never
   holds the lock through retries.
-- API key: read from the `OPENROUTER_API_KEY` environment variable, falling back to a key-file path
-  set in `kblam.toml` (the shipped default is `~/kblam/jev!.txt`, §9). Never log,
+- API key: read from the `OPENROUTER_API_KEY` environment variable, falling back to a key file
+  (the default is `~/kblam/jev!.txt`; another variable or file is set per machine, §9). Never log,
   print or commit it. (Note: `!` in the filename triggers history expansion in interactive bash;
   quote the path or rename the file.)
 
@@ -461,6 +461,14 @@ findings are the author's to edit), and removal is denied too (`rm`, `rmdir`, `R
 every item. The deny reason reads "kblam: <what> under .kblam/ denied. .kblam/ holds kblam's own
 state and only kblam writes it; stage findings under .kblam/staging/ (kblam new, kblam edit)." plus
 the skill pointer. A stale lock is broken by kblam itself (§12 M2).
+
+**`kblam.toml` is the project's.** It sets the rules kblam enforces and, within the limits of §9,
+where requests go, so an agent that could change it could weaken every check or redirect the key.
+Items 1 and 2 deny writing it and removing it (the repository's own `kblam.toml`, not a file of that
+name elsewhere), in the same way as `.kblam/`, with the reason "kblam: <what> denied. kblam.toml sets
+the rules kblam enforces and where kblam sends the Jev API key, so only a person changes it; ask the
+user to make the change you need." plus the skill pointer. A person edits it by hand (user,
+2026-09-25).
 
 **Hook input and output.** `kblam hook <event>` reads Claude Code's hook JSON on stdin and always
 exits 0; the decision travels only in the JSON on stdout (research/desk-hooks-answers.md H4–H6).
@@ -751,8 +759,6 @@ lock_stale_seconds = 300       # a lock older than this (or whose holder is dead
 endpoint = "https://openrouter.ai/api/v1/systemone"
 model = "typesafe/jev-1.13"
 expected_served_model = "typesafe/jev-1.13-20260917"
-key_env = "OPENROUTER_API_KEY"
-key_file = "~/kblam/jev!.txt"  # the default; ~ is the user's home directory
 max_candidates = 30
 topic_bonus = 0.2              # §6.1: same-topic similarity bonus, as a fraction of the top score (BM25 only)
 link_bonus = 0.15              # §6.1: shared anchor or evidence bonus, as a fraction of the top score
@@ -793,8 +799,20 @@ The block above is an example configuration for a hypothetical project (the prom
 abbreviated). `kblam.toml` is committed, so it holds nothing machine-specific.
 The API key is read from the environment variable named by `key_env` if it is set, otherwise from
 `key_file`, a path relative to the user's home directory when it starts with `~` (user,
-2026-09-23: a key file, not an environment variable). Each machine keeps the key at that path;
-the key never enters the repository. `kblam init` writes this file with the `[jev]` section, the
+2026-09-23: a key file, not an environment variable). The defaults are `OPENROUTER_API_KEY` and
+`~/kblam/jev!.txt`. Each machine keeps the key at that path; the key never enters the repository.
+
+**Per-machine settings (user, 2026-09-25).** `kblam.toml` is committed, so anyone who can change the
+repository, and any agent working in it, could otherwise choose which secret kblam sends as the API
+key and where it and the findings' text go; the Stop hook would send them with nobody running a
+command. So four `[jev]` keys are limited in `kblam.toml`: `key_env` and `key_file` may only hold
+their defaults, `endpoint` must be an `https://openrouter.ai/` URL, and `ollama_url` must name this
+machine (`127.0.0.1`, `localhost` or `[::1]`). Anything else there is a config error naming the key
+and where to set it instead: `~/kblam/config.toml`, an optional per-machine file holding only a
+`[jev]` table with any of those four keys as strings. Its values override `kblam.toml`'s and have
+none of those limits, since only the machine's user writes it.
+
+`kblam init` writes `kblam.toml` with the `[jev]` section, the
 default prompt and thresholds as shown (they belong to the model, not the project) and generic `[kb]`
 vocabularies (`evidence_roots = ["evidence"]`, `scopes = ["any"]`) for the project to edit. A project
 may edit the prompt text — `kblam prompt-id` then prints a new id, the thresholds no longer match
@@ -1029,9 +1047,9 @@ M6.5. Packaging: one install per machine, one command per project (user, 2026-09
         `stop_hook_active: false` with no `agent_type`. A hook answered if it exited 0 with no output
         or with JSON other than the did-not-run message. On a KB whose `tree.hash` is stale, the Stop
         run does the real check and may ask Jev.
-      - *Key file.* `~` expands to HOME, or USERPROFILE on Windows. Any other relative `key_file`
-        is relative to the repository root. The missing-key message names both the variable and the
-        file.
+      - *Key file.* `~` expands to HOME, or USERPROFILE on Windows, here and in the per-machine
+        `~/kblam/config.toml` (§9). Any other relative `key_file` is relative to the repository
+        root. The missing-key message names both the variable and the file.
       - *Hooks and config.* Only the upward search for kblam.toml finding none is silent. An
         explicit `--root` without kblam.toml, an unreadable file, invalid TOML or an invalid value
         gets the systemMessage note. Malformed hook input and unknown events are checked before

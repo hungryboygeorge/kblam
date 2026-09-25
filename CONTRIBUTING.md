@@ -95,6 +95,14 @@ it. Every message that stops a write (the deny hooks, the Stop block, and every 
 a configuration error) ends with "Load the kblam-write skill for how to fix this.", and tests in
 `tests/test_hook.py` check that each one does. The exit codes are fixed (SPEC.md §7).
 
+**The committed configuration cannot redirect secrets.** `kblam.toml` is written by whoever can
+change the repository, including an agent whose write the hooks miss, and the Stop hook acts on it
+with nobody running a command. So in `kblam.toml`, `key_env` and `key_file` keep their defaults, the
+Jev endpoint is OpenRouter's over https, and `ollama_url` names this machine
+(`jev._check_committed`). Other values come only from the per-machine `~/kblam/config.toml`
+(`jev.machine_jev`). Keep any new setting that decides where data or credentials go on the machine
+side of that line.
+
 **Nothing secret or textual goes into the logs.** The API key is held in `jev._Secret` and scrubbed
 from error messages. `calls.jsonl` and `checks.jsonl` record IDs, fingerprints and verdicts, never
 finding text.

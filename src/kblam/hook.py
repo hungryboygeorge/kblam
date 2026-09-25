@@ -5,10 +5,10 @@ silence, so the normal permission flow still applies. With no kblam.toml there i
 and the hook is silent. A hook never stops an agent's unrelated work: with an unreadable or invalid
 kblam.toml, malformed input or any unexpected error it allows the action and prints a note.
 
-- PreToolUse (Write, Edit, NotebookEdit): deny a target under findings/, or under .kblam/ outside
-  .kblam/staging/ (kblam's state).
+- PreToolUse (Write, Edit, NotebookEdit): deny a target under findings/, under .kblam/ outside
+  .kblam/staging/ (kblam's state), or the repository's kblam.toml (its rules and where the key goes).
 - PreToolUse (Bash, PowerShell): deny a command that visibly writes under findings/, or writes or
-  removes under .kblam/ outside .kblam/staging/ (best effort, §8 items 1-2).
+  removes under .kblam/ outside .kblam/staging/ or kblam.toml (best effort, §8 items 1-2).
 - Stop, SubagentStop: silent while findings/ is as kblam last wrote it (tree.hash); otherwise check
   and validate, and block with the failures. SubagentStop is silent for Claude Code's internal
   agents (empty agent_type), which cannot fix findings/.
@@ -25,11 +25,13 @@ import shlex
 import sys
 from pathlib import Path
 
-from kblam.config import Config, ConfigError, NoConfig, load_config
+from kblam.config import CONFIG_NAME, Config, ConfigError, NoConfig, load_config
 
 SKILL_POINTER = "Load the kblam-write skill for how to fix this."
 STATE_USE = (".kblam/ holds kblam's own state and only kblam writes it; stage findings under .kblam/staging/ "
              "(kblam new, kblam edit).")
+CONFIG_USE = (f"{CONFIG_NAME} sets the rules kblam enforces and where kblam sends the Jev API key, so only a "
+              f"person changes it; ask the user to make the change you need.")
 
 FILE_TOOLS = {"Write": "file_path", "Edit": "file_path", "NotebookEdit": "notebook_path"}  # no MultiEdit tool
 SHELL_TOOLS = ("Bash", "PowerShell")
@@ -346,6 +348,10 @@ def _pre_tool_use(cfg: Config, data: dict) -> int:
         """Under .kblam/ (kblam's state) and not under .kblam/staging/ (SPEC §8), as written or resolved."""
         return any(_within(form, cfg.state_dir) and not _within(form, cfg.staging_dir) for form in forms(path))
 
+    def config(path: str) -> bool:
+        """The repository's kblam.toml (SPEC §8): it sets the rules and where the API key goes."""
+        return any(_within(form, cfg.repo_root / CONFIG_NAME) for form in forms(path))
+
     if tool in FILE_TOOLS:
         path = tool_input.get(FILE_TOOLS[tool])
         if not isinstance(path, str):
@@ -354,6 +360,8 @@ def _pre_tool_use(cfg: Config, data: dict) -> int:
             return _deny(f"kblam: {tool} of {path} denied. {use}")
         if state(path):
             return _deny(f"kblam: {tool} of {path} under .kblam/ denied. {STATE_USE}")
+        if config(path):
+            return _deny(f"kblam: {tool} of {path} denied. {CONFIG_USE}")
         return 0
     command = tool_input.get("command")
     if not isinstance(command, str):
@@ -370,11 +378,12 @@ def _pre_tool_use(cfg: Config, data: dict) -> int:
     if hits:
         reasons.append(f"kblam: this command writes under {cfg.findings_dir}/ ({', '.join(hits)}), so it is "
                        f"denied. {use}")
-    written, removed = [t for t in targets if state(t)], [t for t in removals if state(t)]
-    if written or removed:
-        what = " and ".join(f"{verb} {', '.join(paths)}" for verb, paths in
-                            (("writing", written), ("removing", removed)) if paths)
-        reasons.append(f"kblam: {what} under .kblam/ denied. {STATE_USE}")
+    for protected, where, why in ((state, " under .kblam/", STATE_USE), (config, "", CONFIG_USE)):
+        written, removed = [t for t in targets if protected(t)], [t for t in removals if protected(t)]
+        if written or removed:
+            what = " and ".join(f"{verb} {', '.join(paths)}" for verb, paths in
+                                (("writing", written), ("removing", removed)) if paths)
+            reasons.append(f"kblam: {what}{where} denied. {why}")
     return _deny(" ".join(reasons)) if reasons else 0
 
 
@@ -439,5 +448,7 @@ def run(event: str, root: Path | None = None) -> int:
         if event == "SubagentStop" and data.get("agent_type") == "":
             return 0  # an internal agent (prompt suggestions, /btw), not a subagent (SPEC §8 item 3)
         return _stop(cfg, event, data)
+    except ConfigError as exc:  # e.g. a [jev] value kblam.toml may not hold (SPEC §9), found by the check
+        return _note(event, str(exc))
     except Exception as exc:  # a hook must never break the agent's work (SPEC §8)
         return _note(event, f"unexpected {type(exc).__name__}: {exc}")
