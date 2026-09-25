@@ -59,8 +59,8 @@ OpenRouter API key with credit. By the spec's estimate a write with 30 candidate
 on one-sentence claims, and more on longer ones; `kblam cost` reports what was actually spent.
 Candidate selection uses ollama with the `embeddinggemma:300m` model when it is running at
 `http://127.0.0.1:11434`, and falls back to BM25 without it. The Claude Code hooks run through bash
-(Git Bash on Windows) or PowerShell 7. kblam was developed on Windows with Git Bash and PowerShell,
-and its test suite also runs on Linux.
+(Git Bash on Windows) or PowerShell 7. kblam is used mainly on Windows with Git Bash and PowerShell,
+and it is also tested on Linux.
 
 ### Installing (once per machine)
 
@@ -87,9 +87,13 @@ adds a `.gitattributes` line that stops git from converting line endings under `
 entries in `.claude/settings.json`, a line in `CLAUDE.md`, and the git pre-commit hook. It reports
 what it did to each file. It never overwrites `kblam.toml`, and it never overwrites a pre-commit hook
 that is not kblam's. It finishes by running each hook once to check that it answers. Review the files
-and commit them; a clone on another machine then carries the setup and needs only the per-machine
-install. Later, `kblam init --update` rewrites the rule, the skill, the hook entries and the
-pre-commit hook to match the installed version of kblam.
+and commit them. A clone then carries the setup except for the pre-commit hook, which lives inside
+`.git/`, and it starts without kblam's state, since `.kblam/` is not committed: no review items and
+no record of what Jev has checked. In a new clone, after the per-machine install, run `kblam init`
+there as well, which installs the pre-commit hook and leaves the committed files as they are, and
+then `kblam validate --record` to accept the cloned tree. With the Jev check on, that first
+`--record` asks Jev about every finding. Later, `kblam init --update` rewrites the rule, the skill,
+the hook entries and the pre-commit hook to match the installed version of kblam.
 
 ### Writing a finding
 
@@ -198,148 +202,104 @@ anywhere inside the repository. An MCP server for a librarian agent without shel
 ### Documentation and license
 
 SPEC.md is the design and the reference for behaviour: the finding format, the rules, the Jev
-decision policy, the hooks and the calibration. REFERENCES.md lists the external documentation kblam
-was built against, and `research/` and `desk-jevdocs-answers.md` hold the research notes the spec
-cites. kblam is released under the VibeCoded AI-Slop License v1.0 in LICENSE: do whatever you want
-with it; there is no warranty and no support.
+decision policy, the hooks and the calibration. CONTRIBUTING.md is for working on kblam itself.
+kblam is released under the VibeCoded AI-Slop License v1.0 in LICENSE: do whatever you want with
+it; there is no warranty and no support.
 
 ## For agents
 
-This section is for coding agents. Which part applies depends on where you are working.
+This section is for agents. The first part helps an agent decide whether kblam fits a problem it
+has been asked to solve, the second is for an agent setting kblam up for a project, and the third
+is for an agent working in a repository that already uses kblam. Changing kblam's own code is
+covered in CONTRIBUTING.md.
 
-### In a repository that uses kblam
+### Deciding whether kblam fits
 
-If you are working in a project whose findings kblam manages, you do not need this README. The
-project's `.claude/rules/kblam-findings.md` loads when you open a finding, and the `kblam-write`
-skill covers writing one; if you have no Skill tool, read `.claude/skills/kblam-write/SKILL.md` as a
-file. The essentials are these. Never write under `findings/`, or under `.kblam/` outside
-`.kblam/staging/`, yourself: the hooks deny it, and the Stop hook catches what they miss. Add or
-change a finding with `kblam new` or `kblam edit`, edit the staged copy, and `kblam put` it. When a
-put is rejected as a duplicate or a conflict, edit the existing finding it names instead of
-rewording yours until it passes. Treat `kblam validate` as the only evidence that the knowledge
-base is clean, including after your own work.
+kblam fits when several agents, or one agent over many sessions, record research findings in a git
+repository and the record keeps drifting from what is true: corrected claims survive beside their
+corrections, one fact is written in several places, and indexes go stale. It keeps one claim per
+file and only the current version of each, and every finding has to cite at least one file or
+folder in the repository as its evidence. That suits evidence-backed research, such as
+measurements, experiments or reverse engineering, better than notes or opinions.
 
-### Working on kblam itself
+kblam is not a search engine, a retrieval layer or a memory store for agents, and it has no search
+command: agents find findings through the generated `findings/INDEX.md` and their ordinary file
+tools. Nor is it a wiki that keeps each page's history on the page. A claim that turns out wrong is
+rewritten, and its earlier versions survive only in git history.
 
-#### SPEC.md is the source of truth
+The parts that act while an agent works are built for Claude Code: hooks that deny direct writes to
+the knowledge base, a Stop hook that validates anything that got past them, a rule for reading
+findings and a skill for writing them. With any other agent, `kblam put` still refuses a bad write
+and the git pre-commit hook still refuses a commit while `kblam validate` fails, but nothing stops a
+direct write under `findings/`, and Jev does not compare a finding written that way with the others
+unless someone runs `kblam check`. Such an agent also has to be pointed at the rule and the skill
+that `kblam init` installs under `.claude/`, since only Claude Code loads them by itself.
 
-SPEC.md is the design, and its "As built" paragraphs record implementation details. Read the
-section for the area you are changing first; module docstrings cite their sections. Many decisions
-carry an attribution and a date, such as "(user, 2026-09-24)": do not reverse one of those without
-asking. A change in behaviour updates SPEC.md in the same commit. A change to a message or an exit
-code that the `kblam-write` skill describes (`src/kblam/assets/skills/kblam-write/SKILL.md`)
-updates the skill in the same commit too. Details of the Jev API are cited to entries in
-`desk-jevdocs-answers.md` and to the TypeSafe pages listed in REFERENCES.md; check them before
-changing how requests are built or answers are read.
+Each `kblam put` sends the claim paragraph and scope of the new finding, and of up to 30 similar
+existing findings, to Jev, a model from TypeSafe AI, through OpenRouter. The rest of each finding
+is not sent, and the similarity search that chooses them runs locally, with ollama or BM25. The
+Jev check needs an OpenRouter API key with credit, and the Requirements section above gives its
+cost. Whether to send claim text to that service and pay for it is your user's decision; OpenRouter
+describes what it keeps on its
+[privacy and logging page](https://openrouter.ai/docs/features/privacy-and-logging). With the Jev
+check switched off, kblam still applies its deterministic rules and compares numeric quantities.
 
-#### Setup and tests
+kblam also assumes that someone other than a finding's author settles the review items the Jev
+check raises: a coordinating agent, a librarian agent or a person. While an item is open,
+`kblam validate` fails, and so the pre-commit hook refuses every commit in the repository.
 
-```sh
-uv sync
-uv run pytest                                  # about 30 s
-uv run kblam --root <path to a scratch KB> validate
-```
+kblam is at version 0.1.0 and was built for one research project. It is installed from its GitHub
+repository, needs Python 3.11 or newer, uv and git, and comes with no warranty and no support. The
+Status section above lists what is not implemented yet.
 
-Expect two skips: a test of case-insensitive paths that runs only on Windows, and the live Jev test,
-which runs only with `KBLAM_LIVE_JEV=1` and a real `OPENROUTER_API_KEY` and costs a fraction of a
-cent. No other test may reach the network. Jev is a fake `httpx2.MockTransport` (`ScriptedJev` and
-the `jkb` fixture in `tests/test_check.py`), and ollama is a local fake server (`FakeOllama` in
-`tests/test_embed.py`). The fixtures in `tests/conftest.py` set `embedding_model = ""`, so a real
-ollama running on the machine cannot change candidate selection, and point HOME at a scratch
-directory, so no test reads a real key file. Build knowledge bases with the `kb` fixture under
-`tmp_path`, never in this repository.
+### Setting kblam up for a project
 
-#### Where things are
+The commands are in the Installing and Setting up a repository sections above. An agent running
+them should also know the following.
 
-| Module | Holds |
-|---|---|
-| `entry.py` | The `kblam` console script. It dispatches `kblam hook` without importing the CLI. |
-| `cli.py` | Commands, argument parsing and exit codes (`EXIT_HELP`). |
-| `config.py` | Loading `[kb]` from `kblam.toml` and finding the repository root, a resolved path. |
-| `finding.py` | Parsing one finding (frontmatter, claim paragraph) and its fingerprint. |
-| `view.py` | `KBView`, an in-memory snapshot of `findings/` as it is or as it would be after a put. |
-| `rules.py` | The validator rules K1 to K11 and `validate()`. |
-| `index.py`, `treehash.py` | `INDEX.md` generation, and the tree digest with the tree.hash rule. |
-| `store.py` | `new`, `edit`, `put`, `ack` and `index`, the edit-base guard, and `atomic_write`. |
-| `lock.py` | `.kblam/lock`, including breaking a stale lock. |
-| `check.py` | Candidate selection, BM25, the quantity comparison, the decision policy and `checks.jsonl`. |
-| `embed.py` | The ollama calls, the vector cache and the cosine scores. |
-| `jev.py` | The Jev client (retries, throttling, key loading), `pairs.sqlite`, `calls.jsonl`, and `kblam cost`. |
-| `jev_prompts.py` | The Jev question shapes, validation of `[jev.prompt]`, and `prompt_id`. |
-| `review.py` | `review.jsonl` items, and `check`, `check --pending`, `audit` and `resolve`. |
-| `hook.py` | The Claude Code hooks: the PreToolUse deny, and the Stop and SubagentStop validation. |
-| `init.py` | `kblam init [--update]`. |
-| `assets/` | The files `init` installs: the rule, the skill, the hook entries, the pre-commit hook and the `kblam.toml` template. |
+The OpenRouter key belongs to your user. Ask them to save it in `~/kblam/jev!.txt` or to set
+`OPENROUTER_API_KEY`, and never write it into the repository or into `kblam.toml`. Without a key,
+every `put` is accepted but left unchecked, and commits are refused until `kblam check --pending`
+succeeds with the key in place.
 
-Each test module's docstring says what it covers; `tests/test_rules.py` has at least one passing and
-one failing case per rule.
+Run `kblam init` at the root of the git repository and read its report. It exits 0 when everything
+is in place, and on exit 1 the report says what went wrong. For example, an existing pre-commit
+hook that is not kblam's is left alone, and the report says to run `kblam --root <repo> validate`
+from it or to replace it with kblam's.
 
-#### Invariants to keep
+Then edit `[kb] scopes` in `kblam.toml` to name the products, versions or components the project's
+findings apply to. Jev is never asked about two findings whose scopes do not overlap, and the
+default scope, `any`, overlaps every other. `kblam validate` should now report OK, and
+`kblam jev-smoke` tests the key and the endpoint for a fraction of a cent. Commit the files `init`
+created or changed. Each further clone of the repository then needs `kblam init` and
+`kblam validate --record`, as the Setting up a repository section explains.
 
-**Only kblam writes the knowledge base.** `put`, `ack` and `index` are the only writers of
-`findings/`, and they replace files there with `store.atomic_write`. They, `new`, `edit`, `resolve`
-and the recording step of `check` and `audit` hold `.kblam/lock` for their read-validate-write
-span. `put` asks
-Jev before it takes the lock and, under the lock, recomputes the candidates against the current tree
-and asks only about pairs the tree gained meanwhile. Keep network calls outside the lock.
+The skill tells authors to send the review items and rejected items that their writes raise to a
+coordinator, or to a librarian agent if one is deployed. Agree with your user on who that is, and
+write it into the project's instructions; SPEC.md §8.1 describes the librarian role. A Claude Code
+agent definition with an explicit tool list needs the Skill tool in that list to load the
+`kblam-write` skill, or an instruction to read the skill's file.
 
-**The tree.hash rule.** `put`, `ack` and `index` advance `.kblam/tree.hash` only when the tree
-matched it before their write (`treehash.record_after_write`), and only `validate --record` accepts a
-change made outside kblam. Without this rule, a shell write followed by `kblam index` would silence
-the Stop hook.
+If the project already keeps its findings in long documents, SPEC.md §11 describes moving them into
+kblam one topic at a time, with every claim staged and put like any other. The `kblam migrate`
+helpers are not implemented yet, so the splitting is done by hand or by an agent.
 
-**A failure is never a pass.** A Jev question that gets no answer leaves the finding unchecked, as
-an open `U-` item; it is never recorded as checked. An embedding failure is different by design: the
-whole check falls back to BM25, and one check never mixes the two mechanisms.
+### Working in a repository that uses kblam
 
-**Hooks fail open and stay fast.** `kblam hook` always exits 0, and its decision travels only in the
-JSON it prints. When the upward search finds no `kblam.toml` it prints nothing; on an invalid
-configuration, malformed input or any exception it allows the action and prints a `systemMessage`. PreToolUse runs on every Write, Edit and shell command, so
-`entry.py` dispatches it without importing the CLI and `hook.py` imports only `kblam.config` at
-module level. The Stop path imports the rest inside `_stop`. Do not add heavier module-level imports
-to `hook.py`.
+If you are working in a project whose findings kblam manages, the rule and the skill installed in
+that project are your instructions, and this README is only background. The project's
+`.claude/rules/kblam-findings.md` loads when you open a finding, and the `kblam-write` skill covers
+writing one; if you have no Skill tool, read `.claude/skills/kblam-write/SKILL.md` as a file. The
+essentials are these. Never write under `findings/`, or under `.kblam/` outside `.kblam/staging/`,
+yourself: the hooks deny it, and the Stop hook catches what they miss. Add or change a finding with
+`kblam new` or `kblam edit`, edit the staged copy, and `kblam put` it. When a put is rejected as a
+duplicate or a conflict, edit the existing finding it names instead of rewording yours until it
+passes. Send the IDs of review and rejected items that your writes raise to the coordinator, or to
+the librarian if there is one, and carry on rather than resolving them yourself. Treat
+`kblam validate` as the only evidence that the knowledge base is clean, including after your own
+work.
 
-**Messages are written for agents.** Every refusal names the rule, the place and what to do about
-it. Every message that stops a write (the deny hooks, the Stop block, and every `put` refusal except
-a configuration error) ends with "Load the kblam-write skill for how to fix this.", and tests in
-`tests/test_hook.py` check that each one does. The exit codes are fixed (SPEC.md §7).
-
-**Nothing secret or textual goes into the logs.** The API key is held in `jev._Secret` and scrubbed
-from error messages. `calls.jsonl` and `checks.jsonl` record IDs, fingerprints and verdicts, never
-finding text.
-
-**The question wording belongs to the project.** The Jev questions live in each consuming project's
-`kblam.toml`. The code in `jev_prompts.py` owns only the option keys, the question types, the state
-shapes and `SHAPE_VERSION`. Changing any of those changes every project's `prompt_id`, which turns
-all of that project's reject verdicts into review items until it recalibrates, so treat such a change
-as a breaking one.
-
-**Output is deterministic.** `INDEX.md` must be reproducible byte for byte (K7), files are written
-with LF line endings, `validate()` returns its issues sorted, and candidate ranking breaks ties by
-ID. A `KBView` is treated as immutable once its `findings` or `memo` have been computed; build a new
-view instead of changing one.
-
-**Dependencies stay small.** The runtime dependencies are ruamel.yaml and typesafe-sdk. The embedding
-path uses only the standard library, by decision (SPEC.md §12, M6.7): urllib and a pure-Python dot
-product, with no numpy and no ollama package.
-
-**It runs on Windows.** The main deployment is Windows with Git Bash and PowerShell, where agents may
-write through either shell tool. Path handling in `hook.py` therefore covers drive letters, Git
-Bash's `/c/...` form, PowerShell's backslash separator on every platform, and symlinked directories,
-and `lock.py` checks whether a lock holder is alive through the Win32 API. When you change path or
-process logic, test it on POSIX and reason through Windows.
-
-#### Conventions
-
-Match the surrounding code: `from __future__ import annotations`, dataclasses, type hints,
-docstrings that say why and cite SPEC.md sections, and lines wrapped at about 110 characters.
-Comments and messages are written in full sentences. Tests are named for the behaviour they check,
-such as `test_k9_rejects_near_duplicate_claim`. The assets under `src/kblam/assets/` write the
-configured findings folder as the token `{{kb_root}}`, which `kblam init` replaces; consuming
-projects pick up asset changes with `kblam init --update`.
-
-#### Not implemented yet
-
-`kblam recheck` and `kblam migrate` (SPEC.md §7) and the MCP server (§12, M7) do not exist yet.
-`[kb] evidence_roots` is parsed in `config.py`, but no rule reads it. Where you find the code and
-SPEC.md disagreeing, ask which one is intended rather than silently changing either.
+Outside Claude Code the hooks do not run, so nothing stops a direct write under `findings/` until
+the pre-commit hook runs `kblam validate`, and that does not ask Jev. Write through `kblam put` all
+the same. If `kblam` is not on your PATH, it has to be installed as described under Installing
+before you write a finding.
