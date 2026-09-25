@@ -479,9 +479,13 @@ exits 0; the decision travels only in the JSON on stdout (research/desk-hooks-an
 - **Root.** `--root` if given, else `$CLAUDE_PROJECT_DIR`, else the input's `cwd`, else the
   process's working directory; from there kblam walks up to `kblam.toml` as usual (§9).
 - **Paths.** A target path is resolved against the input's `cwd`, after expanding `~` and `$VAR`
-  and, on Windows, turning Git Bash's `/c/...` into `c:/...`. It is normalised without touching
-  the filesystem (Windows paths compare case-insensitively; symlinks are not resolved). It is under
-  `findings/` if it is the findings directory or inside it.
+  and, on Windows, turning Git Bash's `/c/...` into `c:/...`; in a PowerShell command `\` is a
+  separator on every platform, as it is in PowerShell. It is normalised lexically, and a second
+  form has its symlinks resolved (`realpath`, which accepts paths that do not exist), since the
+  root kblam finds is a resolved path and an agent may name the repository through a symlinked
+  directory. Windows paths compare case-insensitively. It is under `findings/` if either form is
+  the findings directory or inside it (either form of that directory), and under `.kblam/` (§8)
+  if a form is inside `.kblam/` and outside `.kblam/staging/`.
 - A PreToolUse call imports only the hook code (the console script dispatches `kblam hook` before
   loading the rest of the CLI), so it takes about 0.1 s.
 
