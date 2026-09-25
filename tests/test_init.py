@@ -107,6 +107,37 @@ def test_init_in_a_fresh_repo_produces_a_kb_that_validates(repo, capsys):
     assert "kblam validate: OK (0 findings)" in capsys.readouterr().out
 
 
+def test_init_approves_its_own_template_for_the_first_commit(repo, capsys, no_hook_check, monkeypatch):
+    """The kblam.toml init writes is kblam's template, so committing it needs no approval; an edit to it
+    does (SPEC §8 item 4), and approve-config shows the edit against the template, not the whole file."""
+    assert kblam_init(capsys)[0] == 0
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    capsys.readouterr()
+    assert cli.main(["validate", "--commit"]) == 0
+
+    path = repo / "kblam.toml"
+    path.write_text(path.read_text(encoding="utf-8").replace('scopes = ["any"]', 'scopes = ["any", "MX-200"]'),
+                    encoding="utf-8")
+    subprocess.run(["git", "add", "kblam.toml"], cwd=repo, check=True)
+    capsys.readouterr()
+    assert cli.main(["validate", "--commit"]) == 1
+    assert "this commit changes kblam.toml" in capsys.readouterr().out
+
+    class Terminal:
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr("sys.stdin", Terminal())
+    monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+    assert cli.main(["approve-config"]) == 0
+    out = capsys.readouterr().out
+    assert "--- kblam.toml (the template kblam init writes)" in out
+    changed = [line for line in out.splitlines() if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))]
+    assert changed == ['-scopes = ["any"]               # where a finding applies; edit for this project',
+                       '+scopes = ["any", "MX-200"]               # where a finding applies; edit for this project']
+    assert cli.main(["validate", "--commit"]) == 0
+
+
 def test_second_init_changes_nothing(repo, capsys):
     assert kblam_init(capsys)[0] == 0
     before = snapshot(repo)
@@ -251,7 +282,7 @@ def test_update_rewrites_a_changed_skill_but_never_kblam_toml(repo, capsys, no_h
     skill.write_text("# local edit\n", encoding="utf-8")
     edited = config.read_text(encoding="utf-8").replace('scopes = ["any"]', 'scopes = ["any", "MX-100"]')
     config.write_text(edited, encoding="utf-8")
-    hook.write_bytes(hook.read_bytes().replace(b"validate\n", b"validate  # older kblam\n"))
+    hook.write_bytes(hook.read_bytes().replace(b"validate --commit\n", b"validate  # older kblam\n"))
 
     code, out, _ = kblam_init(capsys)
     assert code == 0

@@ -1,6 +1,6 @@
 ---
 name: kblam-write
-description: Add, change or correct a finding in {{kb_root}}/ (the kblam knowledge base), and handle any kblam refusal - a denied write under {{kb_root}}/ or .kblam/, a kblam put rejection (exit 1, 3 or 4), a Stop hook block, a failing kblam validate or pre-commit, a review or unchecked item, or a suspect dependency.
+description: Add, change or correct a finding in {{kb_root}}/ (the kblam knowledge base), and handle any kblam refusal - a denied write under {{kb_root}}/ or .kblam/ or to kblam.toml, a kblam put rejection (exit 1, 3 or 4), a Stop hook block, a failing kblam validate or pre-commit, a review or unchecked item, or a suspect dependency.
 ---
 
 # Writing findings with kblam
@@ -12,6 +12,11 @@ you stop. Each refusal names the finding and the rule that fired, and what to do
 `.kblam/` holds kblam's own state (the review items, the verdict cache, the lock), and only kblam
 writes it: a Write, Edit, shell write or removal there is denied. The one exception is
 `.kblam/staging/`, where your staged findings are yours to edit.
+
+`kblam.toml` sets the rules and where kblam sends its API key, so only a person changes it: writing
+or removing it is denied too, and a commit that changes it is refused until a person approves it with
+`kblam approve-config` at a terminal. If a finding needs something it does not allow, such as a new
+scope, ask the user to add it. Never try to approve a change yourself.
 
 ## The flow
 

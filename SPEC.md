@@ -415,8 +415,8 @@ the calibration measured). The revision verdict fires when noul ≥ T_rev.
   `.kblam/review.jsonl`, and the next `kblam validate` fails until `kblam check --pending` succeeds.
   A question that failed before `put` took the lock is not retried under it, so an outage never
   holds the lock through retries.
-- API key: read from the `OPENROUTER_API_KEY` environment variable, falling back to a key-file path
-  set in `kblam.toml` (the shipped default is `~/kblam/jev!.txt`, §9). Never log,
+- API key: read from the `OPENROUTER_API_KEY` environment variable, falling back to a key file
+  (the default is `~/kblam/jev!.txt`; another variable or file is set per machine, §9). Never log,
   print or commit it. (Note: `!` in the filename triggers history expansion in interactive bash;
   quote the path or rename the file.)
 
@@ -432,6 +432,8 @@ the calibration measured). The revision verdict fires when noul ≥ T_rev.
 | `kblam check --pending` | re-run the check of each finding with an open unchecked item |
 | `kblam audit` | ask every candidate pair and revision question with no cached answer (§6.5); what fires becomes review items |
 | `kblam validate --record` | check (as `kblam check` with no IDs) the findings not yet checked at their current fingerprint, then, on a clean result, write `tree.hash` for the current tree: the explicit way to accept a legitimate out-of-band change such as `git pull` or `git checkout` |
+| `kblam validate --commit` | as `kblam validate`, and also refuse a commit whose `kblam.toml` differs from the last commit's (or removes it) unless a person approved that version on this machine (§8 item 4); what the pre-commit hook runs |
+| `kblam approve-config` | show how `kblam.toml` differs from the last commit (from the template `kblam init` writes when no commit holds it), check it loads, and on an interactive terminal ask a person to approve it for commits on this machine; with no terminal, approve nothing and exit 1 |
 | `kblam index` | regenerate `findings/INDEX.md` from frontmatter and write `tree.hash`. Deterministic: a fixed header line, topics in sorted order, one table row per finding (ID link, title, label, scope) in ID order, no timestamps. |
 | `kblam ack <dependent> <target>` | record the target's current fingerprint in the dependent's `depends_on` after re-reading the target (K3). Edits only that value (round-trip YAML), then rewrites `tree.hash`. `--all <target>` is deliberately absent: each dependent is re-read and acked on its own. |
 | `kblam deps <id>` | list the finding's dependents and dependencies, with suspect ones marked |
@@ -461,6 +463,14 @@ findings are the author's to edit), and removal is denied too (`rm`, `rmdir`, `R
 every item. The deny reason reads "kblam: <what> under .kblam/ denied. .kblam/ holds kblam's own
 state and only kblam writes it; stage findings under .kblam/staging/ (kblam new, kblam edit)." plus
 the skill pointer. A stale lock is broken by kblam itself (§12 M2).
+
+**`kblam.toml` is the project's.** It sets the rules kblam enforces and, within the limits of §9,
+where requests go, so an agent that could change it could weaken every check or redirect the key.
+Items 1 and 2 deny writing it and removing it (the repository's own `kblam.toml`, not a file of that
+name elsewhere), in the same way as `.kblam/`, with the reason "kblam: <what> denied. kblam.toml sets
+the rules kblam enforces and where kblam sends the Jev API key, so only a person changes it; ask the
+user to make the change you need." plus the skill pointer. A person edits it by hand and approves
+the change before committing it (item 4) (user, 2026-09-25).
 
 **Hook input and output.** `kblam hook <event>` reads Claude Code's hook JSON on stdin and always
 exits 0; the decision travels only in the JSON on stdout (research/desk-hooks-answers.md H4–H6).
@@ -550,9 +560,21 @@ being validated. Only `kblam validate --record` accepts an out-of-band change.
    An input with no `agent_type` key at all is treated as a real subagent. So is a subagent whose
    `agent_type` is the session's own agent name (H3); the hook cannot tell it apart.
 4. **git pre-commit** (a POSIX `sh` script that `kblam init` installs): `kblam --root <repo>
-   validate`, with `kblam` from `PATH`. Catches anything written outside Claude Code. If `kblam`
-   is not installed the command fails with 127 and the commit is refused. Any non-zero exit prints
-   "kblam pre-commit: commit refused (kblam validate exit N)." and the skill pointer.
+   validate --commit`, with `kblam` from `PATH`. Catches anything written outside Claude Code. If
+   `kblam` is not installed the command fails with 127 and the commit is refused. Any non-zero exit
+   prints "kblam pre-commit: commit refused (kblam validate exit N)." and the skill pointer.
+   **Configuration changes (user, 2026-09-25).** The deny hooks cannot see every write to
+   `kblam.toml` (a `git checkout` of an older version, a script), so `--commit` also compares the
+   `kblam.toml` the commit will hold (the index, read with `git cat-file`) with the last commit's. A
+   difference is refused unless a person approved exactly that version on this machine with
+   `kblam approve-config`; a commit that removes it is refused outright. Approvals are sha256 digests
+   of the file with CRLF normalised to LF (so a `core.autocrlf` working copy matches the stored
+   blob), one a line in `.kblam/config-approved`, which the deny hooks protect. `approve-config`
+   asks only on an interactive terminal, so an agent's non-interactive shell cannot approve; a
+   wrapper that supplies a terminal, or `git commit --no-verify`, still gets past it, so like the
+   other hooks this stops an agent taking a shortcut, not one set on evading it. `kblam init` records
+   an approval of the template it writes, so the first commit of an unedited `kblam.toml` needs
+   none.
 5. **Librarian agent** (optional; proposed by the user 2026-09-23; see §8.1).
 6. **Agent guidance** (§8.2): a path-scoped rule for reading findings and a skill for writing them.
    Every message that stops a write names the skill with the line "Load the kblam-write skill for
@@ -751,8 +773,6 @@ lock_stale_seconds = 300       # a lock older than this (or whose holder is dead
 endpoint = "https://openrouter.ai/api/v1/systemone"
 model = "typesafe/jev-1.13"
 expected_served_model = "typesafe/jev-1.13-20260917"
-key_env = "OPENROUTER_API_KEY"
-key_file = "~/kblam/jev!.txt"  # the default; ~ is the user's home directory
 max_candidates = 30
 topic_bonus = 0.2              # §6.1: same-topic similarity bonus, as a fraction of the top score (BM25 only)
 link_bonus = 0.15              # §6.1: shared anchor or evidence bonus, as a fraction of the top score
@@ -793,8 +813,20 @@ The block above is an example configuration for a hypothetical project (the prom
 abbreviated). `kblam.toml` is committed, so it holds nothing machine-specific.
 The API key is read from the environment variable named by `key_env` if it is set, otherwise from
 `key_file`, a path relative to the user's home directory when it starts with `~` (user,
-2026-09-23: a key file, not an environment variable). Each machine keeps the key at that path;
-the key never enters the repository. `kblam init` writes this file with the `[jev]` section, the
+2026-09-23: a key file, not an environment variable). The defaults are `OPENROUTER_API_KEY` and
+`~/kblam/jev!.txt`. Each machine keeps the key at that path; the key never enters the repository.
+
+**Per-machine settings (user, 2026-09-25).** `kblam.toml` is committed, so anyone who can change the
+repository, and any agent working in it, could otherwise choose which secret kblam sends as the API
+key and where it and the findings' text go; the Stop hook would send them with nobody running a
+command. So four `[jev]` keys are limited in `kblam.toml`: `key_env` and `key_file` may only hold
+their defaults, `endpoint` must be an `https://openrouter.ai/` URL, and `ollama_url` must name this
+machine (`127.0.0.1`, `localhost` or `[::1]`). Anything else there is a config error naming the key
+and where to set it instead: `~/kblam/config.toml`, an optional per-machine file holding only a
+`[jev]` table with any of those four keys as strings. Its values override `kblam.toml`'s and have
+none of those limits, since only the machine's user writes it.
+
+`kblam init` writes `kblam.toml` with the `[jev]` section, the
 default prompt and thresholds as shown (they belong to the model, not the project) and generic `[kb]`
 vocabularies (`evidence_roots = ["evidence"]`, `scopes = ["any"]`) for the project to edit. A project
 may edit the prompt text — `kblam prompt-id` then prints a new id, the thresholds no longer match
@@ -1029,9 +1061,9 @@ M6.5. Packaging: one install per machine, one command per project (user, 2026-09
         `stop_hook_active: false` with no `agent_type`. A hook answered if it exited 0 with no output
         or with JSON other than the did-not-run message. On a KB whose `tree.hash` is stale, the Stop
         run does the real check and may ask Jev.
-      - *Key file.* `~` expands to HOME, or USERPROFILE on Windows. Any other relative `key_file`
-        is relative to the repository root. The missing-key message names both the variable and the
-        file.
+      - *Key file.* `~` expands to HOME, or USERPROFILE on Windows, here and in the per-machine
+        `~/kblam/config.toml` (§9). Any other relative `key_file` is relative to the repository
+        root. The missing-key message names both the variable and the file.
       - *Hooks and config.* Only the upward search for kblam.toml finding none is silent. An
         explicit `--root` without kblam.toml, an unreadable file, invalid TOML or an invalid value
         gets the systemMessage note. Malformed hook input and unknown events are checked before

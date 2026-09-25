@@ -21,6 +21,7 @@ import sys
 import tomllib
 from pathlib import Path
 
+from kblam.approval import record_approval
 from kblam.config import CONFIG_NAME, ConfigError, load_config
 from kblam.lock import LockError
 from kblam.store import atomic_write, regenerate_index
@@ -164,7 +165,8 @@ class Init:
                 self.report("unchanged", rel)
         elif PRE_COMMIT_MARKER.encode() not in old:
             self.report("refused", rel, "a different pre-commit hook is already there; not overwritten. Run "
-                                        f"`kblam --root <repo> validate` from it, or replace it with {ASSETS / 'pre-commit'}")
+                                        f"`kblam --root <repo> validate --commit` from it, or replace it "
+                                        f"with {ASSETS / 'pre-commit'}")
             self.status = EXIT_REFUSED
         elif self.update:
             _write(path, data, 0o755)
@@ -356,12 +358,15 @@ def run(update: bool, cwd: Path | None = None) -> int:
         template = _asset(CONFIG_NAME)
         if not config.exists():
             _write(config, template)
-            state.report("created", CONFIG_NAME, "edit [kb] evidence_roots and scopes for this project")
+            state.report("created", CONFIG_NAME, "edit [kb] scopes for this project; after an edit, kblam "
+                                                 "approve-config before you commit it")
         elif config.read_bytes() == template:
             state.report("unchanged", CONFIG_NAME)
         else:
             state.report("kept", CONFIG_NAME, "init never overwrites it")
         cfg = load_config(root=repo)
+        if config.read_bytes() == template:
+            record_approval(cfg, template)  # kblam's own template: its first commit needs no approval (§8 item 4)
         state.prompt(cfg.jev.get("prompt") if isinstance(cfg.jev, dict) else None,
                      _template_prompt(template))
         index = f"{cfg.findings_dir}/INDEX.md"

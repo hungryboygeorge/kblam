@@ -44,10 +44,12 @@ usually the existing finding. Weaker signals open review items, which a coordina
 agent settles.
 
 `kblam init` adds guards around this for Claude Code and for git. Claude Code hooks deny direct
-writes under `findings/` and under `.kblam/`, where kblam keeps its state. When an agent stops,
+writes under `findings/` and under `.kblam/`, where kblam keeps its state, and to `kblam.toml`, which
+only a person should change. When an agent stops,
 another hook validates anything that changed outside `kblam put` and blocks the agent from finishing
 while the tree fails; an agent that cannot fix it is released rather than looped. A git pre-commit
-hook refuses commits while `kblam validate` fails. A project rule tells agents how to read findings,
+hook refuses commits while `kblam validate` fails, and commits that change `kblam.toml` until a
+person has approved the new version. A project rule tells agents how to read findings,
 a skill tells them how to write them, and every message that stops a write points to the skill.
 Several agents can write at once: `put` takes a lock, and it refuses to overwrite a finding that
 changed after the writer staged its edit.
@@ -73,6 +75,12 @@ This puts `kblam` on your PATH. Save your OpenRouter key, alone on one line, in 
 which is where kblam looks by default, or set `OPENROUTER_API_KEY` instead. Quote the file name in
 interactive bash, where `!` triggers history expansion.
 
+A machine that keeps the key elsewhere, calls Jev through an endpoint other than OpenRouter's, or
+uses an ollama on another host says so in its own `~/kblam/config.toml`, a `[jev]` table holding any
+of `key_env`, `key_file`, `endpoint` and `ollama_url`. These cannot be set in the project's
+`kblam.toml`: that file is committed, so anyone who could change it could otherwise make kblam send
+some other secret on your machine, or your findings, to a server of their choosing.
+
 ### Setting up a repository (once per project)
 
 ```sh
@@ -81,7 +89,8 @@ kblam init
 ```
 
 `kblam init` runs inside a git repository. It writes `kblam.toml`, the project configuration, whose
-`[kb] scopes` vocabulary you should edit for your project. It also creates `findings/INDEX.md` and
+`[kb] scopes` vocabulary you should edit for your project; after editing it, run
+`kblam approve-config` before you commit, as described under Configuration. It also creates `findings/INDEX.md` and
 adds a `.gitattributes` line that stops git from converting line endings under `findings/`, a
 `.gitignore` line for `.kblam/`, the Claude Code rule and skill under `.claude/`, kblam's hook
 entries in `.claude/settings.json`, a line in `CLAUDE.md`, and the git pre-commit hook. It reports
@@ -139,6 +148,8 @@ and the finding is replaced in place. SPEC.md §4 and the installed skill descri
 | `kblam put <file>` | Validate, run the Jev check, and move a staged finding into `findings/`. |
 | `kblam validate` | Run every rule and list open review items; exit 1 on any failure. |
 | `kblam validate --record` | Accept a change made outside kblam (a `git pull`, say) once the tree is clean. |
+| `kblam validate --commit` | Also refuse a commit that changes `kblam.toml` without approval; the pre-commit hook runs this. |
+| `kblam approve-config` | Show how `kblam.toml` changed and, at a terminal, approve it for commits on this machine. |
 | `kblam check [<id> ...]` | Jev-check findings already in the tree: those named, or every one not checked since its claim, scope, quantities or evidence last changed. |
 | `kblam check --pending` | Retry the findings Jev could not answer for. |
 | `kblam audit` | Ask every candidate pair and question that has no cached answer. |
@@ -186,9 +197,16 @@ if everything is clean.
 
 `kblam.toml` holds the project's vocabularies (`labels`, and the `scopes` a finding may apply to;
 topics are simply folders), the claim and file length limits, the revision-history phrases that
-K4 looks for, the lock timeouts, the Jev endpoint, model and thresholds, the embedding settings, and
-the wording of the Jev questions. SPEC.md §9 documents every key. The file is committed, so it holds
-nothing machine-specific, and the API key never goes in it.
+K4 looks for, the lock timeouts, the Jev model and thresholds, the embedding settings, and the
+wording of the Jev questions. SPEC.md §9 documents every key. The file is committed, so it holds
+nothing machine-specific, and the API key never goes in it; where the key is read from, and where
+requests go beyond OpenRouter and a local ollama, are set per machine as described under Installing.
+Agents are not allowed to edit `kblam.toml`, so change it by hand. Because the hooks cannot catch
+every way a file can change, the pre-commit hook also refuses a commit that changes `kblam.toml`
+until a person has approved that exact version: after editing it, run `kblam approve-config` in a
+terminal, read the diff it shows, and answer `y`. The approval is recorded under `.kblam/` on your
+machine, and it can only be given at an interactive terminal, so an agent cannot give it. A project
+set up before this change gets the new pre-commit hook from `kblam init --update`.
 
 ### Status
 
@@ -258,17 +276,23 @@ The commands are in the Installing and Setting up a repository sections above. A
 them should also know the following.
 
 The OpenRouter key belongs to your user. Ask them to save it in `~/kblam/jev!.txt` or to set
-`OPENROUTER_API_KEY`, and never write it into the repository or into `kblam.toml`. Without a key,
+`OPENROUTER_API_KEY`, and never write it into the repository or into `kblam.toml`. A different key
+file or variable, another endpoint, or an ollama on another host goes in the user's own
+`~/kblam/config.toml`, never in `kblam.toml`. Without a key,
 every `put` is accepted but left unchecked, and commits are refused until `kblam check --pending`
 succeeds with the key in place.
 
 Run `kblam init` at the root of the git repository and read its report. It exits 0 when everything
 is in place, and on exit 1 the report says what went wrong. For example, an existing pre-commit
-hook that is not kblam's is left alone, and the report says to run `kblam --root <repo> validate`
-from it or to replace it with kblam's.
+hook that is not kblam's is left alone, and the report says to run
+`kblam --root <repo> validate --commit` from it or to replace it with kblam's.
 
-Then edit `[kb] scopes` in `kblam.toml` to name the products, versions or components the project's
-findings apply to. Jev is never asked about two findings whose scopes do not overlap, and the
+Then `[kb] scopes` in `kblam.toml` needs to name the products, versions or components the project's
+findings apply to. Once the hooks are active they deny agents any edit to `kblam.toml`, since it
+also decides where the API key goes, so propose the scopes and let your user write them. Your
+user then approves the edited file with `kblam approve-config` at a terminal, because the
+pre-commit hook refuses a commit of a `kblam.toml` that no person has approved; the unedited file
+`init` wrote needs no approval. Jev is never asked about two findings whose scopes do not overlap, and the
 default scope, `any`, overlaps every other. `kblam validate` should now report OK, and
 `kblam jev-smoke` tests the key and the endpoint for a fraction of a cent. Commit the files `init`
 created or changed. Each further clone of the repository then needs `kblam init` and
@@ -295,7 +319,9 @@ yourself: the hooks deny it, and the Stop hook catches what they miss. Add or ch
 `kblam new` or `kblam edit`, edit the staged copy, and `kblam put` it. When a put is rejected as a
 duplicate or a conflict, edit the existing finding it names instead of rewording yours until it
 passes. Send the IDs of review and rejected items that your writes raise to the coordinator, or to
-the librarian if there is one, and carry on rather than resolving them yourself. Treat
+the librarian if there is one, and carry on rather than resolving them yourself. Never edit
+`kblam.toml` either, and never try to approve a change to it; if you need one, such as a new
+scope, ask your user. Treat
 `kblam validate` as the only evidence that the knowledge base is clean, including after your own
 work.
 

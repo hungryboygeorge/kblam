@@ -245,6 +245,52 @@ def test_shell_write_or_removal_in_kblam_state_is_denied(kb, monkeypatch, capsys
     assert " under .kblam/ denied. " in reason and reason.endswith(STATE_TAIL)
 
 
+CONFIG_TAIL = ("kblam.toml sets the rules kblam enforces and where kblam sends the Jev API key, so only a person "
+               f"changes it; ask the user to make the change you need. {POINTER}")
+
+
+@pytest.mark.parametrize("name", ["Write", "Edit"])
+def test_file_tool_write_of_kblam_toml_is_denied(kb, monkeypatch, capsys, name):
+    """kblam.toml chooses the rules and where the API key is sent, so an agent may not change it."""
+    for path in (str(kb.root / "kblam.toml"), "kblam.toml", "evidence/../kblam.toml"):
+        reason = denied(call("PreToolUse", tool(kb, name, file_path=path), monkeypatch, capsys)[1])
+        assert reason == f"kblam: {name} of {path} denied. {CONFIG_TAIL}"
+
+
+@pytest.mark.parametrize("tool_name, command, what", [
+    ("Bash", "echo 'scopes = []' >> kblam.toml", "writing kblam.toml"),
+    ("Bash", "sed -i 's/0.69/0.99/' kblam.toml", "writing kblam.toml"),
+    ("Bash", "cp /tmp/other.toml kblam.toml", "writing kblam.toml"),
+    ("Bash", "rm kblam.toml", "removing kblam.toml"),
+    ("Bash", "mv kblam.toml kblam.toml.off", "removing kblam.toml"),
+    ("PowerShell", "Set-Content -Path kblam.toml -Value x", "writing kblam.toml"),
+    ("PowerShell", "Remove-Item .\\kblam.toml", "removing .\\kblam.toml"),
+])
+def test_shell_write_or_removal_of_kblam_toml_is_denied(kb, monkeypatch, capsys, tool_name, command, what):
+    reason = denied(call("PreToolUse", tool(kb, tool_name, command=command), monkeypatch, capsys)[1])
+    assert reason == f"kblam: {what} denied. {CONFIG_TAIL}"
+
+
+@pytest.mark.parametrize("tool_name, command", [
+    ("Bash", "cat kblam.toml"),
+    ("Bash", "cp kblam.toml /tmp/kblam.toml.bak"),
+    ("Bash", "echo x > kblam.toml.example"),
+    ("Bash", "echo x > docs/kblam.toml"),
+    ("PowerShell", "Get-Content kblam.toml"),
+])
+def test_reading_kblam_toml_or_writing_another_file_passes(kb, monkeypatch, capsys, tool_name, command):
+    assert call("PreToolUse", tool(kb, tool_name, command=command), monkeypatch, capsys) == (0, None, "")
+    other = tool(kb, "Write", file_path=str(kb.root / "docs" / "kblam.toml"))
+    assert call("PreToolUse", other, monkeypatch, capsys) == (0, None, "")
+
+
+def test_a_command_hitting_kblam_state_and_kblam_toml_gets_both_reasons(kb, monkeypatch, capsys):
+    command = "rm .kblam/review.jsonl kblam.toml"
+    reason = denied(call("PreToolUse", tool(kb, "Bash", command=command), monkeypatch, capsys)[1])
+    assert reason == (f"kblam: removing .kblam/review.jsonl under .kblam/ denied. {STATE_TAIL.removesuffix(POINTER)}"
+                      f"kblam: removing kblam.toml denied. {CONFIG_TAIL}")
+
+
 def test_shell_removal_deny_names_the_targets(kb, monkeypatch, capsys):
     command = "echo x > .kblam/tree.hash && rm .kblam/review.jsonl .kblam/staging/F-0003-x.md"
     reason = denied(call("PreToolUse", tool(kb, "Bash", command=command), monkeypatch, capsys)[1])
@@ -384,6 +430,19 @@ def test_bad_kblam_toml_fails_open_with_a_note(kb, monkeypatch, capsys, content,
     assert answer["systemMessage"].endswith("; allowed")
 
 
+def test_a_forbidden_jev_setting_stops_the_stop_hook_check_with_a_note(kb, monkeypatch, capsys):
+    """kblam.toml may not choose which secret is the API key (SPEC §9): the Stop hook, which would
+    otherwise ask Jev for the changed tree, sends nothing and says why."""
+    kb.add("F-0001", "motor", E1)
+    kb.write("kblam.toml", KBLAM_TOML + NO_EMBEDDINGS + 'key_env = "GITHUB_TOKEN"\n' + PROMPT_TOML)
+    (kb.findings / "calibration" / "notes.md").write_text("scratch\n", encoding="utf-8")  # tree.hash is stale
+    code, answer, _ = call("Stop", stop(kb), monkeypatch, capsys)
+    assert code == 0 and set(answer) == {"systemMessage"}
+    note = answer["systemMessage"]
+    assert "[jev] key_env must be 'OPENROUTER_API_KEY' here" in note and "~/kblam/config.toml" in note
+    assert "unexpected" not in note and note.endswith("; allowed")
+
+
 def test_unknown_event_fails_open(kb, monkeypatch, capsys):
     code, answer, _ = call("PostToolUse", tool(kb, "Write", file_path="findings/x.md"), monkeypatch, capsys)
     assert code == 0 and "unknown event" in answer["systemMessage"]
@@ -474,7 +533,7 @@ def test_hooks_json_calls_kblam_hook_for_each_event():
 def test_pre_commit_takes_kblam_from_path():
     pre_commit = (ASSETS / "pre-commit").read_bytes()
     assert pre_commit.startswith(b"#!/bin/sh\n") and b"\r" not in pre_commit
-    assert b'\nkblam --root "$root" validate\n' in pre_commit and b".venv" not in pre_commit
+    assert b'\nkblam --root "$root" validate --commit\n' in pre_commit and b".venv" not in pre_commit
     assert POINTER.encode() in pre_commit
 
 
