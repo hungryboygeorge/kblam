@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import random
+
 import pytest
 
 from kblam import rules
@@ -335,6 +337,28 @@ def test_k9_rejects_near_duplicate_claim(kb):
     assert len(issues) == 1
     assert issues[0].path.endswith("F-0002-sensor-again.md")
     assert "edit F-0001 instead" in issues[0].message
+
+
+@pytest.mark.parametrize("threshold", [0.1, 1 / 3, 0.5, 0.56, 0.75, 0.8, 0.9, 1.0])
+def test_k9_candidate_pairs_include_every_pair_at_or_above_the_threshold(threshold):
+    """similar_pairs prunes K9's all-pairs comparison. It may return extra pairs (K9 measures each),
+    but never drop one whose similarity, computed as K9 computes it, reaches the threshold: random
+    sets over a small vocabulary, duplicates, empty sets, and pairs whose ratio lands exactly on a
+    threshold (9/10, 4/5, 3/4, 14/25, 1/2, 1/3), where float rounding decides: 0.56 * 25 is
+    14.000000000000002 while 14 / 25 >= 0.56, so a bound computed without slack drops that pair."""
+    rng = random.Random(9)
+    vocabulary = [f"t{i}" for i in range(30)]
+    sets = [frozenset(rng.sample(vocabulary, rng.randint(0, 14))) for _ in range(160)]
+    sets += [sets[3], frozenset(), sets[40]]
+    for shared, extra in ((9, 1), (4, 1), (3, 1), (14, 11), (1, 1), (1, 2), (12, 3)):
+        base = [f"x{len(sets)}-{i}" for i in range(shared)]
+        sets += [frozenset(base + [f"a{len(sets)}-{i}" for i in range(extra)]), frozenset(base)]
+    pairs = rules.similar_pairs(sets, threshold)
+    assert pairs == sorted(set(pairs)) and all(i < j for i, j in pairs)
+    expected = {(i, j) for i in range(len(sets)) for j in range(i + 1, len(sets))
+                if sets[i] and sets[j] and len(sets[i] & sets[j]) / len(sets[i] | sets[j]) >= threshold}
+    assert expected <= set(pairs)
+    assert expected  # the case is not vacuous
 
 
 # --- K10 --------------------------------------------------------------------------------------
