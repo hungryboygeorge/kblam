@@ -34,7 +34,6 @@ QUANTITY_CONFLICT = "quantity_conflict"
 LOW_CONFIDENCE = "low_confidence"
 RELATION_VERDICTS = (SAME_FACT, CONFLICT, RESTATES)  # relation options a threshold can make fire
 MODES = ("reject", "review")
-ANY_SCOPE = "any"
 
 # §6.1 similarity: BM25 over each finding's title and claim paragraph.
 BM25_K1 = 1.2
@@ -137,18 +136,24 @@ def _meta(finding: Finding) -> dict:
     return finding.meta if isinstance(finding.meta, dict) else {}
 
 
-def scope_parts(values) -> frozenset[str]:
-    """A scope value containing `/` stands for each of its parts."""
+def scope_parts(values, separator: str = "/") -> frozenset[str]:
+    """A scope value containing `separator` stands for each of its parts, and with "" no value splits
+    ([kb] scope_separator, SPEC §4, §9)."""
     parts = set()
     for value in values or ():
-        parts.update(p.strip() for p in str(value).split("/") if p.strip())
+        pieces = str(value).split(separator) if separator else [str(value)]
+        parts.update(p.strip() for p in pieces if p.strip())
     return frozenset(parts)
 
 
-def scopes_overlap(a, b) -> bool:
-    """`any` overlaps every scope; otherwise the part sets must intersect."""
-    pa, pb = scope_parts(a), scope_parts(b)
-    return ANY_SCOPE in pa or ANY_SCOPE in pb or bool(pa & pb)
+def scopes_overlap(a, b, separator: str = "/", wildcard: str = "any") -> bool:
+    """`wildcard` overlaps every scope, and with "" none does; otherwise the part sets must intersect
+    ([kb] scope_separator and scope_wildcard, SPEC §6.1 Scope gating, §9). A check passes its view's
+    configuration; the defaults are [kb]'s."""
+    pa, pb = scope_parts(a, separator), scope_parts(b, separator)
+    if wildcard and (wildcard in pa or wildcard in pb):
+        return True
+    return bool(pa & pb)
 
 
 def _scope(finding: Finding) -> list:
@@ -345,7 +350,8 @@ def select_candidates(view: KBView, finding: Finding, max_candidates: int, topic
             similar=similar,
             bonus=similarity.topic_bonus * top if same_topic and similar > 0 else 0.0,
             link_bonus=link_bonus * top if shared_anchors or shared_evidence else 0.0,
-            scope_overlap=scopes_overlap(scope, _scope(other)),
+            scope_overlap=scopes_overlap(scope, _scope(other), view.cfg.scope_separator,
+                                         view.cfg.scope_wildcard),
             embedding=similarity.embedding,
         )
         # BM25 excludes a finding that shares no token; an embedding excludes none (SPEC §6.1)
@@ -717,7 +723,8 @@ class Checker:
         scope = _scope(finding)
         for other in view.findings:  # §6.3 is code: every finding whose scope overlaps, candidate or not
             if (not other.ok or not other.file_id or other.file_id == finding.file_id or other.file_id in asked
-                    or not scopes_overlap(scope, _scope(other))):
+                    or not scopes_overlap(scope, _scope(other), view.cfg.scope_separator,
+                                          view.cfg.scope_wildcard)):
                 continue
             conflicts = quantity_conflicts(other, finding, tolerance)
             if conflicts:
