@@ -213,6 +213,8 @@ def _cmd_resolve(cfg, args) -> int:
     for item in resolve(cfg, args.id, args.distinct):
         print(f"kblam resolve: closed {item.id} ({item.verdict} {item.new_id}"
               + (f" vs {item.existing_id}" if item.existing_id else "") + f"): {item.close_reason}")
+    print(f"kblam resolve: recorded the resolution in {cfg.resolutions_path.name} (SPEC §6.4); commit it, so "
+          f"every clone of the repository has it")
     return EXIT_OK
 
 
@@ -289,9 +291,13 @@ def _cmd_cost(cfg, args) -> int:
 
 
 def _cmd_prompt_id(cfg, args) -> int:
-    """The id of this project's Jev prompt: the wording in its [jev.prompt] tables (§6.2, §9)."""
+    """The ids of this project's Jev prompt, the wording in its [jev.prompt] tables (§6.2, §9): the
+    combined id, then each question's own, which [jev.thresholds] records as relation_prompt_id and
+    revision_prompt_id."""
     settings = jev_settings(cfg)
     print(f"kblam prompt-id: {settings.prompt_id}")
+    print(f"relation: {settings.relation_prompt_id}")
+    print(f"revision: {settings.revision_prompt_id}")
     return EXIT_OK
 
 

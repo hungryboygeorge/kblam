@@ -4,8 +4,11 @@ The wording itself lives in each project's `kblam.toml` under `[jev.prompt]` (§
 adapt it. This module owns what the API contract fixes: the relation option keys, the question
 `type`s, the state shapes and SHAPE_VERSION. `load_questions` turns the config's tables into the two
 question dicts as they are sent, and `prompt_id` hashes them: any edit to the text, and any change to
-a shape, changes the id. The id is the pair-cache key (§6.5) and what `[jev.thresholds]` records, so
-answers and thresholds calibrated on other wording are never reused or trusted.
+a shape, changes the id. Each question also has its own id (`relation_prompt_id`,
+`revision_prompt_id`, M6.10): that is what `[jev.thresholds]` records and what keys the question's
+cached answers (§6.5), so answers and thresholds calibrated on other wording are never reused or
+trusted, and editing one question leaves the other's calibration and cache intact. `state_hash`
+identifies one side of a question's state as it is sent (§6.5).
 
 Rules the wording follows (desk-jevdocs Q5): name the parts of state with backtick paths; ask one
 hop deep; each Choice option describes a condition the state could satisfy and never argues for
@@ -37,13 +40,27 @@ QUESTION_KEYS = ("instructions", "criteria")
 # Where the prompt went (SPEC §9): every message about prompt_version says this, so a project
 # upgrading kblam is told what to do rather than just that its key is unknown.
 PROMPT_MOVED = (f"the Jev questions now live in {CONFIG_NAME} under [jev.prompt.relation] and "
-                f"[jev.prompt.revision], and [jev.thresholds] carries prompt_id, the id of that prompt "
-                f"(kblam prompt-id prints it), instead of prompt_version")
+                f"[jev.prompt.revision], and [jev.thresholds] carries relation_prompt_id and "
+                f"revision_prompt_id, the ids of those questions (kblam prompt-id prints them), instead "
+                f"of prompt_version")
+
+
+def _digest(payload: dict) -> str:
+    """12 hex digits of the sha256 of `payload` as canonical JSON: keys sorted, no spaces, UTF-8."""
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
 
 
 def side_state(claim: str, scope: list[str]) -> dict:
     """One finding as it appears in state: its claim paragraph and the scope it applies to."""
     return {"claim": claim, "scope": scope}
+
+
+def state_hash(side: dict) -> str:
+    """A side's state hash (SPEC §6.5): the hash of `side_state(...)` exactly as it is sent. Cached
+    answers and resolutions are keyed by it, so an edit Jev does not see (evidence, quantities, label,
+    title) keeps them, and one to the claim or the scope does not."""
+    return _digest(side)
 
 
 def relation_state(existing: dict, new: dict) -> dict:
@@ -116,10 +133,20 @@ def load_questions(prompt) -> tuple[dict, dict]:
 def prompt_id(relation: dict, revision: dict) -> str:
     """The prompt's identity: 12 hex digits of the sha256 of the questions as they are sent (with
     SHAPE_VERSION), over canonical JSON. Parsed values, so reformatting the TOML does not change it
-    and any change to the text does."""
-    payload = {"shape": SHAPE_VERSION, RELATION_KEY: relation, REVISION_KEY: revision}
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
+    and any change to the text does. Since M6.10 each question has its own id (below); a
+    `[jev.thresholds]` that records this combined one still vouches for both while it is current."""
+    return _digest({"shape": SHAPE_VERSION, RELATION_KEY: relation, REVISION_KEY: revision})
+
+
+def relation_prompt_id(relation: dict) -> str:
+    """The relation question's own id (SPEC §6.2): the same hash over the relation question alone, so
+    an edit to the revision question leaves it unchanged."""
+    return _digest({"shape": SHAPE_VERSION, RELATION_KEY: relation})
+
+
+def revision_prompt_id(revision: dict) -> str:
+    """The revision question's own id (SPEC §6.2), as `relation_prompt_id` is the relation question's."""
+    return _digest({"shape": SHAPE_VERSION, REVISION_KEY: revision})
 
 
 def questions_for_api(prompt) -> tuple[str, dict, dict]:

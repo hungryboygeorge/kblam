@@ -370,7 +370,8 @@ def test_template_is_a_valid_config_with_the_spec_values(tmp_path):
     assert settings.embedding_document_prefix == "title: none | text: {text}"
     policy = parse_policy(settings.thresholds)
     assert policy.served_model == "typesafe/jev-1.13-20260917" and policy.low_confidence_review == 0.3
-    assert policy.prompt_id == settings.prompt_id  # the template's thresholds record its own prompt
+    assert (policy.relation_prompt_id, policy.revision_prompt_id) == (  # the template's thresholds record
+        settings.relation_prompt_id, settings.revision_prompt_id)       # its own prompt, one id per question
     assert settings.prompt_id == DEFAULT_PROMPT_ID
 
 

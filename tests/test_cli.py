@@ -52,7 +52,7 @@ def test_cli_without_config_explains(tmp_path, monkeypatch, capsys):
 def test_cli_prompt_id_prints_the_configs_prompt_id(kb, capsys):
     """`kblam prompt-id`: the id of this project's wording, what [jev.thresholds] must record."""
     assert main(["--root", str(kb.root), "prompt-id"]) == 0
-    assert capsys.readouterr().out == f"kblam prompt-id: {DEFAULT_PROMPT_ID}\n"
+    assert capsys.readouterr().out.splitlines()[0] == f"kblam prompt-id: {DEFAULT_PROMPT_ID}"
 
     toml = (kb.root / "kblam.toml").read_text(encoding="utf-8")
     changed = toml.replace("The claims are about different subjects.", "The claims are about other subjects.")
@@ -60,4 +60,4 @@ def test_cli_prompt_id_prints_the_configs_prompt_id(kb, capsys):
     kb.write("kblam.toml", changed)
     assert main(["--root", str(kb.root), "prompt-id"]) == 0
     out = capsys.readouterr().out
-    assert re.fullmatch(r"kblam prompt-id: [0-9a-f]{12}\n", out) and DEFAULT_PROMPT_ID not in out
+    assert re.match(r"kblam prompt-id: [0-9a-f]{12}\n", out) and DEFAULT_PROMPT_ID not in out
