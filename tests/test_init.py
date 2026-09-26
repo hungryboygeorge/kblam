@@ -72,6 +72,8 @@ def settings(root: Path) -> dict:
     return json.loads((root / ".claude" / "settings.json").read_text(encoding="utf-8"))
 
 
+# The lines init appends to .gitattributes (SPEC §7.1): the KB root byte-exact, the resolutions merged by union.
+ATTRIBUTES = "{root}/** -text\nkblam.resolutions.jsonl merge=union\n"
 WRITTEN = ["kblam.toml", "findings/INDEX.md", ".gitattributes", ".gitignore", ".claude/rules/kblam-findings.md",
            ".claude/skills/kblam-write/SKILL.md", ".claude/settings.json", "CLAUDE.md", ".git/hooks/pre-commit"]
 
@@ -86,7 +88,8 @@ def test_init_in_a_fresh_repo_produces_a_kb_that_validates(repo, capsys):
     for rel in WRITTEN:
         assert b"\r" not in (repo / rel).read_bytes(), rel  # LF endings
     assert (repo / "kblam.toml").read_bytes() == (init.ASSETS / "kblam.toml").read_bytes()
-    assert (repo / ".gitattributes").read_text(encoding="utf-8") == "findings/** -text\n"
+    assert (repo / ".gitattributes").read_text(encoding="utf-8") == ATTRIBUTES.format(root="findings")
+    assert "(added findings/** -text and kblam.resolutions.jsonl merge=union)" in out  # one item, both lines
     assert (repo / ".gitignore").read_text(encoding="utf-8") == ".kblam/\n"
     assert (repo / "CLAUDE.md").read_text(encoding="utf-8") == init.GUIDANCE_LINE.format(root="findings") + "\n"
     assert settings(repo) == {"hooks": installed_hooks()}
@@ -153,9 +156,21 @@ def test_init_appends_to_existing_files(repo, capsys, no_hook_check):
     (repo / "CLAUDE.md").write_bytes(b"# Project\n\nSome guidance.\n")
     assert kblam_init(capsys)[0] == 0
     assert (repo / ".gitignore").read_bytes() == b"build/\n.kblam/\n"
-    assert (repo / ".gitattributes").read_bytes() == b"* text=auto\nfindings/** -text\n"
+    assert (repo / ".gitattributes").read_bytes() == b"* text=auto\n" + ATTRIBUTES.format(root="findings").encode()
     line = init.GUIDANCE_LINE.format(root="findings")
     assert (repo / "CLAUDE.md").read_text(encoding="utf-8") == f"# Project\n\nSome guidance.\n\n{line}\n"
+
+
+def test_gitattributes_gains_only_the_missing_line(repo, capsys, no_hook_check):
+    """A repository set up by an older kblam has the KB root line: init appends the resolutions line
+    alone, and a second init finds both (SPEC §7.1)."""
+    (repo / ".gitattributes").write_bytes(b"findings/** -text\n")
+    code, out, _ = kblam_init(capsys)
+    assert code == 0 and actions(out)[".gitattributes"] == "updated"
+    assert "(added kblam.resolutions.jsonl merge=union)" in out
+    assert (repo / ".gitattributes").read_text(encoding="utf-8") == ATTRIBUTES.format(root="findings")
+    code, out, _ = kblam_init(capsys)
+    assert actions(out)[".gitattributes"] == "unchanged" and "has the kblam lines" in out
 
 
 def test_init_keeps_an_extended_guidance_line(repo, capsys, no_hook_check):
@@ -171,7 +186,7 @@ def test_gitattributes_line_follows_the_configured_root(repo, capsys, no_hook_ch
     (repo / "kblam.toml").write_text(template.replace('root = "findings"', 'root = "kb/facts"'), encoding="utf-8")
     code, out, _ = kblam_init(capsys)
     assert code == 0 and actions(out)["kblam.toml"] == "kept"
-    assert (repo / ".gitattributes").read_text(encoding="utf-8") == "kb/facts/** -text\n"
+    assert (repo / ".gitattributes").read_text(encoding="utf-8") == ATTRIBUTES.format(root="kb/facts")
     assert (repo / "kb" / "facts" / "INDEX.md").is_file()
     assert "`kb/facts/`" in (repo / "CLAUDE.md").read_text(encoding="utf-8")
 

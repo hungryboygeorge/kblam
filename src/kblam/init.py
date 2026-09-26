@@ -22,7 +22,7 @@ import tomllib
 from pathlib import Path
 
 from kblam.approval import record_approval
-from kblam.config import CONFIG_NAME, ConfigError, load_config
+from kblam.config import CONFIG_NAME, RESOLUTIONS_NAME, ConfigError, load_config
 from kblam.lock import LockError
 from kblam.store import atomic_write, regenerate_index
 
@@ -103,25 +103,28 @@ class Init:
         else:
             self.report("kept", rel, "differs from the installed version; kblam init --update rewrites it")
 
-    def append_line(self, rel: str, line: str, *, paragraph: bool = False) -> None:
-        """Append `line` to the file unless some line of it already reads so; create the file if missing.
-        With `paragraph`, a blank line separates it from existing text (a markdown paragraph), and a line
-        that starts with it counts as present: the project may have extended the sentence."""
+    def append_line(self, rel: str, *lines: str, paragraph: bool = False) -> None:
+        """Append each of `lines` that no line of the file already reads; create the file if missing. One
+        report line covers them all. With `paragraph` (one line), a blank line separates it from existing
+        text (a markdown paragraph), and a line that starts with it counts as present: the project may have
+        extended the sentence."""
         path = self.repo / rel
         existed = path.exists()
         old = path.read_bytes() if existed else b""
         present = [existing.strip() for existing in old.decode("utf-8", errors="replace").splitlines()]
-        if line in present or (paragraph and any(p.startswith(line) for p in present)):
-            self.report("unchanged", rel, "has the kblam line")
+        missing = [line for line in lines
+                   if line not in present and not (paragraph and any(p.startswith(line) for p in present))]
+        if not missing:
+            self.report("unchanged", rel, "has the kblam line" + ("s" if len(lines) > 1 else ""))
             return
         new = old
         if new and not new.endswith(b"\n"):
             new += b"\n"
         if paragraph and new and not new.endswith(b"\n\n"):
             new += b"\n"
-        _write(path, new + line.encode("utf-8") + b"\n")
+        _write(path, new + "".join(f"{line}\n" for line in missing).encode("utf-8"))
         self.report("updated" if existed else "created", rel,
-                    "added the kblam line" if paragraph else f"added {line}")
+                    "added the kblam line" if paragraph else f"added {' and '.join(missing)}")
 
     def prompt(self, project, installed) -> None:
         """Report a project `[jev.prompt]` that differs from the template's default wording (SPEC §6.2,
@@ -375,7 +378,8 @@ def run(update: bool, cwd: Path | None = None) -> int:
         else:
             regenerate_index(cfg)
             state.report("created", index, "kblam index")
-        state.append_line(".gitattributes", f"{cfg.findings_dir}/** -text")
+        # -text: K7 and tree.hash are byte-exact; merge=union: git merges the resolutions line by line (§6.4)
+        state.append_line(".gitattributes", f"{cfg.findings_dir}/** -text", f"{RESOLUTIONS_NAME} merge=union")
         state.append_line(".gitignore", ".kblam/")
         state.owned_file(RULE, _asset("rules/kblam-findings.md", cfg.findings_dir))
         state.owned_file(SKILL, _asset("skills/kblam-write/SKILL.md", cfg.findings_dir))
