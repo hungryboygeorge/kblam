@@ -1,110 +1,90 @@
-# kblam
+<div align="center"><h1>kblam</h1>
+<h2>the knowledge base for LLM-assisted mereology</h2>
+<h5>(mereology: the study of part-hole relationships and examination of how components interact in a system)</h5>
+<h5>Yes I Came Up With The Backronym Myself</h5></div>
 
-## For humans
+## what this is
+kblam is a flat-file knowledge base (a claim, fact, and finding management system) with semi-automated organizational enforcement. it's designed primarily for use by LLM research and coding agents, and mainly for use with Claude Code hooks; it also has Git hooks for other harnesses, but i have not personally tested them.
 
-### What kblam is
+it is intended to fix the problem of research agents producing "findings" files or similar structures: Markdown files, manually indexed by line number, with individual entries of facts gleaned from research, testing, or experimentation. i have found that, because of the inhuman way LLMs "think," function, and work, these files tend to drift and accumulate internal contradictions, supercessions, overrides, and so on, until they're a mess that's so confusing as to be indecipherable to humans and damaging to the LLMs' comprehension of the system. agents would leave obsolete information in place and either override it elsewhere in a file or append to it, information would wind up in multiple files and its copies would drift apart, and so on. agents would end up pulling incorrect inforation out of files with grep without reading the whole (enormous) file to find supercessions, leading to trouble and wasted time.
 
-kblam is a command-line tool for a knowledge base of research findings that several LLM agents
-write. Each finding is one Markdown file that states one claim, with YAML frontmatter naming its
-evidence, its scope and the findings it depends on. The knowledge base holds only current facts:
-when a claim turns out to be wrong, the finding is rewritten in place so that it states what is true
-now, and the earlier version survives only in git history. kblam enforces this with checks on the
-files rather than with instructions to the agents, because instructions alone did not work.
+no attempts instructing agents in better organization seems to help as the problems are fundamental to how agents work. i got tired of this while attempting to coordinate a large hardware RE project and had clod serve me some slop.
 
-### Why it exists
+kblam is designed to eliminate this gradual accumulation of organizational debt by enforcing structure. agents are disallowed from storing facts that override or duplicate other facts via a combination of heuristics, BM25 or (if available via Ollama) embedding-based semantic comparison, and claim pair analysis performed quickly and cheaply by TypeSafe AI's decision model Jev (served via Openrouter).
 
-kblam was built against a pilot corpus of about 34,000 lines of agent-written findings documents,
-in which five failure modes kept recurring despite written rules. A falsified claim stayed where it
-was while its correction was appended somewhere else, so agents that searched landed on the wrong
-one. New documents superseded old ones instead of editing them. Hand-maintained indexes drifted out
-of date. Failed experiments were kept whole with a correction tacked on. The same fact was copied
-into several files, and the copies diverged. Agents also reported following the rules when the
-files showed otherwise, so kblam treats a check on the files as the only evidence. SPEC.md §1
-describes these cases.
+## how it works
 
-### How it works
+each finding is a Markdown file with YAML frontmatter, which stores one claim (a current fact), along with metadata: evidence for that fact, the scope in which the fact rests, and the other findings that fact depends on. when an agent is caught attempting to store a fact that revises another fact, it is rebuffed and told to rewrite the previous finding instead. because of this enforcement, and because findings aren't stored in a single file from which an agent can pull an obsolete and incorrect section via grep, agents' knowledge of the system at hand should be closer to current and correct than with manual organization.
 
-Findings live at `findings/<topic>/F-NNNN-<slug>.md`, and `findings/INDEX.md` is generated from
-them. The only way into `findings/` is `kblam put`, which validates the whole knowledge base as it
-would be after the write and refuses the write if anything fails. The deterministic rules, K1 to
-K11 in SPEC.md §5, check the frontmatter schema, that cited evidence exists, that no dependency
-points at a finding rewritten since it was last checked, that no finding uses revision-history
-language such as "was wrong" or "superseded", length limits, the generated index, stray files,
-near-duplicate claims, that every excerpt marked verbatim occurs exactly in its cited source, and
-the rules for claims that only a retired document reports.
+indexing is automatic; a markdown index is kept up-to-date in the root of the `findings/` directory. findings are written to a specified markdown file and stored with `kblam put`, which validates both the finding and the knowledge base as it would be after the write, and rejects the write if anything fails. heuristics check for incorrectly formatted frontmatter, the existence of cited evidence, dependencies pointing to findings that were rewritten since last checked, language indicating revision or supercession that agents tend to use, length limits, near-duplicate claims, stray files, that quoted (and marked) excerpts actually appear verbatim in cited sources, and rules for claims that retired documents report. several agents can write at once; `put` takes a lock and refuses to overwrite findings that changed since the agent staged an edit.
 
-Once those rules pass, `put` compares the new finding with the most similar existing ones. It
-selects them with a local embedding model when ollama serves one, and with BM25 otherwise. It then
-asks Jev, a model from TypeSafe AI reached through OpenRouter that answers multiple-choice and
-yes-or-no questions with probabilities and a confidence, whether the new claim restates, extends or
-contradicts each of them, and whether it reads as a correction of an earlier claim. Numeric
-quantities are compared in code, not by Jev. A confident duplicate or contradiction, a claim that
-reads as a correction, or a conflicting quantity refuses the write and says what to edit instead,
-usually the existing finding. Weaker signals open review items, which a coordinator or a librarian
-agent settles.
+once it passes the heuristic, the new finding is compared with the most semantically similar existing findings. these are located with an embedding model of the user's choice served by ollama, or by BM25 as a fallback. these comparisons are then sent to Jev, which provides probabilities and confidence on whether the claim restates, extends, or contradicts each older findings, and whether it reads as a correction of an earlier finding. numeric quantities are compared with code, as Jev isn't great at that. confident duplicate and contradictions, corrections, or numerical conflicts trigger a refusal, along with instructions on what the agent should be editing instead. weaker signals open review items, which an orchestrator or dediated librarian agent can resolve. (kblam includes a definition for a librarian subagent. i've been running the librarian with deepseek v4.1 flash using bman654's [clodex](https://github.com/bman654/clodex) and opencode go.)
 
-`kblam init` adds guards around this for Claude Code and for git. Claude Code hooks deny direct
-writes under `findings/` and under `.kblam/`, where kblam keeps its state, and to `kblam.toml`, which
-only a person should change. When an agent stops,
-another hook validates anything that changed outside `kblam put` and blocks the agent from finishing
-while the tree fails; an agent that cannot fix it is released rather than looped. A git pre-commit
-hook refuses commits while `kblam validate` fails, and commits that change `kblam.toml` until a
-person has approved the new version. A project rule tells agents how to read findings,
-a skill tells them how to write them, and every message that stops a write points to the skill.
-Several agents can write at once: `put` takes a lock, and it refuses to overwrite a finding that
-changed after the writer staged its edit.
+### docs and license
 
-### Requirements
+SPEC.md is the document claude wrote to tell itself how to write the program, and should match the software unless something stupid happens and it starts drifting. CONTRIBUTING.md is what you think it is.
+kblam is released under the VibeCoded AI-Slop License v1.0.
 
-kblam needs Python 3.11 or newer and [uv](https://docs.astral.sh/uv/). The Jev check needs an
-OpenRouter API key with credit. By the spec's estimate a write with 30 candidates costs about $0.001
-on one-sentence claims, and more on longer ones; `kblam cost` reports what was actually spent.
-Candidate selection uses ollama with the `embeddinggemma:300m` model when it is running at
-`http://127.0.0.1:11434`, and falls back to BM25 without it. The Claude Code hooks run through bash
-(Git Bash on Windows) or PowerShell 7. kblam is used mainly on Windows with Git Bash and PowerShell,
-and it is also tested on Linux.
+### potential future changes
 
-### Installing (once per machine)
+the base design shouldn't change much. i haven't implemented `kblam recheck` (runs findings' check commands; is this a security risk? i dunno) or `kblam migrate` (helps split an existing document into findings) yet. `[kb] evidence_roots` in config is read but not enforced yet. i might add an MCP server for the librarian, semantic search using the embeddings/BM25, and some other stuff. i might add the ability to get embeddings from openrouter. who knows
+
+# big disclaimer
+i can't code; my brain isn't built right for syntax, but i understand the systems at work. kblam was entirely implemented by LLMs, which means that *nobody fully understands it.* LLM-written software is inherently disposable. it may have problems, major security vulnerabilities, it may not be appropriate for the range of things i thought it was, it may not work on your machine, it may fuck things up. i mean it when i say there's no warranty. you wanna be sure? have your own agent check it and blame it if the software fucks up, or look at the software yourself. i bet it's full of spaghetti.
+
+kblam may not be maintained properly. if you make a pull request i might accept it if it looks useful. if you ask me to do something for you i will probably ignore you. *i built this software as a personal tool, and i'm putting it up here in case others have this problem and it solves it in a manner that works well enough,* so they can maybe waste less of their time and tokens (and, collectively, our power and water).
+
+you want a guarantee? you want something *objectively good?* go find software a human wrote. machines don't possess the capability to understand and thus they can't write good code. i wouldn't use them if i had the ability and time to build personal tools without their assistance. the negative externalities are ruining the world. the seas are rising and we're pumping all our solar power into silicon heaters, and opening new thermal power plants to run them too. openAI kills kids and helps people plan mass shootings. claude plans bombing runs for the air force and blows up kids in iran. sam altman and dario amodei belong in prison, or elsewhere. my friends are all out of jobs. anti-minority bias is getting embedded in everything and we're all being surveilled everywhere we go. the entire field must be destroyed or we're all fucked; it's not the AI that'll kill us, it's the people running and using it.
+
+anyway here's how this tool for robots works.
+
+### requirements
+
+kblam needs python 3.11 or newer and [uv](https://docs.astral.sh/uv/). the Jev check needs an
+OpenRouter API key with credit. i estimate a write with 30 candidates costs about $0.001
+on one-sentence claims, and more on longer ones; `kblam cost` reports the actual cost.
+candidate selection checks for ollama at `http://127.0.0.1:11434` and if it finds it, embeds findings with `embeddinggemma:300m` (i tested; this one seems to work ideally for our case). if ollama isn't present, it falls back to BM25. the Claude Code hooks run with Bash or Powershell. my kblam installation has mostly been tested on Windows with Git bash and Powershell, but it has also been tested on Linux. mac testing and more configurability for the model (including embeddings via openrouter) soon. you may need to `ollama pull embeddinggemma:300m` manually upon setup for now.
+
+### installation (once per machine)
 
 ```sh
-uv tool install git+https://github.com/hungryboygeorge/kblam
-ollama pull embeddinggemma:300m        # optional: embedding candidates instead of BM25
+uv tool install git+https://github.com/hungryboygeorge/kblam # installs on your PATH
 ```
 
-This puts `kblam` on your PATH. Save your OpenRouter key, alone on one line, in `~/kblam/jev!.txt`,
-which is where kblam looks by default, or set `OPENROUTER_API_KEY` instead. Quote the file name in
-interactive bash, where `!` triggers history expansion.
+your OpenRouter key goes in `~/kblam/jev!.txt` (configurable), or in `OPENROUTER_API_KEY` instead. you'll need to quote the filename if you refer to the file in bash because i am perfectly willing to kneecap myself for a joke.
 
 A machine that keeps the key elsewhere, calls Jev through an endpoint other than OpenRouter's, or
-uses an ollama on another host says so in its own `~/kblam/config.toml`, a `[jev]` table holding any
-of `key_env`, `key_file`, `endpoint` and `ollama_url`. These cannot be set in the project's
-`kblam.toml`: that file is committed, so anyone who could change it could otherwise make kblam send
-some other secret on your machine, or your findings, to a server of their choosing.
+uses an ollama on another host says so in its own 
 
-### Setting up a repository (once per project)
+`~/kblam/config.toml` contains a `[jev]` table holding any
+of `key_env`, `key_file`, `endpoint` and `ollama_url`. these cannot be set in a project's local
+`kblam.toml`; this hopefully helps prevent security issues.
+
+### setting up a knowledge base (once per project)
 
 ```sh
 cd your-research-repo
 kblam init
 ```
 
-`kblam init` runs inside a git repository. It writes `kblam.toml`, the project configuration, whose
-`[kb] scopes` vocabulary you should edit for your project; after editing it, run
-`kblam approve-config` before you commit, as described under Configuration. It also creates `findings/INDEX.md` and
-adds a `.gitattributes` line that stops git from converting line endings under `findings/`, a
-`.gitignore` line for `.kblam/`, the Claude Code rule and skill under `.claude/`, kblam's hook
-entries in `.claude/settings.json`, a line in `CLAUDE.md`, and the git pre-commit hook. It reports
-what it did to each file. It never overwrites `kblam.toml`, and it never overwrites a pre-commit hook
-that is not kblam's. It finishes by running each hook once to check that it answers. Review the files
-and commit them. A clone then carries the setup except for the pre-commit hook, which lives inside
-`.git/`, and it starts without kblam's state, since `.kblam/` is not committed: no review items and
-no record of what Jev has checked. In a new clone, after the per-machine install, run `kblam init`
-there as well, which installs the pre-commit hook and leaves the committed files as they are, and
-then `kblam validate --record` to accept the cloned tree. With the Jev check on, that first
-`--record` asks Jev about every finding. Later, `kblam init --update` rewrites the rule, the skill,
-the hook entries and the pre-commit hook to match the installed version of kblam.
+`kblam init` runs inside a git repo. it creates a project-local `kblam.toml`, whose
+`[kb] scopes` entries you or an agent should edit for your project; after editing it, run
+`kblam approve-config` before you commit.
 
-### Writing a finding
+it also installs Claude Code and Git hooks, and other harness stuff:
+* the Claude Code hooks; these deny agent writes to `findings/`, `.kblam/`, and `kblam.toml`, to prevent an agent from solving a finding problem by bypassing kblam.
+* a Claude Code stop hook that checks for changes made without `kblam put` and refuses stopping while the knowledge base fails validation; if it can't fix it, the agent is released.
+* a git pre-commit hook refuses commits while the knowledge base fails `kblam validate`, and requests human confirmation for changes to `kblam.toml`.
+* a project rule which tells agents how to read findings.
+* a skill that tells agents how to write them and use kblam. messages that stop writes point to the skill.
+* some other stuff. the index. etc
+  
+it'll tell you what it did to each file. it won't overwrite `kblam.toml` or another pre-commit hook; it wraps up by testing the hooks. a git clone then carries the setup (minus the pre-commit hook, which lives in `.git/`).
+
+right now a git clone starts without kblam's state, which lives in `.kblam`. a new clone (on a machine with kblam already installed) needs you to run `kblam init`, which installs the Git hook and leaves committed files alone. you then need to run `kblam validate --record` to accept the cloned knowledge base. this asks Jev about every finding. this seems silly and wasteful and will probably be revised; a machine wrote it, so lower your expectations.
+
+### how a robot writes a finding
+clod wrote everything after this. i'm tired.
 
 ```sh
 kblam new calibration "The two curve types are not two analog gains"
@@ -207,22 +187,6 @@ until a person has approved that exact version: after editing it, run `kblam app
 terminal, read the diff it shows, and answer `y`. The approval is recorded under `.kblam/` on your
 machine, and it can only be given at an interactive terminal, so an agent cannot give it. A project
 set up before this change gets the new pre-commit hook from `kblam init --update`.
-
-### Status
-
-The design is settled except for the open questions in SPEC.md §13. Two commands in the spec's
-command list are not implemented yet: `kblam recheck`, which would re-run each finding's optional
-`check:` command, and `kblam migrate`, helpers for splitting an existing document into findings. The
-`[kb] evidence_roots` setting is read but not yet enforced, so a finding may cite evidence from
-anywhere inside the repository. An MCP server for a librarian agent without shell access is deferred
-(SPEC.md §12, M7).
-
-### Documentation and license
-
-SPEC.md is the design and the reference for behaviour: the finding format, the rules, the Jev
-decision policy, the hooks and the calibration. CONTRIBUTING.md is for working on kblam itself.
-kblam is released under the VibeCoded AI-Slop License v1.0 in LICENSE: do whatever you want with
-it; there is no warranty and no support.
 
 ## For agents
 
