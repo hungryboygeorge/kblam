@@ -9,6 +9,7 @@ from pathlib import Path
 
 CONFIG_NAME = "kblam.toml"
 STATE_DIR = ".kblam"
+RESOLUTIONS_NAME = "kblam.resolutions.jsonl"  # committed resolutions of misread items (SPEC §6.4)
 ROOT_RE = re.compile(r"[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*")  # [kb] root, as a POSIX path
 
 DEFAULT_KB = {
@@ -41,7 +42,21 @@ DEFAULT_KB = {
     # "" disables the reported-label checks; the history-path check still applies.
     "reported_label": "reported",
     "history_dirs": ["history"],
+    # M6.10 (SPEC §9 "Keys M6.10 adds"). Each default keeps the behaviour of a kblam.toml without it.
+    # K1: the allowed topics; empty means any.
+    "topics": [],
+    # K12: every blockquote in a finding's body is a verbatim excerpt.
+    "verbatim_blockquotes": False,
+    # §4, §6.1: a scope value containing the separator stands for each of its parts ("" never
+    # splits), and the wildcard overlaps every scope ("" means none does).
+    "scope_separator": "/",
+    "scope_wildcard": "any",
 }
+
+# M6.10 keys whose absence means something other than any value (SPEC §9): None when absent.
+# adjudicators: agent types that may run kblam resolve and kblam rm (§8 item 2); absent = no gate.
+# history_id_terms: K5's own terms; absent = K5 uses history_terms.
+OPTIONAL_KB = ("adjudicators", "history_id_terms")
 
 
 class ConfigError(Exception):
@@ -70,6 +85,16 @@ class Config:
     reported_label: str = "reported"
     history_dirs: tuple[str, ...] = ("history",)
     jev: dict = field(default_factory=dict)
+    topics: tuple[str, ...] = ()
+    verbatim_blockquotes: bool = False
+    scope_separator: str = "/"
+    scope_wildcard: str = "any"
+    adjudicators: tuple[str, ...] | None = None
+    history_id_terms: tuple[str, ...] | None = None
+
+    @property
+    def resolutions_path(self) -> Path:
+        return self.repo_root / RESOLUTIONS_NAME
 
     @property
     def state_dir(self) -> Path:
@@ -126,15 +151,19 @@ def load_config(root: Path | None = None, cwd: Path | None = None) -> Config:
         raise ConfigError(f"cannot read {repo_root / CONFIG_NAME}: {reason}") from exc
 
     kb_raw = raw.get("kb", {})
-    unknown = sorted(set(kb_raw) - set(DEFAULT_KB))
+    allowed = (*DEFAULT_KB, *OPTIONAL_KB)
+    unknown = sorted(set(kb_raw) - set(allowed))
     if unknown:
         raise ConfigError(
             f"{CONFIG_NAME}: unknown [kb] key(s) {', '.join(unknown)}; "
-            f"allowed: {', '.join(DEFAULT_KB)}"
+            f"allowed: {', '.join(allowed)}"
         )
     kb = {**DEFAULT_KB, **kb_raw}
     for key, default in DEFAULT_KB.items():
         _check_type(key, kb[key], type(default))
+    for key in OPTIONAL_KB:
+        if key in kb_raw:
+            _check_type(key, kb_raw[key], list)
 
     findings_dir = Path(kb["root"])
     if findings_dir.is_absolute() or ".." in findings_dir.parts or not findings_dir.parts:
@@ -164,4 +193,11 @@ def load_config(root: Path | None = None, cwd: Path | None = None) -> Config:
         reported_label=kb["reported_label"],
         history_dirs=tuple(d.strip("/") for d in kb["history_dirs"]),
         jev=raw.get("jev", {}),
+        topics=tuple(kb["topics"]),
+        verbatim_blockquotes=kb["verbatim_blockquotes"],
+        scope_separator=kb["scope_separator"],
+        scope_wildcard=kb["scope_wildcard"],
+        adjudicators=tuple(kb_raw["adjudicators"]) if "adjudicators" in kb_raw else None,
+        history_id_terms=(tuple(t.lower() for t in kb_raw["history_id_terms"])
+                          if "history_id_terms" in kb_raw else None),
     )

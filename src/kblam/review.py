@@ -57,6 +57,12 @@ class ReviewItem:
     created: str = ""
     closed: str | None = None
     close_reason: str | None = None
+    # M6.10: each side's state hash (SPEC §6.5), so a resolution can be recorded for a side that is
+    # not in the tree (a rejected item's staged finding); and, for a rejected item closed by a put,
+    # the fingerprint that went in (`kblam items --reworded`, SPEC §7). None in items written earlier.
+    new_state: str | None = None
+    existing_state: str | None = None
+    closed_fp: str | None = None
 
     @property
     def open(self) -> bool:
