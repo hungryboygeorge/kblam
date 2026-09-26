@@ -288,6 +288,17 @@ def _cmd_cost(cfg, args) -> int:
     return EXIT_OK
 
 
+def _cmd_recheck(cfg, args) -> int:
+    """Run the findings' check: commands that a person approved on this machine (SPEC §7, §8.3)."""
+    from kblam.recheck import RecheckError, recheck
+
+    try:
+        return recheck(cfg, args.ids)
+    except RecheckError as exc:
+        print(f"kblam recheck: {exc}", file=sys.stderr)
+        return EXIT_INVALID
+
+
 def _cmd_prompt_id(cfg, args) -> int:
     """The id of this project's Jev prompt: the wording in its [jev.prompt] tables (§6.2, §9)."""
     settings = jev_settings(cfg)
@@ -384,6 +395,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=_cmd_resolve)
     p = sub.add_parser("cost", help="summarise .kblam/calls.jsonl: Jev requests, tokens and cost, per day and kind")
     p.set_defaults(func=_cmd_cost)
+    p = sub.add_parser("recheck", help="run the check: commands of the given findings, or of every finding that has "
+                                       "one; a command runs only once a person approved it at a terminal")
+    p.add_argument("ids", nargs="*", metavar="F-NNNN")
+    p.set_defaults(func=_cmd_recheck)
     p = sub.add_parser("prompt-id", help="print the id of this project's Jev prompt (its [jev.prompt] tables): "
                                          "the value [jev.thresholds] records and calibration is tied to")
     p.set_defaults(func=_cmd_prompt_id)
