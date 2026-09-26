@@ -267,13 +267,31 @@ def record_rejected(cfg: Config, check: CheckResult) -> list[ReviewItem]:
     return reopened
 
 
-def close_rejected(cfg: Config, finding_id: str) -> list[ReviewItem]:
-    """A successful `put` of `finding_id` closes its open rejected items (§6.4)."""
+def close_rejected(cfg: Config, finding_id: str, fp: str) -> list[ReviewItem]:
+    """A successful `put` of `finding_id` closes its open rejected items (§6.4), recording `fp`, the fingerprint
+    that went in, as each item's `closed_fp`: `kblam items --reworded` compares it with the one rejected (§7)."""
     items = load_items(cfg)
     closed = []
     for item in items:
         if item.open and item.kind == "rejected" and item.new_id == finding_id:
             item.close(f"{finding_id} was put")
+            item.closed_fp = fp
+            closed.append(item)
+    if closed:
+        save_items(cfg, items)
+    return closed
+
+
+def close_items_on(cfg: Config, finding_id: str, reason: str,
+                   items: list[ReviewItem] | None = None) -> list[ReviewItem]:
+    """Close every open review, rejected and unchecked item with `finding_id` on either side, for `reason`:
+    `kblam rm` removed the finding, so nothing about it is left to decide (§7). `items` is the file as the
+    caller read it under the lock (read again when None). Call under the lock."""
+    items = load_items(cfg) if items is None else items
+    closed = []
+    for item in items:
+        if item.open and finding_id in (item.new_id, item.existing_id):
+            item.close(reason)
             closed.append(item)
     if closed:
         save_items(cfg, items)

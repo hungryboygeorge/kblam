@@ -133,9 +133,14 @@ def _check_notes(command: str, check) -> None:
 
 def _cmd_put(cfg, args) -> int:
     result = put(cfg, Path(args.file), client_factory=JevClient)
+    # Errors that were in findings/ before this put do not block it (SPEC §7 put, Validation); they are printed as
+    # warnings after the put's own report, and before the final line of a refusal.
+    warnings = [f"kblam put: warning: {issue.format(result.view)}" for issue in result.warnings]
     if result.issues:
         for issue in result.issues:
             print(issue.format(result.view))
+        for line in warnings:
+            print(line)
         print(f"kblam put: rejected {result.finding_id} ({len(result.issues)} error(s)); "
               f"{cfg.findings_dir}/ is unchanged. Fix the staged file and put it again. {SKILL_POINTER}")
         return EXIT_INVALID
@@ -147,6 +152,8 @@ def _cmd_put(cfg, args) -> int:
             print(item.describe() if item else f"{verdict.mode} {verdict.describe()}")
         for line in result.check.unavailable:
             print(f"unchecked {line}")
+        for line in warnings:
+            print(line)
         print(f"kblam put: rejected {result.finding_id} by the Jev check ({len(result.check.rejected)} reject "
               f"verdict(s)); {cfg.findings_dir}/ is unchanged. Fix every verdict above and put it again. {SKILL_POINTER}")
         return EXIT_REJECTED
@@ -163,6 +170,11 @@ def _cmd_put(cfg, args) -> int:
               f"edit {dependent}. kblam validate fails until then")
     for item in result.review + ([result.unchecked] if result.unchecked else []):
         print(f"kblam put: {item.describe()}. kblam validate fails until it is closed")
+    for line in warnings:
+        print(line)
+    if warnings:
+        print(f"kblam put: the {len(warnings)} warning(s) above were already in {cfg.findings_dir}/ before this "
+              f"put, so they did not block it; kblam validate fails until each is fixed")
     return EXIT_OK
 
 
@@ -218,9 +230,83 @@ def _cmd_resolve(cfg, args) -> int:
     return EXIT_OK
 
 
+def _refused(command: str, exc: Exception) -> int:
+    """A refused `rm` or `renumber` leaves findings/ unchanged; like a refused put, its message ends with the
+    skill pointer (SPEC §8 item 6)."""
+    print(f"kblam {command}: {exc}. {SKILL_POINTER}", file=sys.stderr)
+    return EXIT_LOCKED if isinstance(exc, LockError) else EXIT_INVALID
+
+
+def _cmd_rm(cfg, args) -> int:
+    from kblam.store import remove_finding
+
+    try:
+        result = remove_finding(cfg, args.id, args.merged_into)
+    except (StoreError, LockError, ReviewError) as exc:
+        return _refused("rm", exc)
+    print(f"kblam rm: removed {result.finding_id} ({result.path}), merged into {result.target_id}")
+    if result.folder:
+        print(f"kblam rm: removed {result.folder}, which the removal left empty")
+    print(f"kblam rm: regenerated {result.index_path}" + (" and .kblam/tree.hash" if result.recorded else ""))
+    for item in result.closed:
+        pair = item.new_id + (f" vs {item.existing_id}" if item.existing_id else "")
+        print(f"kblam rm: closed {item.kind} item {item.id} ({item.verdict or 'unchecked'} {pair}): "
+              f"{item.close_reason}")
+    for staged in result.staged:
+        print(f"kblam rm: {staged} is a staged copy of {result.finding_id}; putting it would add "
+              f"{result.finding_id} again, so delete it unless that is what you want")
+    title = f" ({result.title})" if result.title else ""
+    print(f"kblam rm: commit this with the reason for the removal in the message, e.g.: Remove "
+          f"{result.finding_id}{title}, merged into {result.target_id}: <what made it redundant>")
+    return EXIT_OK
+
+
+def _cmd_renumber(cfg, args) -> int:
+    from kblam.store import renumber
+
+    try:
+        result = renumber(cfg, Path(args.path))
+    except (StoreError, LockError) as exc:
+        return _refused("renumber", exc)
+    print(f"kblam renumber: {result.old_id} -> {result.new_id}: {result.old_path} is now {result.new_path} "
+          f"(fingerprint {result.fingerprint}); {result.old_id} stays with {', '.join(result.kept)}")
+    for dependent, path in result.rekeyed:
+        print(f"kblam renumber: {dependent} depends_on {result.old_id} is now {result.new_id}: "
+              f"{result.fingerprint} ({path}), since its fingerprint showed it meant {result.old_path}")
+    print(f"kblam renumber: regenerated {result.index_path}" + (" and .kblam/tree.hash" if result.recorded else ""))
+    if result.mentions:
+        print(f"kblam renumber: {len(result.mentions)} other mention(s) of {result.old_id} may mean either "
+              f"finding; a person checks each and points it at {result.new_id} where it meant the renumbered one:")
+        for mention in result.mentions:
+            print(f"  {mention}")
+    else:
+        print(f"kblam renumber: no other mention of {result.old_id} in {cfg.findings_dir}/")
+    return EXIT_OK
+
+
+def _cmd_items(cfg, args) -> int:
+    from kblam import items
+
+    view = load_view(cfg)
+    lines = [] if args.reworded or args.stats else items.listing_lines(items.open_items(cfg, view))
+    if args.reworded:
+        lines += items.reworded_lines(items.reworded(cfg, view))
+    if args.stats:
+        lines += items.stats_lines(items.stats(cfg, view))
+    for line in lines:
+        print(line)
+    return EXIT_OK
+
+
 def _cmd_ack(cfg, args) -> int:
     result = ack(cfg, args.dependent, args.target)
     if result.changed:
+        # SPEC §7 ack: the target as the dependent recorded it, beside its current claim, for the re-reading
+        if result.claim_then is not None:
+            print(f"{args.target} as recorded (commit {result.then_commit}): {result.claim_then}")
+        else:
+            print(f"kblam ack: {result.history_note}")
+        print(f"{args.target} now: {result.claim_now}")
         print(f"kblam ack: {args.dependent} depends_on {args.target} set to {result.fingerprint} "
               f"({result.path})" + (" and .kblam/tree.hash rewritten" if result.recorded else ""))
     else:
@@ -399,6 +485,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--distinct", required=True, metavar="REASON",
                    help="why they are distinct; stored so the pair at these fingerprints is not raised again")
     p.set_defaults(func=_cmd_resolve)
+    p = sub.add_parser("rm", help="remove a finding after a merge moved everything it stated into another one "
+                                  "(an adjudicator's command); the reason goes in the commit message")
+    p.add_argument("id", metavar="F-NNNN")
+    p.add_argument("--merged-into", required=True, metavar="F-NNNN", dest="merged_into",
+                   help="the finding that now states what the removed one stated")
+    p.set_defaults(func=_cmd_rm)
+    p = sub.add_parser("renumber", help="give a new ID to one of two findings that share an ID (K1, after the work "
+                                        "of two clones is merged), re-keying the depends_on entries that mean it")
+    p.add_argument("path", help="the finding file under the KB root to renumber")
+    p.set_defaults(func=_cmd_renumber)
+    p = sub.add_parser("items", help="list the open review, rejected and unchecked items in .kblam/review.jsonl")
+    p.add_argument("--reworded", action="store_true",
+                   help="instead, list the rejected items whose finding went in later at another fingerprint while "
+                        "the other side stayed as it was: a correction, or rewording to pass the check")
+    p.add_argument("--stats", action="store_true",
+                   help="instead, count each verdict's closed items as closed distinct or otherwise, and say "
+                        "whether its recalibration is due (SPEC §10.7)")
+    p.set_defaults(func=_cmd_items)
     p = sub.add_parser("cost", help="summarise .kblam/calls.jsonl: Jev requests, tokens and cost, per day and kind")
     p.set_defaults(func=_cmd_cost)
     p = sub.add_parser("recheck", help="run the check: commands of the given findings, or of every finding that has "
