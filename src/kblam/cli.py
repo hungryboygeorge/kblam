@@ -37,7 +37,13 @@ exit status:
   4  put rejected by the Jev check or a quantity conflict (SPEC §6.4); findings/ is unchanged"""
 
 
-def _validate(cfg, args) -> int:
+def _validate(cfg, args, *, baseline: bool = False) -> int:
+    """`kblam validate`, with --record and --commit. `baseline`: --record on a tree kblam has no tree.hash
+    for (a new clone, or .kblam/ deleted), whose findings are accepted from the repository (SPEC §8 item 3)."""
+    from kblam.commit_checks import check_commit
+    from kblam.config import RESOLUTIONS_NAME
+    from kblam.treehash import accept_from_repository
+
     view = load_view(cfg)
     issues = validate(view)
     for issue in issues:
@@ -46,17 +52,34 @@ def _validate(cfg, args) -> int:
     for item in items:
         print(item.describe())
     config = approval.commit_problems(cfg) if args.commit else []
+    commit = check_commit(cfg, view) if args.commit else None
+    blocking = items if commit is None or commit.changes_kb else []  # SPEC §8 item 4: only commits to the KB
+    if items and not blocking:
+        print(f"kblam validate: note: this commit changes nothing under {cfg.findings_dir}/ or "
+              f"{RESOLUTIONS_NAME}, so the {len(items)} open item(s) above do not block it")
     for problem in config:
         print(f"kblam validate: {problem}")
-    if issues or items or config:
+    refusals = commit.problems if commit else []
+    for problem in refusals:
+        print(f"kblam validate: {problem}")
+    for warning in commit.warnings if commit else []:
+        print(f"kblam validate: warning: {warning}")
+    if issues or blocking or config or refusals:
         print(f"kblam validate: {len(issues)} error(s) in {cfg.findings_dir}/"
-              + (f", {len(items)} open item(s) in .kblam/review.jsonl" if items else "")
+              + (f", {len(blocking)} open item(s) in .kblam/review.jsonl" if blocking else "")
+              + (f", {len(refusals)} problem(s) with the commit being made" if refusals else "")
               + (f", and {CONFIG_NAME} needs approval before this commit" if config else "")
               + ("; tree.hash not recorded" if args.record else ""))
         return EXIT_INVALID
     if args.record:
+        # The marks go first, so a failure while writing them leaves no tree.hash and the next run starts over.
+        accepted = accept_from_repository(cfg, view) if baseline else 0
         write_tree_hash(cfg, tree_digest(view))
         print(f"kblam validate: OK ({len(view.findings)} findings); recorded .kblam/tree.hash for this tree")
+        if baseline:
+            print(f"kblam validate: there was no .kblam/tree.hash (a new clone, or .kblam/ was deleted), so "
+                  f"Jev was not asked: {accepted} finding(s) accepted from the repository as checked at their "
+                  f"current fingerprints. kblam audit checks them with Jev")
     else:
         print(f"kblam validate: OK ({len(view.findings)} findings)")
     return EXIT_OK
@@ -65,6 +88,12 @@ def _validate(cfg, args) -> int:
 def _cmd_validate(cfg, args) -> int:
     if not args.record:
         return _validate(cfg, args)
+    if read_tree_hash(cfg) is None:
+        # A new clone, or .kblam/ deleted (SPEC §8 item 3): validate and record the tree without asking Jev.
+        # Decided again under the lock, since a put, ack or index may record a tree.hash meanwhile.
+        with kb_lock(cfg, "validate --record"):
+            if read_tree_hash(cfg) is None:
+                return _validate(cfg, args, baseline=True)
     _print_checks("validate --record", check_findings(cfg, None, command="validate --record",
                                                      client_factory=JevClient))
     with kb_lock(cfg, "validate --record"):

@@ -673,11 +673,12 @@ def test_validate_record_checks_changed_findings_first(jkb, capsys):
     jkb.add("F-0001", "motor", E1)
     jkb.add("F-0002", "drift", N)  # written outside put: never checked
     jkb.fake.relations[(E1, N)] = ("same_fact", 0.93, 0.91)
-    (jkb.root / ".kblam" / "tree.hash").unlink()
+    # A stale tree.hash, not none: with none, --record accepts the tree without Jev (test_fresh_clone.py).
+    (jkb.root / ".kblam" / "tree.hash").write_text("stale\n", encoding="ascii")
     assert run(jkb, "validate", "--record") == 1
     out = capsys.readouterr().out
     assert "same_fact F-0002 vs F-0001" in out and "tree.hash not recorded" in out
-    assert read_tree_hash(jkb.cfg) is None
+    assert read_tree_hash(jkb.cfg) == "stale"
     item_id, = open_ids(jkb)
     assert run(jkb, "resolve", item_id, "--distinct", "one is the MX-100 figure") == 0
     assert run(jkb, "validate", "--record") == 0
