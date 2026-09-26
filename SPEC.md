@@ -160,11 +160,13 @@ Research behind this design (the sources are listed under "About this document")
 ├── history/                   # retired source documents ([kb] history_dirs, §11)
 ├── .claude/                   # the §8.2 rule and skill and the §8 hook entries (kblam init)
 ├── CLAUDE.md                  # carries the §8.2 pointer line
-└── .kblam/                    # gitignored machine state
+└── .kblam/                    # gitignored machine state, never committed (§8)
     ├── pairs.sqlite           # Jev answers, resolutions and "checked" marks (§6.4, §6.5)
     ├── embeddings.sqlite      # embedding vector cache (§6.1)
     ├── calls.jsonl            # one line per Jev request: model id, tokens, cost, latency
     ├── checks.jsonl           # one line per check: candidates with reasons, verdicts (IDs and fingerprints, no finding text)
+    ├── recheck.jsonl          # one line per check: command a recheck considered: IDs, digests, outcome (no command text, §7)
+    ├── recheck/               # F-NNNN.log: the output of that finding's last recheck (§7)
     ├── review.jsonl           # review, unchecked and rejected items (§6.4, §6.5); an open review or unchecked item fails `validate`, a rejected one does not
     ├── staging/               # findings being written or rewritten (`new`, `edit`), awaiting `put`, and `edit`'s edit-base records (§7)
     ├── lock, lock.break       # the writers' lock and its break guard (§7)
@@ -175,7 +177,9 @@ Research behind this design (the sources are listed under "About this document")
 
 `kblam init` also adds lines to `.gitattributes` and `.gitignore` (§7.1), and §11 adds history
 folders to `.ignore`. Each machine keeps the Jev API key, by default in `~/kblam/jev!.txt`, and may
-keep a per-machine `~/kblam/config.toml` (§9); neither is in the repository.
+keep a per-machine `~/kblam/config.toml` (§9); neither is in the repository. Each clone keeps the
+`check:` commands a person approved in its git directory, `.git/kblam/recheck-approved.jsonl`
+(shared by its linked work trees), where no commit can write (§7, `kblam recheck`).
 
 Topic folders are organised by subject, never by work package or agent (naming a document after
 the work package that produced it is what creates parallel truths). `[kb] topics` makes that a
@@ -242,8 +246,10 @@ Rules:
   Evidence lies under an `[kb] evidence_roots` folder (K2; not yet enforced).
 - `check` is the optional "warrant" idea (desk-reddit): a command whose re-run reproduces the
   finding's key number. The command itself compares what it computes with the finding and exits
-  non-zero on a mismatch; `kblam recheck` runs these commands and reports any that fail (§7; not
-  yet built).
+  non-zero on a mismatch. It is a program and its arguments, split as a POSIX shell splits them but
+  run without a shell, from the repository root (user, 2026-09-26), so a pipeline goes in a script
+  under `evidence/`. `kblam recheck` runs these commands, each only once a person has approved it
+  on that machine, and reports any that fail (§7).
 - **Scope** values come from `[kb] scopes`, and two conventions apply to them (§6.1): a value
   containing `/` stands for each of its parts, and `any` overlaps every scope. Both symbols are
   configurable (`scope_separator`, `scope_wildcard`, §9; not yet built: today they are fixed).
@@ -689,7 +695,8 @@ Every command but `init` takes `--root <dir>` to name the repository root (§4).
 | `kblam rm <id> --merged-into <target>` | (not yet built) remove a finding after a merge moved everything it stated into `<target>` (§8.1). Refused while another finding depends on it (edit each dependent to depend on `<target>` first), while `<target>` is not in the KB, or while one of its quantities is missing from `<target>` with the same value and unit. Under the lock it removes the file and a topic folder left empty, regenerates `INDEX.md`, applies the tree.hash rule and closes the finding's open items; the reason for the removal goes in the commit message. An adjudicator's command (§8 item 2). |
 | `kblam renumber <path>` | (not yet built) give a new ID to one of two findings that share an ID, which K1 reports after the work of two clones is merged: rewrite that file's `id` and filename, re-key each `depends_on` entry whose recorded fingerprint shows it means that finding, and list the other mentions of the old ID for a person to check |
 | `kblam items [--reworded] [--stats]` | (not yet built) list the open review, rejected and unchecked items. `--reworded` lists each rejected item whose finding later went in at a different fingerprint while the other side of the pair stayed as it was: a correction or rewording to pass, for the adjudicator to tell apart (§6.4); `put` records the fingerprint that went in when it closes a rejected item. `--stats` counts, per verdict, the items closed as distinct and those closed otherwise (§10.7) |
-| `kblam recheck [F-…]` | (not yet built) run the `check:` commands (§4) of the named findings, or of all: from the repository root, through bash (or `pwsh -NoProfile -Command` where there is no bash, as the hook check finds them, §7.1), with a 600 s timeout each and the Jev key's variable (`key_env`) removed from the environment. A check passes when its command exits 0. A command a person has not approved on this machine is listed and skipped: the commands come from committed findings, so a person approves each new or changed one at an interactive terminal, as `approve-config` does, and its digest is kept in `.kblam/checks-approved` (§8.3). Exit 1 when a check failed or was skipped |
+| `kblam recheck [F-…]` | run the `check:` commands (§4) of the named findings, in the order given, or of every finding, in ID order. At an interactive terminal it first shows a person each command that is new, changed, or whose named files changed since its approval, and asks; without one it runs only the approved commands and reports the others as not approved ("`kblam recheck`" below) |
+| `kblam recheck --list` | print each `check:` command with its approval state on this machine; run nothing |
 | `kblam upgrade` | (not yet built) migrate a KB and this machine's state to the formats M6.10 introduces, under the lock: re-stamp `depends_on` with v2 fingerprints (§5.1), move resolutions from `.kblam/pairs.sqlite` into `kblam.resolutions.jsonl` (§6.4), re-key the cached answers of current findings by state hash (§6.5), and print the per-question prompt ids for a person to record in `[jev.thresholds]` (it never edits `kblam.toml`). It applies the tree.hash rule to its writes |
 | `kblam calibrate <pairs.jsonl>` | (not yet built) run the §10 procedure on a labelled set: every pair twice, the flip rate and the answers' resolution, thresholds chosen on the calibration half by the §10.3 rule, held-out precision and recall with counts and exact 95% intervals, and a proposed `[jev.thresholds]` for a person to copy (it never edits `kblam.toml`) |
 | `kblam cost` | spend summary from `calls.jsonl` |
@@ -701,8 +708,10 @@ Every command but `init` takes `--root <dir>` to name the repository root (§4).
 
 Exit status: 0 success, including a `put` whose Jev questions went unanswered (the finding is in,
 with an open unchecked item); 1 refused (validation errors, open review or unchecked items, a
-request kblam will not carry out, Jev unavailable to `jev-smoke`; `check` and `audit` also exit 1
-when the run left an item open, which an unavailable Jev does); 2 no usable `kblam.toml` or bad
+request kblam will not carry out, Jev unavailable to `jev-smoke`, files under `.kblam/` that git
+tracks (§8); `check` and `audit` also exit 1 when the run left an item open, which an unavailable
+Jev does, and `recheck` when a check failed, could not run or was not approved, or a finding could
+not be read); 2 no usable `kblam.toml` or bad
 arguments; 3 timed out waiting for `.kblam/lock`; 4 `put` rejected by the Jev check or a quantity
 conflict (`findings/` unchanged).
 
@@ -767,6 +776,69 @@ that only one waiter breaks it. Not yet built (M6.10): the holder refreshes the 
 modification time at least every `lock_stale_seconds`/3, and a lock is broken only when its
 holder's process is not running or its last refresh is older than `lock_stale_seconds` (which also
 covers a pid reused by another process), so a live holder is never broken.
+
+**`kblam recheck`** (user, 2026-09-26). A `check:` string is written by an agent, reaches every
+clone through `git pull` from anyone who can push, and is read by neither the K rules nor Jev, and
+an agent may be allowed to run `kblam` without asking (a `Bash(kblam:*)` permission, say). If
+`recheck` ran whatever `check:` says, a command someone put into a finding would run without anyone
+having seen it. So a check runs only in `kblam recheck`, never from a hook, `validate`, `put`,
+`check` or `audit`, and only once a person has approved that exact command on the machine. The
+threat is a command a third party puts into the knowledge base, not an agent on this machine set on
+running its own code (§8.3).
+- *Command form.* The string is split into arguments by POSIX shell rules on every platform and run
+  without a shell, so the person approves exactly the argv that runs. `;`, `&&`, `|`, `$(…)`,
+  backticks, redirection, globs, `~` and `$VAR` have no effect, `#` is an ordinary character, and
+  `\` escapes the next character (so paths are written with `/`). A bare program name is looked up
+  only in PATH's absolute entries, never in the current directory; a name with a directory part is
+  relative to the repository root. On Windows a name without a PATHEXT extension gets each in turn,
+  and a batch file (`.bat`, `.cmd`) is refused, because Windows runs it through cmd.exe, which
+  re-parses its arguments.
+- *Approval.* An approval covers the finding ID, the sha256 of the `check:` string exactly as
+  written, and the sha256 of every regular file inside the repository that the command names: an
+  argument, the value of an `--option=value` argument, or the program when it is given as a path.
+  So a changed command or a changed script needs a person again, and the reason given names what
+  changed. Code the command reaches without naming it (a module its script imports, the project
+  that `uv run` syncs) is not pinned. Approvals are JSON lines (ID, digests, time) in the
+  repository's git directory, `.git/kblam/recheck-approved.jsonl`, shared by its linked work trees:
+  a pull writes tracked files over ignored ones, so approvals under `.kblam/` could come from any
+  commit, while git refuses every path with a `.git` component. The §8 hooks deny agents writes
+  there, and outside a git work tree `recheck` runs nothing. Old approvals are kept, so a command
+  changed back needs none. A line that cannot be read, or a link in the file's place, refuses the
+  run.
+- *Asking.* A person is asked only when stdin and stdout are both an interactive terminal. For each
+  command that is new, changed, or whose named files changed, `recheck` shows the finding ID and the
+  reason; the string, escaped when it holds anything other than printable ASCII, so that no control
+  character, lookalike letter or direction mark can hide what it says; the argv as JSON; the program
+  found; the pinned files; and the directory, the variable it runs without and the timeout. It asks
+  `[y/N]` for each before running any, and records each `y`. With no terminal it asks nothing: the
+  approved commands run, and every other one is reported as not approved, with its reason and a
+  message that a person runs `kblam recheck <id>` at a terminal and that an agent asks the user to,
+  never running the command itself. As with `approve-config`, a wrapper that supplies a terminal,
+  such as `script`, gets past this.
+- *Running.* Just before a check runs, its named files are hashed again; a change since its approval
+  (an earlier check in the same run may have made it) means it is not run. It runs from the
+  repository root with stdin closed, in a process group of its own (a new session on POSIX), with
+  kblam's environment minus the variable the Jev API key is read from (`key_env`, §9). A check
+  passes when it exits 0. It fails on any other exit or a signal, and on running past `[kb]
+  recheck_timeout_seconds` (§9, default 600), when it and every process it started are killed
+  (`killpg`, or `taskkill /T` by full path on Windows). A string that cannot be split, or a program
+  that is not found, is reported without asking and counts as a failure, as does a program that
+  cannot be started.
+- *Output.* A line as each approved check starts, and one with its result. For a failure, the last
+  20 lines of output follow, with control characters escaped, then what to do. Last comes a summary
+  line, which ends with the skill pointer when the exit status is 1. The exit status is 0 when every
+  selected check passed, or when no finding has a check, and 1 otherwise, including when a finding
+  cannot be read or its `check:` is not a string; with no IDs given, such a finding is reported and
+  the rest still run. An ID that is malformed, not in the KB, unreadable, or without a `check:`
+  refuses the whole run before anything runs. `--list` runs nothing: it prints each command with its
+  state (approved; not approved, and why; or cannot run, and why) and exits 0.
+- *Logs.* `.kblam/recheck.jsonl` gets one line for each check a run considered: time, ID,
+  fingerprint, command sha256, the pinned files with their digests, outcome (`passed`, `failed`,
+  `timed_out`, `not_started`, `not_approved` or `declined`), exit code, seconds, and whether a
+  terminal was present. It never holds the command text or its output. `.kblam/recheck/F-NNNN.log`
+  holds the combined stdout and stderr of that finding's last run (empty when it could not start).
+  It is written to a new file that then replaces it, so a link at that name is replaced, never
+  written through, and a link at `.kblam/recheck.jsonl` or `.kblam/recheck/` refuses the run.
 
 ### 7.1 `kblam init`
 
@@ -863,8 +935,8 @@ plugin: plugins can't ship rules, and each machine would still need an install s
 ## 8. Enforcement points (Claude Code and git)
 
 Research agents write code and scratch files freely; nothing below touches paths outside `findings/`,
-`.kblam/`, `kblam.toml` and (not yet built) `kblam.resolutions.jsonl`, except the pre-commit hook's
-evidence checks (item 4).
+`.kblam/`, `kblam.toml`, `kblam.resolutions.jsonl` and `.git/kblam/` (§7, `kblam recheck`), except
+the pre-commit hook's evidence checks (item 4).
 
 **`.kblam/` is kblam's state** (tree.hash, review.jsonl, the verdict cache, the lock). A hand write
 there could silence the Stop hook or close a review item, so items 1 and 2 treat a path under
@@ -875,6 +947,19 @@ every item. The deny reason reads "kblam: <what> under .kblam/ denied. .kblam/ h
 state and only kblam writes it; stage findings under .kblam/staging/ (kblam new, kblam edit)." plus
 the skill pointer. A stale lock is broken by kblam itself (§7). Not yet built (M6.10): the committed
 `kblam.resolutions.jsonl` (§6.4) is kblam's state too, and items 1 and 2 protect it the same way.
+`.git/kblam/`, where `kblam recheck` keeps what a person approved (§7), is protected as well: items
+1 and 2 deny writes and removals there, with the reason that only `kblam recheck` writes it, after
+showing each command to a person at a terminal.
+
+**Committed state (user, 2026-09-26).** `.kblam/` is never committed. A pull writes tracked files
+over ignored ones, so a commit holding files there would replace every clone's `tree.hash`, review
+items and cached answers with its own. While git tracks anything under `.kblam/` (the index lists
+it, so a staged file counts, and so does a link at `.kblam` itself), every command but `init` and
+`hook` refuses with exit 1, naming the files and the fix: `git rm -r --cached .kblam` and a commit,
+and, when the files came with a pull, deleting `.kblam/`, then `kblam validate --record` (which
+accepts the committed findings as on a new clone, item 3) and `kblam audit`. The pre-commit hook's
+`validate --commit` refuses such a commit the same way. The Stop hook trusts none of that state
+(item 3).
 
 **As built.** `.kblam` itself counts (so `rm -rf .kblam` is denied), and so does `.kblam/staging`
 itself for the exemption. Bash removals: every operand of `rm` and `rmdir`, and the `mv` sources
@@ -1010,6 +1095,9 @@ exits 0; the decision travels only in the JSON on stdout (desk-hooks H4–H6).
      `kblam validate --record` records the tree without asking Jev and marks every finding as
      accepted from the repository, so later checks cover what changes after the clone, and
      `kblam audit` checks the rest when someone wants it.
+   - **Committed state.** While git tracks files under `.kblam/` (above), the hook ignores
+     `tree.hash` and the open items, runs only the deterministic rules, as on a new clone, and
+     blocks with the committed-state message and any failures. The loop guard applies as above.
 
    SubagentStop also fires for Claude Code's internal agents (prompt suggestions, `/btw`), which
    have an empty `agent_type` and can't fix `findings/`. The hook exits 0 silently for them
@@ -1188,6 +1276,8 @@ a skill would miss the moments it is for; writing guidance loaded into every rea
   - A suspect dependency (`kblam deps F-x`) means the finding it depends on was rewritten since
     this one was checked against it: re-read the target before relying on the dependent.
   - Cite findings by ID; don't cite `.kblam/staging/` files or desk answer files.
+  - A finding's `check:` command runs only through `kblam recheck`, which runs one only once a
+    person has approved it; never run it directly, since anyone who can push can write one (§7).
   - To add or change a finding, load the `kblam-write` skill.
 
   The consuming repo's CLAUDE.md also carries one always-loaded line, because a path-scoped rule
@@ -1223,7 +1313,13 @@ a skill would miss the moments it is for; writing guidance loaded into every rea
       or, for `revision`, a direct statement read as a correction. The reason names what differs,
       for a later reader.
   - Unchecked items: `kblam check --pending` once Jev is reachable.
-  - That writes and removals under `.kblam/` are denied, except in `.kblam/staging/` (§8).
+  - `check:` commands (§7, `kblam recheck`): how to write one (a program and its arguments, no
+    shell, run from the repository root, exit 0 when the number reproduces); that `kblam recheck`
+    runs one only once a person has approved it, so an author asks the user to approve a new or
+    changed one at a terminal and never runs or approves it any other way; and what a failed check
+    means.
+  - That writes and removals under `.kblam/` are denied, except in `.kblam/staging/`, and so are
+    those under `.git/kblam/` (§8).
 - **Pointers from the tool.** The §8 deny hooks, the Stop hook's block message and every `put`
   refusal end with "Load the kblam-write skill for how to fix this." so an agent reaches the skill at
   the moment it needs it, whatever its description matching does.
@@ -1244,11 +1340,15 @@ terminal (§8 item 4). Each protected asset has a stated adversary:
   (§9). They keep kblam's own requests from being redirected; they cannot stop an agent with a
   shell from reading the key file itself, or from writing `~/kblam/config.toml`, which is outside
   the repository and outside the hooks' reach.
-- **kblam's state** (`.kblam/`, and `kblam.resolutions.jsonl` once built): hand edits that would
-  close items or silence the Stop hook (§8).
+- **kblam's state** (`.kblam/`, and `kblam.resolutions.jsonl`): hand edits that would close items
+  or silence the Stop hook (§8). For `.kblam/`, also other contributors: a pull writes tracked files
+  over ignored ones, so a commit holding files there would replace every clone's own, and kblam acts
+  on none of that state while git tracks any of it (§8, "Committed state").
 - **The user's environment**: `check:` commands, which any contributor can commit in a finding.
-  `kblam recheck` runs only commands a person approved on that machine, and without the key's
-  variable (§7; not yet built).
+  `kblam recheck` runs only commands a person approved on that machine, keeps those approvals in
+  the git directory, where no commit can write, and runs each without the key's variable (§7). An
+  agent may be allowed to run `kblam` without asking, so the approval is what keeps a committed
+  command from running unseen.
 
 **What leaves the machine.** With any verdict enabled in `[jev.thresholds]`, as in the template,
 kblam sends each checked finding's claim paragraph and scope to TypeSafe through OpenRouter
@@ -1388,6 +1488,7 @@ history_id_terms = ["wrong", "incorrect", "mistaken", "erroneous", "corrects", "
 verbatim_blockquotes = true    # K12; absent = off
 scope_separator = "/"          # §4, §6.1; "" = a scope value never splits
 scope_wildcard = "any"         # §4, §6.1; "" = no scope overlaps every other
+recheck_timeout_seconds = 600  # §7 kblam recheck: a check: command running longer is killed and fails; absent = 600
 
 [jev.thresholds]
 relation_prompt_id = "6d79e4e0e409"   # §6.2; with revision_prompt_id, replaces prompt_id
@@ -1657,7 +1758,9 @@ sections above, it points there.
     `evidence_roots` in K2 and K10's hex excerpts (§5); configurable scope symbols (§4, §9).
   - *The lock:* a heartbeat, so a live holder is never broken (§7).
   - *Calibration:* `kblam calibrate` (§7) and the counts of §10.7.
-  - *`kblam recheck`*, running approved commands only (§7).
+  - *`kblam recheck`* (user, 2026-09-26): argv without a shell, approvals that pin the files a
+    command names and live in the git directory, the key's variable removed (§7).
+  - *Committed state:* kblam acts on none of `.kblam/` while git tracks any of it (§8, §8.3).
   - *Assets:* the skill's "A reject means" heading becomes "A verdict that names an existing
     finding" (§8.2); the skill and the rule describe `rm`, `items`, the gate, K12 and resolving a
     `revision` item; the template gains the M6.10 keys (§9).

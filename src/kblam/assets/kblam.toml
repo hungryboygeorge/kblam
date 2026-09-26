@@ -38,6 +38,7 @@ verbatim_blockquotes = true    # K12: every blockquote is a verbatim excerpt, wh
 adjudicators = []              # agent types that may run kblam resolve and kblam rm; [] = main session only
 lock_wait_seconds = 30         # how long new/edit/put/ack/index wait for .kblam/lock
 lock_stale_seconds = 300       # a lock older than this (or whose holder is dead) is broken
+recheck_timeout_seconds = 600  # kblam recheck: a check: command running longer is killed and fails
 
 # The [jev] section and its thresholds belong to the model, not the project: keep them as written.
 [jev]
