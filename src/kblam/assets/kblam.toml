@@ -58,7 +58,8 @@ workers = 6                    # parallel pair requests
 
 [jev.thresholds]      # calibrated on this default prompt (SPEC §10.6); a verdict with no entry is disabled
 served_model = "typesafe/jev-1.13-20260917"
-prompt_id = "4dda2f781f12"
+relation_prompt_id = "6d79e4e0e409"   # the id of each question's wording (SPEC §6.2; kblam prompt-id prints them)
+revision_prompt_id = "d9a34c823fe3"
 same_fact            = { p = 0.69, confidence = 0.61, mode = "reject" }
 cannot_both_be_true  = { p = 0.58, confidence = 0.46, mode = "reject" }
 restates_and_extends = { p = 0.48, confidence = 0.34, mode = "review" }

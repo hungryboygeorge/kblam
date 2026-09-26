@@ -99,6 +99,8 @@ class JevSettings:
     embedding_query_prefix: str
     embedding_document_prefix: str
     prompt_id: str                  # sha256 of the questions as sent (jev_prompts.prompt_id)
+    relation_prompt_id: str         # each question's own id (SPEC §6.2): what [jev.thresholds] records
+    revision_prompt_id: str         # and what keys that question's cached answers (§6.5)
     relation_question: dict         # the questions to send: built from [jev.prompt], never from code
     revision_question: dict
     quantity_rel_tolerance: float
@@ -170,6 +172,8 @@ def jev_settings(cfg: Config) -> JevSettings:
         embedding_query_prefix=raw["embedding_query_prefix"],
         embedding_document_prefix=raw["embedding_document_prefix"],
         prompt_id=prompt_id,
+        relation_prompt_id=jev_prompts.relation_prompt_id(relation),
+        revision_prompt_id=jev_prompts.revision_prompt_id(revision),
         relation_question=relation,
         revision_question=revision,
         quantity_rel_tolerance=float(raw["quantity_rel_tolerance"]),
@@ -284,7 +288,8 @@ def load_key(cfg: Config, settings: JevSettings) -> _Secret:
 
 @dataclass(frozen=True)
 class Side:
-    """One finding as Jev sees it: claim and scope, plus the ID and M2 fingerprint used for caching."""
+    """One finding as Jev sees it: claim and scope, plus the ID and M2 fingerprint that logs and items
+    carry. Cached answers are keyed by its state hash, not its fingerprint (SPEC §6.5)."""
 
     finding_id: str
     claim: str
@@ -302,6 +307,22 @@ class Side:
 
     def state(self) -> dict:
         return jev_prompts.side_state(self.claim, list(self.scope))
+
+    @property
+    def state_hash(self) -> str:
+        """The hash of this side's state exactly as it is sent (SPEC §6.5)."""
+        return jev_prompts.state_hash(self.state())
+
+
+def question_prompt_id(settings: JevSettings, kind: str) -> str:
+    """The id of the question `kind` ("relation" or "revision") asks: its own (SPEC §6.2)."""
+    return settings.relation_prompt_id if kind == jev_prompts.RELATION_KEY else settings.revision_prompt_id
+
+
+def cache_key(settings: JevSettings, kind: str, existing_state: str, new_state: str) -> tuple:
+    """The pair-cache key of one question (SPEC §6.5): (expected served model, the question's own prompt
+    id, kind, the state hash of `existing` or "" for a revision question, the state hash of `new`)."""
+    return (settings.expected_served_model, question_prompt_id(settings, kind), kind, existing_state, new_state)
 
 
 @dataclass(frozen=True)
@@ -353,14 +374,17 @@ class CacheSchemaError(JevUnavailable):
 
 
 class PairCache:
-    """`.kblam/pairs.sqlite`: answers keyed by (expected served model, prompt id, kind,
-    fingerprint(existing) or "" for revision, fingerprint(new)). A row is only used when its
-    served model is the expected one.
+    """`.kblam/pairs.sqlite`: answers keyed by `cache_key` (SPEC §6.5): expected served model, the
+    question's own prompt id, kind, the state hash of `existing` or "" for revision, and the state hash
+    of `new`. A row is only used when its served model is the expected one. The two side columns keep
+    their names from before M6.10, when they held fingerprints under the combined prompt id; such rows
+    match no key now and stay until `kblam upgrade` re-keys them.
 
-    Two more tables hold review-workflow state (M5): `distinct_pairs`, the reasons given to
-    `kblam resolve --distinct` for a pair at given fingerprints (unordered; a revision item's
-    second side is empty), and `checked`, each (finding, fingerprint) whose Jev check got an
-    answer to every question."""
+    Two more tables hold review-workflow state (M5): `distinct_pairs`, the resolutions recorded before
+    M6.10 (the reasons given to `kblam resolve --distinct` for a pair at given fingerprints, unordered;
+    a revision item's second side is empty), which still suppress until `kblam upgrade` moves them into
+    kblam.resolutions.jsonl, and `checked`, each (finding, fingerprint) whose Jev check got an answer to
+    every question: a finding counts as checked at its fingerprint, not its state hash."""
 
     SCHEMA = """
         CREATE TABLE IF NOT EXISTS answers (
@@ -438,12 +462,14 @@ class PairCache:
         return (*first, *second)
 
     def mark_distinct(self, a: tuple[str, str], b: tuple[str, str] | None, reason: str) -> None:
-        """Record `kblam resolve --distinct` for (id, fingerprint) sides a and b (None for a revision item)."""
+        """A resolution as kblam recorded it before M6.10, for (id, fingerprint) sides a and b (None for a
+        revision item). `kblam resolve` now appends to kblam.resolutions.jsonl instead."""
         with self._lock, self._connect() as conn, conn:
             conn.execute("INSERT OR REPLACE INTO distinct_pairs VALUES (?, ?, ?, ?, ?, ?)",
                          (*self._pair(a, b), reason, _now()))
 
     def distinct_reason(self, a: tuple[str, str], b: tuple[str, str] | None) -> str | None:
+        """The reason of a pre-M6.10 resolution of (id, fingerprint) sides a and b, if there is one."""
         with self._lock, self._connect() as conn:
             row = conn.execute("SELECT reason FROM distinct_pairs WHERE a_id = ? AND a_fp = ? AND b_id = ? "
                                "AND b_fp = ?", self._pair(a, b)).fetchone()
@@ -533,7 +559,7 @@ class JevClient:
     def ask_relation(self, existing: Side | Finding, new: Side | Finding) -> RelationResult:
         """Which §6.2 relation option describes `new` relative to `existing` (directional)."""
         existing, new = _side(existing), _side(new)
-        key = self._key_for("relation", existing.fingerprint, new.fingerprint)
+        key = cache_key(self.settings, "relation", existing.state_hash, new.state_hash)
         ids = {"existing_id": existing.finding_id, "existing_fp": existing.fingerprint,
                "new_id": new.finding_id, "new_fp": new.fingerprint}
         hit = self._cached("relation", key, ids)
@@ -558,7 +584,7 @@ class JevClient:
     def ask_revision(self, new: Side | Finding) -> RevisionResult:
         """Noul: does `new` read as a correction of an earlier claim (asked once per finding)."""
         new = _side(new)
-        key = self._key_for("revision", "", new.fingerprint)
+        key = cache_key(self.settings, "revision", "", new.state_hash)
         ids = {"existing_id": None, "existing_fp": None, "new_id": new.finding_id, "new_fp": new.fingerprint}
         hit = self._cached("revision", key, ids)
         if hit is not None:
@@ -586,13 +612,11 @@ class JevClient:
 
     # --- internals --------------------------------------------------------------------------
 
-    def _key_for(self, kind: str, existing_fp: str, new_fp: str) -> tuple:
-        return (self.settings.expected_served_model, self.settings.prompt_id, kind, existing_fp, new_fp)
-
     def _record(self, kind: str, status: str, ids: dict, **fields) -> dict:
+        # prompt_id: the asked question's own id, the one its answer is cached under (SPEC §6.5)
         return {"kind": kind, "status": status, "requested_model": self.settings.model,
                 "expected_served_model": self.settings.expected_served_model,
-                "prompt_id": self.settings.prompt_id, **ids, **fields}
+                "prompt_id": question_prompt_id(self.settings, kind), **ids, **fields}
 
     def _cached(self, kind: str, key: tuple, ids: dict) -> tuple[dict, CallInfo] | None:
         hit = self.cache.get(key, self.settings.expected_served_model)

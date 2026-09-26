@@ -226,7 +226,7 @@ def test_a_legacy_prompt_version_is_a_config_error_naming_the_move(jkb):
     with pytest.raises(jev.ConfigError,
                        match=re.escape("[jev] prompt_version is gone: the Jev questions now live in "
                                        "kblam.toml under [jev.prompt.relation] and [jev.prompt.revision], "
-                                       "and [jev.thresholds] carries prompt_id")):
+                                       "and [jev.thresholds] carries relation_prompt_id and revision_prompt_id")):
         JevClient(jkb.cfg)
 
 
