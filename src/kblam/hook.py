@@ -30,6 +30,7 @@ import sys
 from pathlib import Path
 
 from kblam.config import CONFIG_NAME, RESOLUTIONS_NAME, Config, ConfigError, NoConfig, load_config
+from kblam.gitdir import kblam_git_dir
 
 SKILL_POINTER = "Load the kblam-write skill for how to fix this."
 STATE_USE = (".kblam/ holds kblam's own state and only kblam writes it; stage findings under .kblam/staging/ "
@@ -39,6 +40,9 @@ CONFIG_USE = (f"{CONFIG_NAME} sets the rules kblam enforces and where kblam send
 RESOLUTIONS_USE = (f"{RESOLUTIONS_NAME} records the adjudicator's resolutions, and only kblam resolve writes "
                    f"it: the adjudicator closes an item Jev misread with kblam resolve <item-id> --distinct "
                    f"\"<reason>\", and any other agent sends the item ID to the coordinator or librarian.")
+APPROVALS_USE = ("That folder holds the check: commands a person approved on this machine, and only kblam recheck "
+                 "writes it, after showing each command to a person at a terminal; an agent asks the user to run "
+                 "kblam recheck, and never approves or runs a check: command itself.")
 REMOVAL_USE = ("Removing a finding is the adjudicator's decision: once a merge has moved everything a finding "
                "states into another, the adjudicator removes it with kblam rm <id> --merged-into <target>. "
                "Any other agent sends the finding IDs to the coordinator or librarian.")
@@ -424,6 +428,12 @@ def _pre_tool_use(cfg: Config, data: dict) -> int:
         """The repository's kblam.resolutions.jsonl (SPEC §8): the adjudicator's resolutions (§6.4)."""
         return any(_within(form, cfg.resolutions_path) for form in forms(path))
 
+    approvals_dir = kblam_git_dir(cfg)
+
+    def approvals(path: str) -> bool:
+        """<git common dir>/kblam/ (SPEC §7 recheck, §8): the check: commands a person approved here."""
+        return approvals_dir is not None and any(_within(form, approvals_dir) for form in forms(path))
+
     def removes_findings(path: str) -> bool:
         """A finding file (F-NNNN-<slug>.md directly in a topic folder), or the KB root or a topic folder
         that holds one on disk (SPEC §8 item 2): removing a finding is the adjudicator's decision. Any
@@ -448,6 +458,8 @@ def _pre_tool_use(cfg: Config, data: dict) -> int:
             return _deny(f"kblam: {tool} of {path} denied. {CONFIG_USE}")
         if resolutions(path):
             return _deny(f"kblam: {tool} of {path} denied. {RESOLUTIONS_USE}")
+        if approvals(path):
+            return _deny(f"kblam: {tool} of {path} denied. {APPROVALS_USE}")
         return 0
     command = tool_input.get("command")
     if not isinstance(command, str):
@@ -474,7 +486,8 @@ def _pre_tool_use(cfg: Config, data: dict) -> int:
         reasons.append(f"kblam: this command removes findings ({', '.join(lost)}), so it is denied. "
                        f"{REMOVAL_USE}")
     for protected, where, why in ((state, " under .kblam/", STATE_USE), (config, "", CONFIG_USE),
-                                  (resolutions, "", RESOLUTIONS_USE)):
+                                  (resolutions, "", RESOLUTIONS_USE),
+                                  (approvals, " (kblam recheck's approvals)", APPROVALS_USE)):
         written, removed = [t for t in targets if protected(t)], [t for t in removals if protected(t)]
         if written or removed:
             what = " and ".join(f"{verb} {', '.join(paths)}" for verb, paths in
@@ -498,42 +511,53 @@ def _gate_reason(cfg: Config, agent: str, commands: list[str]) -> str:
 
 
 def _stop(cfg: Config, event: str, data: dict) -> int:
+    from kblam.gitdir import tracked_state, tracked_state_problem
     from kblam.review import check_findings, open_items
     from kblam.rules import validate
     from kblam.treehash import read_tree_hash, tree_digest
     from kblam.view import load_view
 
-    recorded = read_tree_hash(cfg)
-    if recorded is None and not cfg.findings_path.exists():
+    # SPEC §8.3: while git tracks files under .kblam/, a pull may have written another machine's tree.hash and
+    # review items there, so none of it is trusted: the tree is checked as a new clone's, and the stop blocked.
+    tracked = tracked_state(cfg)
+    recorded = None if tracked else read_tree_hash(cfg)
+    if recorded is None and not cfg.findings_path.exists() and not tracked:
         return 0  # no knowledge base yet
     digest = tree_digest(load_view(cfg))
     if digest == recorded:
         return 0
     if recorded is not None:
         check_findings(cfg, None, command=f"hook {event}")
-    # else a new clone, or .kblam/ was deleted (SPEC §8 item 3): checking every finding with Jev could not
-    # finish within the hook's timeout, so only the deterministic rules run, which the committing machines'
-    # pre-commit hooks already ran. Nothing is recorded; kblam validate --record accepts the tree.
+    # else a new clone, or .kblam/ was deleted or is tracked (SPEC §8 item 3): checking every finding with Jev
+    # could not finish within the hook's timeout, so only the deterministic rules run, which the committing
+    # machines' pre-commit hooks already ran. Nothing is recorded; kblam validate --record accepts the tree.
     view = load_view(cfg)
-    lines = [issue.format(view) for issue in validate(view)] + [item.describe() for item in open_items(cfg, view)]
+    lines = [issue.format(view) for issue in validate(view)]
+    if not tracked:
+        lines += [item.describe() for item in open_items(cfg, view)]
     marker = cfg.state_dir / STOP_BLOCK_NAME
-    if not lines:
+    if not lines and not tracked:
         return 0
     last = marker.read_text(encoding="ascii").strip() if marker.is_file() else None
     if data.get("stop_hook_active") is True and last == tree_digest(view):
-        return _note(event, f"{cfg.findings_dir}/ still fails kblam validate ({len(lines)} failure(s)) and is "
-                            f"unchanged since the last block, so the stop is not blocked again")
+        what = ("git still tracks files under .kblam/" if tracked
+                else f"{cfg.findings_dir}/ still fails kblam validate ({len(lines)} failure(s))")
+        return _note(event, f"{what} and {cfg.findings_dir}/ is unchanged since the last block, so the stop is not "
+                            f"blocked again")
     from kblam.store import atomic_write
 
     atomic_write(marker, (tree_digest(view) + "\n").encode("ascii"))
     shown = lines[:MAX_BLOCK_LINES]
     if len(lines) > len(shown):
         shown.append(f"... and {len(lines) - len(shown)} more; run kblam validate for all of them")
+    fix = (f"Fix each failure through kblam (kblam edit <id>, change the staged copy, kblam put it); never write "
+           f"under {cfg.findings_dir}/ directly. Once the tree is clean, kblam validate --record accepts the change.")
+    if tracked:
+        return _block(f"kblam: {tracked_state_problem(tracked)}. Until then the knowledge base is checked as on a new "
+                      f"clone" + (", and it fails kblam validate:\n" + "\n".join(shown) + "\n" + fix if shown else "."))
     return _block(
         f"kblam: {cfg.findings_dir}/ was changed outside kblam put, and the knowledge base fails kblam "
-        f"validate:\n" + "\n".join(shown) + "\n"
-        f"Fix each failure through kblam (kblam edit <id>, change the staged copy, kblam put it); never write "
-        f"under {cfg.findings_dir}/ directly. Once the tree is clean, kblam validate --record accepts the change."
+        f"validate:\n" + "\n".join(shown) + "\n" + fix
     )
 
 

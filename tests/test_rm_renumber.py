@@ -43,6 +43,10 @@ def git(kb, *args: str) -> str:
 
 
 def commit_all(kb, message: str) -> str:
+    """Commit everything but .kblam/, which is ignored as kblam init sets it up (SPEC §7.1): kblam acts on no
+    state that git tracks (§8.3)."""
+    if not (kb.root / ".gitignore").exists():
+        kb.write(".gitignore", ".kblam/\n")
     git(kb, "add", "-A")
     git(kb, "commit", "-q", "-m", message)
     return git(kb, "rev-parse", "HEAD")

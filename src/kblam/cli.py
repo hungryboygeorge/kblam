@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections import Counter
 from pathlib import Path
 
-from kblam import approval
+from kblam import approval, recheck
 from kblam.approval import ApprovalError
 from kblam.check import parse_policy
 from kblam.config import CONFIG_NAME, ConfigError, load_config
 from kblam.finding import ID_RE
+from kblam.gitdir import tracked_state, tracked_state_problem
 from kblam.hook import SKILL_POINTER
 from kblam.hook import run as run_hook
 from kblam.jev import CallInfo, CostBucket, JevClient, JevUnavailable, cost_summary, jev_settings, smoke_sides
 from kblam.lock import LockError, kb_lock
+from kblam.recheck import RecheckError, shown
 from kblam.review import Recorded, ReviewError, audit, check_findings, check_pending, open_items, resolve
 from kblam.rules import Dependency, dependencies, validate
 from kblam.store import StoreError, ack, edit_finding, new_finding, put, regenerate_index
@@ -30,8 +33,8 @@ EXIT_REJECTED = 4
 EXIT_HELP = """\
 exit status:
   0  success
-  1  refused: validation errors, open review or unchecked items, or a request kblam will not carry
-     out; Jev unavailable
+  1  refused: validation errors, open review or unchecked items, a recheck that failed, could not run
+     or was not approved, or a request kblam will not carry out; Jev unavailable
   2  no usable kblam.toml, or bad command-line arguments
   3  timed out waiting for .kblam/lock (another kblam write is running); retry later
   4  put rejected by the Jev check or a quantity conflict (SPEC §6.4); findings/ is unchanged"""
@@ -406,14 +409,115 @@ def _cmd_cost(cfg, args) -> int:
 
 
 def _cmd_recheck(cfg, args) -> int:
-    """Run the findings' check: commands that a person approved on this machine (SPEC §7, §8.3)."""
-    from kblam.recheck import RecheckError, recheck
+    """Run the check: commands a person has approved on this machine (SPEC §7). At a terminal, ask about
+    each new or changed one first; without one, report those as not approved."""
+    recheck.check_state_paths(cfg)
+    checks, problems = recheck.collect(cfg, args.ids)
+    approvals = recheck.load_approvals(cfg)
+    states = {c.finding_id: recheck.approval_state(c, approvals) for c in checks}
+    if args.list:
+        return _list_rechecks(checks, states, problems)
+    terminal = recheck.at_terminal()
+    declined = set()
+    if terminal:  # a person is here: ask about every command that needs it before running any
+        for c in checks:
+            if c.problem is None and not states[c.finding_id].approved:
+                print(recheck.approval_prompt(cfg, c, states[c.finding_id]))
+                try:
+                    answer = input(f"Run it, and approve it for {c.finding_id} on this machine? [y/N] ")
+                except EOFError:
+                    answer = ""
+                if answer.strip().lower() in ("y", "yes"):
+                    recheck.record_approval(cfg, c)
+                    states[c.finding_id] = recheck.State(True)
+                else:
+                    declined.add(c.finding_id)
+                    states[c.finding_id] = recheck.State(False, "you did not approve it")
+    counts = Counter(_recheck_one(cfg, c, states[c.finding_id], terminal, c.finding_id in declined)
+                     for c in checks)
+    for problem in problems:
+        print(f"kblam recheck: {problem}")
+    if not checks and not problems:
+        print("kblam recheck: no finding has a check: command")
+        return EXIT_OK
+    parts = [f"{counts['passed']} passed"] + [f"{counts[k]} {k}" for k in ("failed", "could not run", "not approved")
+                                              if counts[k]]
+    if problems:
+        parts.append(f"{len(problems)} finding(s) not considered")
+    bad = len(checks) - counts["passed"] + len(problems)
+    print(f"kblam recheck: {len(checks)} check(s): {', '.join(parts)}" + (f". {SKILL_POINTER}" if bad else ""))
+    return EXIT_INVALID if bad else EXIT_OK
 
-    try:
-        return recheck(cfg, args.ids)
-    except RecheckError as exc:
-        print(f"kblam recheck: {exc}", file=sys.stderr)
-        return EXIT_INVALID
+
+def _recheck_one(cfg, c: recheck.Check, state: recheck.State, terminal: bool, declined: bool) -> str:
+    """Run or report one check; the summary's category for it."""
+    if c.problem:
+        print(f"kblam recheck: {c.finding_id} could not run: {c.problem}")
+        recheck.log(cfg, c, "not_started", terminal=terminal)
+        return "could not run"
+    if state.approved:
+        now = recheck.named_files(cfg.repo_root, c.argv)
+        if now != c.files:  # changed while this run asked, or ran an earlier check
+            state = recheck.State(False, f"{recheck.changed_files(c.files, now)} changed since approval")
+    if not state.approved:
+        print(f"kblam recheck: {c.finding_id} not run: not approved on this machine ({state.reason}): "
+              f"{shown(c.command)}")
+        if not terminal:
+            print(f"  A person approves it by running kblam recheck {c.finding_id} at a terminal, which shows the "
+                  f"command first; an agent asks the user to do that. Anyone who can push to this repository "
+                  f"can put a command in a finding, so an agent never runs an unapproved one itself.")
+        elif not declined:
+            print(f"  Run kblam recheck {c.finding_id} again to see it and decide.")
+        recheck.log(cfg, c, "declined" if declined else "not_approved", terminal=terminal)
+        return "not approved"
+    print(f"kblam recheck: {c.finding_id} running: {shown(c.command)}", flush=True)
+    result = recheck.run_check(cfg, c)
+    recheck.log(cfg, c, result.status, terminal=terminal, result=result)
+    if result.status == "passed":
+        print(f"kblam recheck: {c.finding_id} passed ({result.detail} after {result.seconds:.1f} s)")
+        return "passed"
+    if result.status == "not_started":
+        print(f"kblam recheck: {c.finding_id} could not run: {result.detail}")
+        return "could not run"
+    output = recheck.output_path(cfg, c.finding_id).relative_to(cfg.repo_root).as_posix()
+    what = result.detail if result.status == "timed_out" else f"{result.detail} after {result.seconds:.1f} s"
+    print(f"kblam recheck: {c.finding_id} FAILED ({what}); its output is in {output}"
+          + (", ending:" if result.tail else ", and is empty"))
+    for line in result.tail:
+        print(f"  | {line}")
+    if result.status == "timed_out":
+        print(f"  {c.finding_id}'s check did not finish. If it needs longer, ask the user to raise [kb] "
+              f"recheck_timeout_seconds in kblam.toml; otherwise find out why it hangs, and kblam edit "
+              f"{c.finding_id} to fix its check:.")
+    else:
+        print(f"  {c.finding_id}'s key number did not reproduce, or its command broke. Read the output, then "
+              f"kblam edit {c.finding_id} so the finding states what its evidence shows now, or so its check: "
+              f"runs what reproduces it.")
+    return "failed"
+
+
+def _list_rechecks(checks: list[recheck.Check], states: dict[str, recheck.State], problems: list[str]) -> int:
+    """`kblam recheck --list`: each check: command and its approval state on this machine; nothing runs."""
+    approved = broken = 0
+    for c in checks:
+        state = states[c.finding_id]
+        if c.problem:
+            broken += 1
+            label = "cannot run"
+        elif state.approved:
+            approved += 1
+            label = "approved"
+        else:
+            label = f"not approved ({state.reason})"
+        print(f"kblam recheck: {c.finding_id} {label}: {shown(c.command)}")
+        if c.problem:
+            print(f"  {c.problem}")
+    for problem in problems:
+        print(f"kblam recheck: {problem}")
+    print(f"kblam recheck --list: {len(checks)} check(s): {approved} approved, "
+          f"{len(checks) - approved - broken} not approved on this machine"
+          + (f", {broken} cannot run" if broken else "") + "; nothing was run")
+    return EXIT_OK
 
 
 def _cmd_prompt_id(cfg, args) -> int:
@@ -534,9 +638,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=_cmd_items)
     p = sub.add_parser("cost", help="summarise .kblam/calls.jsonl: Jev requests, tokens and cost, per day and kind")
     p.set_defaults(func=_cmd_cost)
-    p = sub.add_parser("recheck", help="run the check: commands of the given findings, or of every finding that has "
-                                       "one; a command runs only once a person approved it at a terminal")
+    p = sub.add_parser("recheck", help="run the check: commands of the given findings, or of every finding; a "
+                                       "new or changed command runs only once a person approves it at a "
+                                       "terminal")
     p.add_argument("ids", nargs="*", metavar="F-NNNN")
+    p.add_argument("--list", action="store_true",
+                   help="print each check: command and whether it is approved on this machine; run nothing")
     p.set_defaults(func=_cmd_recheck)
     p = sub.add_parser("prompt-id", help="print the id of this project's Jev prompt (its [jev.prompt] tables): "
                                          "the value [jev.thresholds] records and calibration is tied to")
@@ -572,8 +679,12 @@ def main(argv: list[str] | None = None) -> int:
         return run_init(args.update)
     try:
         cfg = load_config(root=args.root)
+        tracked = tracked_state(cfg)
+        if tracked:  # SPEC §8.3: a pull may have written someone else's state there
+            print(f"kblam {args.command}: {tracked_state_problem(tracked)}. {SKILL_POINTER}", file=sys.stderr)
+            return EXIT_INVALID
         return args.func(cfg, args)
-    except (ConfigError, StoreError, LockError, JevUnavailable, ReviewError, ApprovalError) as exc:
+    except (ConfigError, StoreError, LockError, JevUnavailable, ReviewError, ApprovalError, RecheckError) as exc:
         pointer = f" {SKILL_POINTER}" if args.command == "put" and not isinstance(exc, ConfigError) else ""
         print(f"kblam {args.command}: {exc}{pointer}", file=sys.stderr)
         if isinstance(exc, LockError):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import tomllib
 from dataclasses import dataclass, field
@@ -51,6 +52,8 @@ DEFAULT_KB = {
     # splits), and the wildcard overlaps every scope ("" means none does).
     "scope_separator": "/",
     "scope_wildcard": "any",
+    # kblam recheck (§7): how long one check: command may run before it and everything it started are killed.
+    "recheck_timeout_seconds": 600.0,
 }
 
 # M6.10 keys whose absence means something other than any value (SPEC §9): None when absent.
@@ -89,6 +92,7 @@ class Config:
     verbatim_blockquotes: bool = False
     scope_separator: str = "/"
     scope_wildcard: str = "any"
+    recheck_timeout_seconds: float = 600.0
     adjudicators: tuple[str, ...] | None = None
     history_id_terms: tuple[str, ...] | None = None
 
@@ -176,6 +180,8 @@ def load_config(root: Path | None = None, cwd: Path | None = None) -> Config:
         raise ConfigError(f"{CONFIG_NAME}: [kb] duplicate_similarity must be in (0, 1]")
     if kb["lock_wait_seconds"] < 0 or kb["lock_stale_seconds"] <= 0:
         raise ConfigError(f"{CONFIG_NAME}: [kb] lock_wait_seconds must be >= 0 and lock_stale_seconds > 0")
+    if not (math.isfinite(kb["recheck_timeout_seconds"]) and kb["recheck_timeout_seconds"] > 0):
+        raise ConfigError(f"{CONFIG_NAME}: [kb] recheck_timeout_seconds must be > 0 (a number of seconds)")
 
     return Config(
         repo_root=repo_root,
@@ -197,6 +203,7 @@ def load_config(root: Path | None = None, cwd: Path | None = None) -> Config:
         verbatim_blockquotes=kb["verbatim_blockquotes"],
         scope_separator=kb["scope_separator"],
         scope_wildcard=kb["scope_wildcard"],
+        recheck_timeout_seconds=float(kb["recheck_timeout_seconds"]),
         adjudicators=tuple(kb_raw["adjudicators"]) if "adjudicators" in kb_raw else None,
         history_id_terms=(tuple(t.lower() for t in kb_raw["history_id_terms"])
                           if "history_id_terms" in kb_raw else None),
