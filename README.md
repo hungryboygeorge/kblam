@@ -27,7 +27,7 @@ kblam is released under the VibeCoded AI-Slop License v1.0.
 
 ### potential future changes
 
-the base design shouldn't change much. i haven't implemented `kblam recheck` (runs findings' check commands; is this a security risk? i dunno) or `kblam migrate` (helps split an existing document into findings) yet. `[kb] evidence_roots` in config is read but not enforced yet. i might add an MCP server for the librarian, semantic search using the embeddings/BM25, and some other stuff. i might add the ability to get embeddings from openrouter. who knows
+the base design shouldn't change much. i haven't implemented `kblam recheck` (runs findings' check commands; is this a security risk? i dunno) or `kblam migrate` (helps split an existing document into findings) yet. `[kb] evidence_roots` in config is read but not enforced yet. i might add an MCP server for the librarian, semantic search using the embeddings/BM25, and some other stuff. i might add the ability to get embeddings from openrouter. i might package it and put it on pypi. who knows
 
 # big disclaimer
 i can't code; my brain isn't built right for syntax, but i understand the systems at work. kblam was entirely implemented by LLMs, which means that *nobody fully understands it.* LLM-written software is inherently disposable. it may have problems, major security vulnerabilities, it may not be appropriate for the range of things i thought it was, it may not work on your machine, it may fuck things up. i mean it when i say there's no warranty. you wanna be sure? have your own agent check it and blame it if the software fucks up, or look at the software yourself. i bet it's full of spaghetti.
