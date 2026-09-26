@@ -1,6 +1,6 @@
 <div align="center"><h1>kblam</h1>
 <h2>the knowledge base for LLM-assisted mereology</h2>
-<h5>(mereology: the study of part-hole relationships and examination of how components interact in a system)</h5>
+<h5>(mereology: the study of part-whole relationships and examination of how components interact in a system)</h5>
 <h5>Yes I Came Up With The Backronym Myself</h5></div>
 
 ## what this is
