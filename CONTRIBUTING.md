@@ -49,19 +49,27 @@ outside this one.
 | `config.py` | Loading `[kb]` from `kblam.toml` and finding the repository root, a resolved path. |
 | `finding.py` | Parsing one finding (frontmatter, claim paragraph) and its fingerprint. |
 | `view.py` | `KBView`, an in-memory snapshot of `findings/` as it is or as it would be after a put. |
-| `rules.py` | The validator rules K1 to K11 and `validate()`. |
+| `rules.py` | The validator rules K1 to K12 and `validate()`. |
 | `index.py`, `treehash.py` | `INDEX.md` generation, and the tree digest with the tree.hash rule. |
-| `store.py` | `new`, `edit`, `put`, `ack` and `index`, the edit-base guard, and `atomic_write`. |
+| `store.py` | `new`, `edit`, `put`, `ack`, `index`, `rm` and `renumber`, the edit-base guard, and `atomic_write`. |
+| `items.py` | `kblam items`, with `--reworded` and `--stats`. |
 | `lock.py` | `.kblam/lock`, including breaking a stale lock. |
 | `check.py` | Candidate selection, BM25, the quantity comparison, the decision policy and `checks.jsonl`. |
 | `embed.py` | The ollama calls, the vector cache and the cosine scores. |
 | `jev.py` | The Jev client (retries, throttling, key loading), `pairs.sqlite`, `calls.jsonl`, and `kblam cost`. |
 | `jev_prompts.py` | The Jev question shapes, validation of `[jev.prompt]`, and `prompt_id`. |
 | `review.py` | `review.jsonl` items, and `check`, `check --pending`, `audit` and `resolve`. |
+| `resolutions.py` | The committed `kblam.resolutions.jsonl`: reading, checking and appending resolutions. |
+| `recheck.py` | `kblam recheck`: running the approved `check:` commands. |
 | `hook.py` | The Claude Code hooks: the PreToolUse deny, and the Stop and SubagentStop validation. |
 | `init.py` | `kblam init [--update]`. |
 | `approval.py` | A person's approval of `kblam.toml` before a commit changes it (`validate --commit`, `approve-config`). |
+| `commit_checks.py` | The rest of `validate --commit`: the committed tree, open items, immutable evidence, the resolutions file. |
+| `gitdir.py` | The git directory (where `recheck` keeps approvals) and the files git tracks under `.kblam/`. |
 | `assets/` | The files `init` installs: the rule, the skill, the hook entries, the pre-commit hook and the `kblam.toml` template. |
+
+`agents/librarian.md`, at the top of the repository, is a general definition of the adjudicating librarian
+(SPEC.md §8.1) for projects to copy into their `.claude/agents/`; `kblam init` does not install it.
 
 Each test module's docstring says what it covers. `tests/test_rules.py` has a passing case and at
 least one failing case for every rule except K3, whose cases are in `tests/test_deps.py`.
@@ -141,5 +149,5 @@ projects pick up asset changes with `kblam init --update`.
 
 ## Not implemented yet
 
-`kblam recheck` and `kblam migrate` (SPEC.md §7) and the MCP server (§12, M7) do not exist yet.
-`[kb] evidence_roots` is parsed in `config.py`, but no rule reads it.
+Fingerprint v2 and `kblam upgrade` (SPEC.md §5.1, §7), `kblam calibrate` and `kblam migrate` (§7),
+and the MCP server (§12, M7) do not exist yet.

@@ -1165,14 +1165,19 @@ through `kblam put` themselves. As a **writer** (M7, deferred) it is also the on
 them into findings through `kblam`. Without a librarian, research agents run `kblam new`/`edit`/`put`
 themselves via Bash, and the coordinator owns what the librarian would otherwise own: running
 `kblam validate` at the end of each work package and clearing suspect dependencies (K3) and Jev
-review items. The role is kblam's; the agent definition, its model and its tools belong to the
-deployment (Appendix C describes the pilot's).
+review items. The role is kblam's. kblam's repository carries a general definition of the adjudicating
+librarian, `agents/librarian.md` (user, 2026-09-26), for a deployment to copy into its
+`.claude/agents/` and adapt; its model, and any research workers it spawns, are the deployment's
+(Appendix C describes the pilot's).
 
 #### Adjudicating librarian (deployable now; user, 2026-09-23)
 
 Until the MCP server exists, a deployment can run a librarian whose role is adjudication. Research
-agents still write through `kblam put` themselves. The agent definition belongs to the deployment
-and is not shipped by kblam. The deployment also picks the model.
+agents still write through `kblam put` themselves. The general definition, `agents/librarian.md`,
+names no model, so the deployment picks one (a `model:` line; without one the librarian runs on the
+session's model). The coordinator, the read-only research worker type it may spawn and any ranking of
+sources come from the project's CLAUDE.md. When the project sets `[kb] adjudicators` (§9), the
+librarian's agent type is listed there.
 
 - **It owns review items, rejected items and suspect dependencies.** An author whose put raised a
   review item, was refused with a rejected item (§6.4), or made dependents suspect sends the
@@ -1183,8 +1188,7 @@ and is not shipped by kblam. The deployment also picks the model.
   - **Merge.** A real `same_fact` or `restates_and_extends` restatement is merged: it
     `kblam edit`s the existing finding to carry the new detail and drops the new finding's copy
     of the fact. A finding the merge leaves with nothing of its own to state is removed with
-    `kblam rm <id> --merged-into <existing>` (§7; not yet built). Until then it is removed with
-    `rm`, followed by `kblam index` and, once the tree is clean, `kblam validate --record` (§8).
+    `kblam rm <id> --merged-into <existing>` (§7).
   - **Close.** It runs `kblam resolve --distinct` only when Jev misread the item: a pair of
     distinct facts, or a direct statement read as a correction. It writes the reason for a later
     reader.
@@ -1201,13 +1205,13 @@ and is not shipped by kblam. The deployment also picks the model.
   verdict raised by its own write (`same_fact`, `restates_and_extends`, `cannot_both_be_true`,
   `revision`) goes to the coordinator.
 - Its tools and any research workers it uses are the deployment's (Appendix C). Its boundary is kept
-  by instruction and by the §8 hooks, not by construction; the adjudicator gate (§8 item 2; not yet
-  built) makes `resolve` and `rm` its own. K1–K12 and Jev gate its writes as they gate anyone's.
+  by instruction and by the §8 hooks, not by construction; the adjudicator gate (§8 item 2) makes
+  `resolve` and `rm` its own. K1–K12 and Jev gate its writes as they gate anyone's.
 
 What no gate can supply without a librarian is an owner for the old finding: an agent
 mid-experiment whose put is rejected as a duplicate must rewrite the existing finding, and may
 instead reword to slip past K9; the Jev check (§6) is the defence there, and `kblam items --reworded`
-(§7; not yet built) shows the adjudicator where it happened.
+(§7) shows the adjudicator where it happened.
 
 #### Writing librarian (M7, deferred)
 
@@ -1967,7 +1971,8 @@ What the pilot project decided or observed for its own deployment. kblam does no
   It may spawn the deployment's read-only research workers to check cited evidence and look up
   sources (the deployment defines this worker type and where it looks sources up). A worker writes
   its report to a file whose path the librarian gives it, because an in-process teammate receives
-  no subagent report.
+  no subagent report. `agents/librarian.md` is this deployment's definition with the project's
+  names, model and paths taken out (user, 2026-09-26).
 - **Machines.** The pilot's machines set `CLAUDE_CODE_USE_POWERSHELL_TOOL=1` (§8 item 2). On the
   Windows machine this design was developed on, hook commands run in Git Bash (desk-hooks H9, H13,
   H14), and `typesafe-sdk` 0.7.1 was observed on 2026-09-22 reaching OpenRouter's
