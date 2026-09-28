@@ -194,8 +194,9 @@ Commit the re-stamped findings and `kblam.resolutions.jsonl`; every other machin
 `kblam upgrade` once for its own `.kblam/`. Until a machine has, `validate`, `put`, `check`,
 `audit`, `resolve`, `items` and `rm` refuse there, since they would read its old state as changes.
 A stamp it leaves in the old format means its target changed since it was recorded: re-read the
-target, then `kblam ack` it. If `kblam.toml` records the old combined `prompt_id`, `upgrade` prints
-the two per-question ids to record in its place; it never edits `kblam.toml` itself.
+target, then `kblam ack` it. If `kblam.toml` records the old combined `prompt_id` and it is still the
+id of the question wording, `upgrade` prints the two per-question ids to record in its place; it
+never edits `kblam.toml` itself.
 
 ### Configuration
 

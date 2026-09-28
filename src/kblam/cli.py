@@ -376,12 +376,19 @@ def _cmd_upgrade(cfg, args) -> int:
                    f"\"{relation}\" and revision_prompt_id = \"{revision}\" (kblam prompt-id prints them). "
                    f"{CONFIG_NAME} is a person's to edit; after editing it, run kblam approve-config before "
                    f"committing")
+    if result.prompt_id_differs:
+        recorded, current = result.prompt_id_differs
+        out.append(f"kblam upgrade: [jev.thresholds] in {CONFIG_NAME} records prompt_id {recorded}, but the id of the "
+                   f"current wording in [jev.prompt] is {current}: the thresholds were calibrated on other wording, so "
+                   f"no Jev verdict rejects until they are recalibrated (SPEC §6.4, §10). Leave prompt_id as it is "
+                   f"until then: recording the current per-question ids would apply the thresholds to wording nobody "
+                   f"calibrated")
     if result.restamped or result.resolutions_moved:
         committed = (["the re-stamped findings"] if result.restamped else []) + (
             [cfg.resolutions_path.name] if result.resolutions_moved else [])
         out.append(f"kblam upgrade: commit {' and '.join(committed)}, so every clone has them; each other machine "
                    f"runs kblam upgrade once for its own .kblam/")
-    if not result.changed and not result.prompt_ids and not result.stale:
+    if not result.changed and not result.prompt_ids and not result.prompt_id_differs and not result.stale:
         out.append("kblam upgrade: nothing to upgrade; the knowledge base and this machine's state are already in "
                    "the M6.10 formats")
     for line in out:

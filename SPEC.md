@@ -809,9 +809,11 @@ nothing to do and says so.
   its sides' state hashes (unless the file has it already), and the lapsed ones are dropped. Cached
   answers under the current wording whose sides are current findings move to their question's own
   prompt id and the sides' state hashes (§6.5), and the rest are dropped.
-- *The prompt ids.* While `[jev.thresholds]` records the combined `prompt_id`, `upgrade` prints the
-  per-question ids for a person to record in its place (§6.2) and then approve (`approve-config`);
-  it never edits `kblam.toml`.
+- *The prompt ids.* While `[jev.thresholds]` records the combined `prompt_id` of the current
+  wording, `upgrade` prints the per-question ids for a person to record in its place (§6.2) and then
+  approve (`approve-config`); it never edits `kblam.toml`. When the recorded `prompt_id` is another
+  wording's, the thresholds were calibrated on other wording, and `upgrade` says so and prints no
+  ids: recording the current ones would apply the thresholds to wording nobody calibrated (§6.4).
 - *Until it runs.* While `.kblam/` holds open items or checked marks on v1 fingerprints, or
   resolutions in `pairs.sqlite`, the commands that would read that state as changes refuse (exit
   1), naming `kblam upgrade`: `validate` (and so the pre-commit hook), `put`, `check`, `audit`,
@@ -1563,8 +1565,8 @@ introduces (fingerprint v2, committed resolutions, state-hash cache keys) are ad
 `kblam upgrade`, once per KB, whose re-stamped findings are committed, and once on each machine
 (§7). Until a machine has run it, the commands that would read its older state as changes refuse,
 naming it. A `[jev.thresholds]` that still records `prompt_id` is accepted while it equals the
-current combined id (§6.2), and `upgrade` prints the per-question ids for a person to record in its
-place.
+current combined id (§6.2), and while it does, `upgrade` prints the per-question ids for a person to
+record in its place.
 
 ## 10. Calibration experiment (must run before reject mode is enabled for a model and wording)
 

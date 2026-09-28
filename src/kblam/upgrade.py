@@ -67,7 +67,8 @@ class UpgradeResult:
     resolutions_lapsed: int = 0        # a side changed since, so it no longer applied
     answers_moved: int = 0
     answers_dropped: int = 0
-    prompt_ids: tuple[str, str] | None = None  # (relation, revision) while [jev.thresholds] records prompt_id
+    prompt_ids: tuple[str, str] | None = None  # (relation, revision): to record in place of the combined prompt_id
+    prompt_id_differs: tuple[str, str] | None = None  # (recorded, current): prompt_id is another wording's id
 
     @property
     def changed(self) -> bool:
@@ -192,10 +193,15 @@ def _upgrade(cfg: Config, settings: JevSettings) -> UpgradeResult:
             if "answers" in tables:
                 _rekey_answers(conn, settings, readable, separator, result)
 
-    # 7. the prompt ids, for a person to record
+    # 7. the prompt ids, for a person to record, while the combined prompt_id vouches for this wording: one that
+    # does not means the thresholds were calibrated on other wording, and recording the current ids would apply
+    # them to wording nobody calibrated (SPEC §6.4)
     thresholds = cfg.jev.get("thresholds") if isinstance(cfg.jev, dict) else None
     if isinstance(thresholds, dict) and "prompt_id" in thresholds:
-        result.prompt_ids = (settings.relation_prompt_id, settings.revision_prompt_id)
+        if thresholds["prompt_id"] == settings.prompt_id:
+            result.prompt_ids = (settings.relation_prompt_id, settings.revision_prompt_id)
+        else:
+            result.prompt_id_differs = (str(thresholds["prompt_id"]), settings.prompt_id)
     return result
 
 

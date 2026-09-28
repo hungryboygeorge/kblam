@@ -22,8 +22,8 @@ from kblam.store import edit_finding, put
 from kblam.treehash import read_tree_hash, tree_digest
 from kblam.view import load_view
 
-from conftest import KBLAM_TOML, NO_EMBEDDINGS, PROMPT_TOML, finding_text
-from test_check import E1, E2, N, jkb, run  # noqa: F401 (jkb is a fixture)
+from conftest import DEFAULT_PROMPT_ID, KBLAM_TOML, NO_EMBEDDINGS, PROMPT_TOML, finding_text
+from test_check import E1, E2, N, THRESHOLDS, jkb, run, set_config  # noqa: F401 (jkb is a fixture)
 from test_hook import call, stop
 
 CLAIM_A = "The sensor's two curve types agree to about 0.1%, so they are not two analog gains."
@@ -268,6 +268,18 @@ def test_upgrade_never_edits_kblam_toml_and_says_so_when_nothing_is_old(jkb, cap
     out = capsys.readouterr().out
     assert "records prompt_id, the id of the whole prompt" in out and "run kblam approve-config" in out
     assert (jkb.root / "kblam.toml").read_bytes() == before
+
+
+def test_upgrade_gives_no_ids_to_record_when_prompt_id_is_another_wordings(jkb, capsys):
+    """Recording the current per-question ids would vouch for wording the thresholds were never calibrated on
+    (SPEC §6.4), so upgrade says why prompt_id stays instead."""
+    set_config(jkb, THRESHOLDS.replace(DEFAULT_PROMPT_ID, "0123456789ab"))
+    capsys.readouterr()
+    assert run(jkb, "upgrade") == 0
+    out = capsys.readouterr().out
+    assert (f"records prompt_id 0123456789ab, but the id of the current wording in [jev.prompt] is {DEFAULT_PROMPT_ID}: "
+            f"the thresholds were calibrated on other wording") in out
+    assert "relation_prompt_id" not in out and "nothing to upgrade" not in out
 
 
 def test_with_nothing_old_upgrade_says_so(kb, capsys):
