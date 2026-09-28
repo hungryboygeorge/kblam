@@ -100,6 +100,14 @@ def _short_hash(parts: list) -> str:
     return hashlib.sha256(json.dumps(parts).encode("utf-8")).hexdigest()[:8]
 
 
+def item_id_of(item: ReviewItem) -> str:
+    """The ID a check gives an item on these sides at these fingerprints (`_item_id`, `unchecked_item`).
+    kblam upgrade gives a re-keyed item this ID, so a later check raising it finds it (SPEC §6.4, §7)."""
+    if item.kind == "unchecked":
+        return "U-" + _short_hash([item.new_id, item.new_fp])
+    return "R-" + _short_hash([item.verdict, item.existing_id, item.existing_fp, item.new_id, item.new_fp])
+
+
 def _item_id(v: Verdict) -> str:
     """§6.4: the verdict and both (ID, fingerprint) sides, so raising the same item again does not
     duplicate it. A rejected item hashes the same parts as the review item for that pair."""
@@ -169,7 +177,8 @@ def current_fingerprints(view: KBView) -> dict[str, str]:
     counts: dict[str, int] = {}
     for f in view.findings:
         counts[f.file_id] = counts.get(f.file_id, 0) + 1
-    return {f.file_id: fingerprint(f) for f in view.findings if f.ok and counts[f.file_id] == 1}
+    separator = view.cfg.scope_separator
+    return {f.file_id: fingerprint(f, separator) for f in view.findings if f.ok and counts[f.file_id] == 1}
 
 
 def reconcile(items: list[ReviewItem], fps: dict[str, str]) -> None:
@@ -321,7 +330,8 @@ def check_findings(cfg: Config, ids: list[str] | None, *, command: str = "check"
         targets = [by_id[i] for i in dict.fromkeys(ids)]
     with Checker(cfg, client_factory) as checker:
         if not ids:
-            targets = [f for f in by_id.values() if not checker.cache.was_checked(f.file_id, fingerprint(f))]
+            targets = [f for f in by_id.values()
+                       if not checker.cache.was_checked(f.file_id, fingerprint(f, cfg.scope_separator))]
         results = [checker.check(view, f, command) for f in targets]  # Jev is asked outside the lock
     with kb_lock(cfg, command):
         return record(cfg, load_view(cfg), results, reject_as_review=True)
@@ -355,7 +365,7 @@ def _state_in_tree(item: ReviewItem, findings: dict[str, Finding], fps: dict[str
     `finding_id` in the tree, when it is there at the item's fingerprint. The fingerprint covers the
     claim and the scope, so that is the state Jev was asked about."""
     if fps.get(finding_id) == fp:
-        return Side.of(findings[finding_id]).state_hash
+        return Side.of(findings[finding_id], "").state_hash  # the state hash reads no fingerprint
     raise ReviewError(
         f"{item.id} was recorded by an older kblam, without the state hash a resolution records for "
         f"{finding_id}, and {finding_id} is not in the knowledge base at the fingerprint the item was raised at "

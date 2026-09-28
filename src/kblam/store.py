@@ -25,6 +25,7 @@ from kblam.finding import (
     ID_RE,
     Finding,
     fingerprint,
+    fingerprint_as,
     format_id,
     id_number,
     parse_finding,
@@ -387,8 +388,10 @@ def rekey_dependency(finding: Finding, old_id: str, new_id: str, value: str, sho
     return data
 
 
-def _stamp_nulls(staged: Finding, others: list[Finding], shown: str) -> tuple[Finding, list[tuple[str, str]]]:
-    """Stamp each null depends_on value whose target is a readable finding among `others`."""
+def _stamp_nulls(staged: Finding, others: list[Finding], shown: str,
+                 separator: str) -> tuple[Finding, list[tuple[str, str]]]:
+    """Stamp each null depends_on value whose target is a readable finding among `others`, with the
+    target's fingerprint under the KB's scope `separator` (SPEC §5.1)."""
     by_id: dict[str, list[Finding]] = {}
     for f in others:
         by_id.setdefault(f.file_id, []).append(f)
@@ -399,7 +402,7 @@ def _stamp_nulls(staged: Finding, others: list[Finding], shown: str) -> tuple[Fi
         targets = by_id.get(key, [])
         if len(targets) != 1 or not targets[0].ok:
             continue  # K1/K2 report it
-        value = fingerprint(targets[0])
+        value = fingerprint(targets[0], separator)
         staged = parse_finding(staged.path, stamp_dependency(staged, key, value, shown))
         stamped.append((key, value))
     return staged, stamped
@@ -468,7 +471,8 @@ def _prepare(cfg: Config, source: Path) -> tuple[PutResult, KBView]:
     if replaced:
         _check_edit_base(cfg, finding_id, current, replaced, display_path(cfg, source))
     others = [f for f in current.findings if f.file_id != finding_id]
-    staged, stamped = _stamp_nulls(parse_finding(target, raw), others, display_path(cfg, source))
+    staged, stamped = _stamp_nulls(parse_finding(target, raw), others, display_path(cfg, source),
+                                   cfg.scope_separator)
     files = {p: b for p, b in current.files.items() if p not in replaced}
     files[target] = staged.raw
     view = KBView(cfg=cfg, files=files, display={target: display_path(cfg, source)})
@@ -516,9 +520,11 @@ def _put(cfg: Config, source: Path, checker: Checker) -> PutResult:
         return result
 
     previous = next((f for f in current.findings if f.file_id == finding_id and f.ok), None)
-    if previous is None or fingerprint(previous) != fingerprint(written):
+    separator = cfg.scope_separator
+    if previous is None or fingerprint(previous, separator) != fingerprint(written, separator):
+        # an old-format stamp (SPEC §5.1) needs the same re-reading as a suspect one
         result.suspect = [d.dependent for d in dependencies(view)
-                          if d.target == finding_id and d.state == "suspect"]
+                          if d.target == finding_id and d.state in ("suspect", "old")]
 
     clean = as_kblam_left_it(cfg, tree_digest(current))
     root = cfg.repo_root
@@ -536,7 +542,7 @@ def _put(cfg: Config, source: Path, checker: Checker) -> PutResult:
     if source.is_relative_to(cfg.staging_dir.resolve()):
         source.unlink()
     recorded, = review.record(cfg, view, [result.check], reject_as_review=False)
-    review.close_rejected(cfg, finding_id, fingerprint(written))
+    review.close_rejected(cfg, finding_id, fingerprint(written, separator))
     result.review, result.unchecked = recorded.opened, recorded.unchecked
     return result
 
@@ -629,7 +635,8 @@ def recorded_version(cfg: Config, target: Finding, recorded: str) -> tuple[str, 
         if raw is None:
             continue  # the path was removed in that commit
         then = parse_finding(path.decode("utf-8", "replace"), raw)
-        if then.ok and then.file_id == target.file_id and fingerprint(then) == recorded:
+        if (then.ok and then.file_id == target.file_id
+                and fingerprint_as(recorded, then, cfg.scope_separator) == recorded):
             return short, then.claim
     return None
 
@@ -830,12 +837,10 @@ def _renumber(cfg: Config, source: Path) -> RenumberResult:
         raise StoreError(f"{finding.path} cannot be read as a finding (" + (f"line {line}: " if line else "")
                          + f"{message}), so kblam cannot rewrite its id; renumber {kept[0].path} instead, or ask a "
                          f"person to fix this file")
-    old_fp = fingerprint(finding)
-    kept_fps = {fingerprint(f) for f in kept}
     new_id = allocate_id(cfg)
     new_path = f"{PurePosixPath(finding.path).parent.as_posix()}/{new_id}-{finding.slug}.md"
     data = _set_id(finding, new_id, finding.path)
-    new_fp = fingerprint(parse_finding(new_path, data))
+    new_fp = fingerprint(parse_finding(new_path, data), cfg.scope_separator)
 
     rewrites: list[tuple[Finding, bytes]] = []
     mentions: list[tuple[str, int, str]] = []
@@ -846,10 +851,14 @@ def _renumber(cfg: Config, source: Path) -> RenumberResult:
         if isinstance(depends, dict) and old_id in depends:
             recorded = depends[old_id]
             line = depends.lc.key(old_id)[0] + 2
-            if recorded == old_fp and old_fp not in kept_fps and f is not finding:
+            # A stamp from before fingerprint v2 is compared in its own format (fingerprint_as).
+            stamp = isinstance(recorded, str)
+            means_this = stamp and recorded == fingerprint_as(recorded, finding, cfg.scope_separator)
+            means_kept = stamp and recorded in {fingerprint_as(recorded, k, cfg.scope_separator) for k in kept}
+            if means_this and not means_kept and f is not finding:
                 rewrites.append((f, rekey_dependency(f, old_id, new_id, new_fp, f.path)))
-            elif not (isinstance(recorded, str) and recorded in kept_fps and recorded != old_fp):
-                why = ("matches neither file" if recorded != old_fp
+            elif not (means_kept and not means_this):
+                why = ("matches neither file" if not means_this
                        else "is this finding's own fingerprint" if f is finding
                        else "is the fingerprint of both files")
                 shown_value = "null" if recorded is None else recorded

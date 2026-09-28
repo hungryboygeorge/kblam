@@ -45,7 +45,7 @@ def put(kb, capsys, finding_id: str, slug: str, claim: str, **kw) -> None:
 def open_unchecked_item(kb, finding_id: str) -> ReviewItem:
     """An open unchecked item on the finding at its current fingerprint, as a Jev outage leaves one."""
     finding = next(f for f in load_view(kb.cfg).findings if f.file_id == finding_id)
-    item = ReviewItem("U-0000abcd", "unchecked", "open", finding_id, fingerprint(finding),
+    item = ReviewItem("U-0000abcd", "unchecked", "open", finding_id, fingerprint(finding, "/"),
                       message="Jev could not answer 1 question(s) for this finding (test)", created="2026-09-26")
     save_items(kb.cfg, [item])
     return item

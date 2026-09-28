@@ -23,6 +23,7 @@ from kblam.finding import (
     Finding,
     fingerprint,
     id_number,
+    is_v1_fingerprint,
     normalise_newlines,
 )
 from kblam.index import generate_index
@@ -216,7 +217,7 @@ def _k1_fields(view: KBView, f: Finding) -> list[Issue]:
         value = meta["depends_on"]
         if not isinstance(value, dict):
             add(f.key_line("depends_on"), "depends_on must be a mapping of finding ID to fingerprint, "
-                                          "e.g. {F-0102: 3fa9c1d2}")
+                                          "e.g. {F-0102: 3fa9c1d2e4b7}")
         else:
             for key, fp in value.items():
                 line = _mapping_key_line(f, value, key, "depends_on")
@@ -225,6 +226,12 @@ def _k1_fields(view: KBView, f: Finding) -> list[Issue]:
                 if fp is not None and not isinstance(fp, str):
                     add(line, f"depends_on fingerprint for {key} parsed as {type(fp).__name__}; quote it: "
                               f"{key}: \"{fp}\"")
+                elif is_v1_fingerprint(fp):
+                    add(line, f"depends_on {key}: {fp} is an old-format fingerprint (8 digits, from before "
+                              f"fingerprint v2, SPEC §5.1); run kblam upgrade, which re-stamps each one that is "
+                              f"still current. One that stays old means {key} changed since it was recorded: "
+                              f"re-read {key}, then kblam ack {f.file_id} {key} (in a staged file, set it to "
+                              f"null and put it)")
 
     if "anchors" in meta:
         value = meta["anchors"]
@@ -336,7 +343,7 @@ class Dependency:
     target: str
     recorded: object        # the value as written: a fingerprint, None, or a K1 error
     current: str | None     # the target's fingerprint; None when it cannot be computed
-    state: str              # current | suspect | unstamped | missing | invalid
+    state: str              # current | suspect | unstamped | old | missing | invalid
 
 
 def dependencies(view: KBView) -> list[Dependency]:
@@ -353,7 +360,8 @@ def dependencies(view: KBView) -> list[Dependency]:
             if not isinstance(key, str) or not ID_RE.match(key):
                 continue
             targets = by_id.get(key, [])
-            current = fingerprint(targets[0]) if len(targets) == 1 and targets[0].ok else None
+            current = (fingerprint(targets[0], view.cfg.scope_separator)
+                       if len(targets) == 1 and targets[0].ok else None)
             if isinstance(recorded, str):
                 recorded = str(recorded)
             if not targets:
@@ -362,6 +370,8 @@ def dependencies(view: KBView) -> list[Dependency]:
                 state = "invalid"
             elif recorded is None:
                 state = "unstamped"
+            elif is_v1_fingerprint(recorded):
+                state = "old"  # K1 reports it; kblam upgrade re-stamps it (SPEC §5.1)
             else:
                 state = "current" if recorded == current else "suspect"
             line = _mapping_key_line(f, depends, key, "depends_on") or 0

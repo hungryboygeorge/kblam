@@ -18,7 +18,7 @@ import pytest
 
 from kblam import cli, jev_prompts, resolutions
 from kblam.config import RESOLUTIONS_NAME, load_config
-from kblam.finding import parse_finding
+from kblam.finding import fingerprint_v1, parse_finding
 from kblam.jev import PairCache, Side
 from kblam.review import ReviewItem, load_items, save_items
 from kblam.store import edit_finding
@@ -47,8 +47,19 @@ def distinct_rows(kb) -> int:
         return conn.execute("SELECT COUNT(*) FROM distinct_pairs").fetchone()[0]
 
 
+def legacy_resolution(kb, a: tuple[str, str], b: tuple[str, str] | None, reason: str) -> None:
+    """A resolution as kblam recorded it before M6.10: a row of pairs.sqlite on the unordered (ID, v1
+    fingerprint) sides, a revision item's second side empty."""
+    path = kb.root / ".kblam" / "pairs.sqlite"
+    PairCache(path)  # the tables
+    first, second = sorted([a, b or ("", "")])
+    with closing(sqlite3.connect(path)) as conn, conn:
+        conn.execute("INSERT INTO distinct_pairs VALUES (?, ?, ?, ?, ?, ?)",
+                     (*first, *second, reason, "2026-09-20T10:00:00Z"))
+
+
 def fingerprint_of(kb, finding_id: str) -> str:
-    return Side.of(next(f for f in load_view(kb.cfg).findings if f.file_id == finding_id)).fingerprint
+    return Side.of(next(f for f in load_view(kb.cfg).findings if f.file_id == finding_id), "/").fingerprint
 
 
 def restated(kb) -> str:
@@ -188,21 +199,29 @@ def test_a_not_revision_resolution_survives_an_evidence_edit_and_lapses_with_the
     assert kinds(result) == [("revision", "reject")]
 
 
-def test_rows_pairs_sqlite_held_before_m610_still_suppress(jkb, capsys):
-    """Resolutions recorded before M6.10 stay in pairs.sqlite, keyed by fingerprints, until kblam
-    upgrade moves them; they still suppress what they cover."""
+def test_resolutions_held_in_pairs_sqlite_before_m610_move_with_kblam_upgrade(jkb, capsys):
+    """Resolutions recorded before M6.10 are rows of pairs.sqlite on (ID, v1 fingerprint) sides. A command
+    that reads resolutions refuses while any is there, kblam upgrade moves them into the committed file, and
+    they then suppress what they covered (SPEC §6.4, §7 upgrade)."""
     jkb.add("F-0001", "motor", E1)
     jkb.add("F-0002", "drift", N)
     jkb.fake.relations[(E1, N)] = ("same_fact", 0.93, 0.91)
     jkb.fake.nouls[N] = 0.9
-    cache = PairCache(jkb.root / ".kblam" / "pairs.sqlite")
-    fp1, fp2 = fingerprint_of(jkb, "F-0001"), fingerprint_of(jkb, "F-0002")
-    cache.mark_distinct(("F-0001", fp1), ("F-0002", fp2), "legacy: distinct warm-up phases")
-    cache.mark_distinct(("F-0002", fp2), None, "legacy: a direct statement")  # a revision item's row
+    view = load_view(jkb.cfg)
+    fp1, fp2 = (fingerprint_v1(next(f for f in view.findings if f.file_id == i)) for i in ("F-0001", "F-0002"))
+    legacy_resolution(jkb, ("F-0001", fp1), ("F-0002", fp2), "legacy: distinct warm-up phases")
+    legacy_resolution(jkb, ("F-0002", fp2), None, "legacy: a direct statement")  # a revision item's row
+    assert run(jkb, "check", "F-0002") == 1
+    assert "2 resolution(s) in .kblam/pairs.sqlite" in capsys.readouterr().err
+    assert run(jkb, "upgrade") == 0
+    assert "moved 2 resolution(s) from .kblam/pairs.sqlite into kblam.resolutions.jsonl" in capsys.readouterr().out
+    lines = [json.loads(line) for line in (jkb.root / RESOLUTIONS_NAME).read_text(encoding="utf-8").splitlines()]
+    assert sorted((r["kind"], r["reason"]) for r in lines) == [("distinct", "legacy: distinct warm-up phases"),
+                                                              ("not_revision", "legacy: a direct statement")]
     assert run(jkb, "check", "F-0002") == 0
     out = capsys.readouterr().out
     assert "not raised: same_fact F-0002 vs F-0001" in out and "not raised: revision F-0002" in out
-    assert open_ids(jkb) == [] and not (jkb.root / RESOLUTIONS_NAME).exists()
+    assert open_ids(jkb) == []
 
 
 def test_a_committed_resolution_reaches_another_clone(jkb, tmp_path, capsys):
@@ -219,17 +238,12 @@ def test_a_committed_resolution_reaches_another_clone(jkb, tmp_path, capsys):
 # --- quantity conflicts: never suppressed, never resolved (§6.3) ---------------------------------------
 
 
-@pytest.mark.parametrize("source", ["kblam.resolutions.jsonl", "pairs.sqlite"])
-def test_no_resolution_suppresses_a_quantity_conflict(jkb, source):
+def test_no_resolution_suppresses_a_quantity_conflict(jkb):
     jkb.add("F-0001", "motor", E1, extra=quantity("warm-up", 90, "s"))
     staged = stage(jkb, "F-0002", "drift", N, extra=quantity("warm-up", 60, "s"))
-    new = Side.of(parse_finding("findings/calibration/F-0002-drift.md", staged.read_bytes()))
-    if source == "pairs.sqlite":
-        PairCache(jkb.root / ".kblam" / "pairs.sqlite").mark_distinct(
-            ("F-0001", fingerprint_of(jkb, "F-0001")), ("F-0002", new.fingerprint), REASON)
-    else:
-        resolutions.append(jkb.cfg, resolutions.resolution(
-            resolutions.DISTINCT, [("F-0001", state(E1)), ("F-0002", new.state_hash)], REASON))
+    new = Side.of(parse_finding("findings/calibration/F-0002-drift.md", staged.read_bytes()), "/")
+    resolutions.append(jkb.cfg, resolutions.resolution(
+        resolutions.DISTINCT, [("F-0001", state(E1)), ("F-0002", new.state_hash)], REASON))
     jkb.fake.relations[(E1, N)] = ("same_fact", 0.93, 0.91)  # a verdict on the pair that the resolution covers
     result = do_put(jkb, staged)
     assert kinds(result) == [("quantity_conflict", "reject")]

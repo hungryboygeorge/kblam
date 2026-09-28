@@ -154,7 +154,7 @@ def test_rm_refuses_a_duplicated_id_and_a_lock_timeout(kb, capsys):
 
 def item(item_id: str, kind: str, new_id: str, existing_id: str | None = None, status: str = "open",
          verdict: str | None = "same_fact", close_reason: str | None = None) -> ReviewItem:
-    return ReviewItem(item_id, kind, status, new_id, "0000000a", existing_id, "0000000b" if existing_id else None,
+    return ReviewItem(item_id, kind, status, new_id, "00000000000a", existing_id, "00000000000b" if existing_id else None,
                       None if kind == "unchecked" else verdict, message="m", created="t",
                       closed="t" if status == "closed" else None, close_reason=close_reason)
 
@@ -291,7 +291,7 @@ def test_new_refuses_a_topic_outside_the_configured_topics(kb, capsys):
 
 
 def fp_of(path) -> str:
-    return fingerprint(parse_finding(path.name, path.read_bytes()))
+    return fingerprint(parse_finding(path.name, path.read_bytes()), "/")
 
 
 def two_clones(kb):
@@ -313,7 +313,7 @@ def test_renumber_gives_a_new_id_and_rekeys_the_dependents_that_mean_that_file(k
     means_theirs = kb.add("F-0007", "uses-theirs", CLAIM_D, topic="pump", title="Pump",
                           extra=f"depends_on: {{F-0005: '{theirs_fp}'}}\n")
     kb.add("F-0008", "stale", "The valve closes in 2 ms.", topic="pump", title="Valve",
-           extra="depends_on:\n  F-0005: deadbeef\n")
+           extra="depends_on:\n  F-0005: deadbeef0000\n")
     kb.add("F-0009", "prose", "The fan runs at 1200 rpm.", topic="pump", title="Fan",
            body="See F-0005 for the warm-up.")
     before = {p: p.read_bytes() for p in (mine, theirs, means_mine, means_theirs, flow)}
@@ -334,7 +334,7 @@ def test_renumber_gives_a_new_id_and_rekeys_the_dependents_that_mean_that_file(k
         "kblam renumber: regenerated findings/INDEX.md and .kblam/tree.hash",
         "kblam renumber: 2 other mention(s) of F-0005 may mean either finding; a person checks each and points it "
         "at F-0010 where it meant the renumbered one:",
-        "  findings/pump/F-0008-stale.md:10: depends_on F-0005: deadbeef matches neither file",
+        "  findings/pump/F-0008-stale.md:10: depends_on F-0005: deadbeef0000 matches neither file",
         "  findings/pump/F-0009-prose.md:13: the body names F-0005",
     ]
     assert not mine.exists()

@@ -27,7 +27,7 @@ def messages(issues) -> str:
 
 def test_clean_kb_passes_every_rule(kb):
     kb.add("F-0001", "sensor-curve-types", CLAIM_A)
-    stamp = fingerprint(load_view(kb.cfg).findings[0])
+    stamp = fingerprint(load_view(kb.cfg).findings[0], "/")
     kb.add("F-0002", "motor-warmup", CLAIM_B, topic="motor", extra=f"depends_on:\n  F-0001: {stamp}\n")
     assert kb.issues() == []
 
@@ -475,7 +475,7 @@ def test_k11_rejects_dependency_on_reported_finding(kb):
     _reported_kb(kb)
     kb.add("F-0001", "sensor", CLAIM_A, label="reported", evidence="[history/topic-findings.md]",
            body=_with_excerpt("history/topic-findings.md:3", "A20 measured +0.397 on the odd pair."))
-    stamp = fingerprint(load_view(kb.cfg).findings[0])
+    stamp = fingerprint(load_view(kb.cfg).findings[0], "/")
     kb.add("F-0002", "motor", CLAIM_B, topic="motor", extra=f"depends_on:\n  F-0001: {stamp}\n")
     text = messages(run(kb, rules.k11_reported))
     assert "depends_on names F-0001, which is reported" in text

@@ -223,19 +223,19 @@ def finding(claim: str, **meta) -> Finding:
 
 
 def test_a_state_hash_is_the_hash_of_the_side_as_sent():
-    side = Side.of(finding("The motor  reaches\nsteady output."))
+    side = Side.of(finding("The motor  reaches\nsteady output."), "/")
     state = {"claim": "The motor reaches steady output.", "scope": ["MX-200", "MX-100"]}
     assert side.state() == state and side.state_hash == jev_prompts.state_hash(state) == canonical_hash(state)
     # an edit Jev does not see keeps it (the fingerprint follows the evidence and the quantities)
     for unseen in ({"evidence": ["evidence/b/"]}, {"quantities": [{"name": "q", "value": 1}]},
                    {"label": "inferred"}, {"title": "Another title"}):
-        assert Side.of(finding("The motor reaches steady output.", **unseen)).state_hash == side.state_hash
-    assert Side.of(finding("The motor reaches steady output.", evidence=["evidence/b/"])).fingerprint \
+        assert Side.of(finding("The motor reaches steady output.", **unseen), "/").state_hash == side.state_hash
+    assert Side.of(finding("The motor reaches steady output.", evidence=["evidence/b/"]), "/").fingerprint \
         != side.fingerprint
     # one Jev sees changes it, a reordered scope included: the state is hashed exactly as it is sent
     for seen in (finding("The motor reaches steady output quickly."), finding(side.claim, scope=["MX-200"]),
                  finding(side.claim, scope=["MX-100", "MX-200"])):
-        assert Side.of(seen).state_hash != side.state_hash
+        assert Side.of(seen, "/").state_hash != side.state_hash
 
 
 def answer_rows(kb) -> list[tuple]:
@@ -303,7 +303,7 @@ def test_rows_keyed_by_fingerprints_no_longer_match_and_are_kept(jkb):
     not reused, and they are not deleted either (kblam upgrade re-keys them)."""
     jkb.add("F-0001", "motor", E1)
     jkb.add("F-0002", "drift", N)
-    existing, new = (Side.of(f) for f in load_view(jkb.cfg).findings)
+    existing, new = (Side.of(f, "/") for f in load_view(jkb.cfg).findings)
     cache = PairCache(jkb.root / ".kblam" / "pairs.sqlite")
     call = {"requested_model": "typesafe/jev-1.13", "served_model": SERVED, "expected_served_model": SERVED,
             "input_tokens": 700, "output_tokens": 8, "cost": 0.00003, "latency_s": 0.5, "attempts": 1,

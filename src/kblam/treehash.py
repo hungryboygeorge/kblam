@@ -71,7 +71,7 @@ def accept_from_repository(cfg: Config, view: KBView) -> int:
     cache = PairCache(cfg.state_dir / CACHE_NAME)
     accepted = [f for f in view.findings if f.ok]
     for finding in accepted:
-        cache.mark_checked(finding.file_id, fingerprint(finding))
+        cache.mark_checked(finding.file_id, fingerprint(finding, cfg.scope_separator))
     return len(accepted)
 
 

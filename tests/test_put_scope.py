@@ -128,10 +128,10 @@ def test_k3_on_other_findings_never_blocks_and_only_an_old_one_is_a_warning(kb):
 
 def test_open_review_and_unchecked_items_never_block_a_put(kb, capsys):
     kb.add("F-0001", "sensor", CLAIM_A)
-    current = fingerprint(next(f for f in load_view(kb.cfg).findings if f.file_id == "F-0001"))
+    current = fingerprint(next(f for f in load_view(kb.cfg).findings if f.file_id == "F-0001"), "/")
     review.save_items(kb.cfg, [
         ReviewItem("U-00000001", "unchecked", "open", "F-0001", current, message="no answer", created="t"),
-        ReviewItem("R-00000002", "review", "open", "F-0001", current, "F-0009", "deadbeef", "same_fact",
+        ReviewItem("R-00000002", "review", "open", "F-0001", current, "F-0009", "deadbeef0000", "same_fact",
                    message="m", created="t"),
     ])
     assert run(kb, "validate") == 1

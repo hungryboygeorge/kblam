@@ -16,7 +16,9 @@ FILENAME_RE = re.compile(r"^(F-\d{4,})-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$")
 ID_RE = re.compile(r"^F-\d{4,}$")
 ID_IN_TEXT_RE = re.compile(r"(?<![\w-])F-\d{4,}(?![\w-])")
 CLAIM_MARKER_RE = re.compile(r"^\*\*Claim[.:]\*\*\s*")
-FINGERPRINT_KEYS = ("scope", "quantities", "evidence")  # with id and claim: what a finding asserts
+V1_KEYS = ("scope", "quantities", "evidence")  # fingerprint v1: with id and claim, lists in file order
+V1_FINGERPRINT_RE = re.compile(r"[0-9a-f]{8}")   # a v1 fingerprint (SPEC §5.1): 8 hex digits
+FINGERPRINT_DIGITS = 12                          # a v2 fingerprint's length
 
 
 def yaml_rt() -> YAML:
@@ -54,17 +56,89 @@ def plain_data(value):
     return str(value)
 
 
-def fingerprint(finding: Finding) -> str:
-    """First 8 hex digits of sha256 over the finding's id, claim, scope, quantities and evidence.
+def split_scope(values, separator: str) -> list[str]:
+    """The scope values as parts: each value split at `separator` ([kb] scope_separator; "" never splits),
+    stripped, empty parts dropped, de-duplicated and sorted (SPEC §4, §5.1, §6.1)."""
+    parts = set()
+    for value in values or ():
+        pieces = str(value).split(separator) if separator else [str(value)]
+        parts.update(p.strip() for p in pieces if p.strip())
+    return sorted(parts)
 
-    Whitespace runs in the claim are collapsed, so reflowing it is not a change; the title,
-    depends_on and the body after the claim paragraph are not covered (SPEC §5 K3).
+
+def _evidence_path(path: str) -> str:
+    """An evidence path as the fingerprint sees it: `\\` as `/`, a leading `./` and a trailing `/` removed."""
+    path = path.replace("\\", "/")
+    while path.startswith("./"):
+        path = path[2:]
+    return path.rstrip("/") if len(path) > 1 else path
+
+
+def _sort_key(value) -> str:
+    return json.dumps(value, sort_keys=True, ensure_ascii=False)
+
+
+def _quantity_key(item) -> tuple:
+    """Quantities sort by normalised name (as §6.3 compares names), value and unit; a malformed one after
+    them, by its JSON, so the order is total whatever the file holds (K1 reports it)."""
+    if isinstance(item, dict):
+        name, value, unit = item.get("name"), item.get("value"), item.get("unit")
+        if (isinstance(name, str) and isinstance(value, (int, float)) and not isinstance(value, bool)
+                and (unit is None or isinstance(unit, str))):
+            return (0, " ".join(name.split()).casefold(), float(value), " ".join((unit or "").split()),
+                    _sort_key(item))
+    return (1, "", 0.0, "", _sort_key(item))
+
+
+def _digest(content: dict) -> str:
+    encoded = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def fingerprint(finding: Finding, separator: str) -> str:
+    """Fingerprint v2 (SPEC §5.1): the first 12 hex digits of the sha256 of the canonical JSON of the
+    finding's id, claim, label, scope, quantities and evidence.
+
+    Whitespace runs in the claim are collapsed, so reflowing it is not a change. Every list is in a
+    canonical order, so reordering one is not an edit either: scope values split at `separator` ([kb]
+    scope_separator), de-duplicated and sorted; evidence paths normalised (`_evidence_path`) and sorted;
+    quantities sorted by normalised name, value and unit, each as written. The label counts, so demoting
+    or promoting a finding makes its dependents suspect. The title, depends_on, anchors and the body after
+    the claim paragraph are not covered. A value K1 reports as malformed still hashes as written.
     """
     meta = finding.meta if isinstance(finding.meta, dict) else {}
+    scope, evidence, quantities = (plain_data(meta.get(key)) for key in ("scope", "evidence", "quantities"))
+    if isinstance(scope, list):
+        scope = split_scope(scope, separator)
+    if isinstance(evidence, list):
+        evidence = sorted((_evidence_path(e) if isinstance(e, str) else e for e in evidence), key=_sort_key)
+    if isinstance(quantities, list):
+        quantities = sorted(quantities, key=_quantity_key)
+    content = {"id": finding.file_id, "claim": " ".join(finding.claim.split()),
+               "label": plain_data(meta.get("label")), "scope": scope, "evidence": evidence,
+               "quantities": quantities}
+    return _digest(content)[:FINGERPRINT_DIGITS]
+
+
+def fingerprint_v1(finding: Finding) -> str:
+    """Fingerprint v1, the format before M6.10: the first 8 hex digits over the id, claim, scope, quantities
+    and evidence, each list in file order (SPEC §5.1). Only kblam upgrade and the old-format checks use it,
+    to recognise stamps and state recorded before v2."""
+    meta = finding.meta if isinstance(finding.meta, dict) else {}
     content = {"id": finding.file_id, "claim": " ".join(finding.claim.split())}
-    content.update({key: plain_data(meta.get(key)) for key in FINGERPRINT_KEYS})
-    encoded = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:8]
+    content.update({key: plain_data(meta.get(key)) for key in V1_KEYS})
+    return _digest(content)[:8]
+
+
+def is_v1_fingerprint(value) -> bool:
+    """Whether `value` is in the v1 format: exactly 8 hex digits, where v2 has 12 (SPEC §5.1)."""
+    return isinstance(value, str) and V1_FINGERPRINT_RE.fullmatch(value) is not None
+
+
+def fingerprint_as(recorded, finding: Finding, separator: str) -> str:
+    """`finding`'s fingerprint in the format of `recorded`: v1 for a value recorded before fingerprint v2,
+    so that such a stamp or item still recognises the version it meant until kblam upgrade replaces it."""
+    return fingerprint_v1(finding) if is_v1_fingerprint(recorded) else fingerprint(finding, separator)
 
 
 @dataclass

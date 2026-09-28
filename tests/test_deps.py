@@ -20,11 +20,11 @@ CLAIM_C = "The media tray reports its type through two contact pins read at load
 
 
 def fp_of_text(text: str) -> str:
-    return fingerprint(parse_finding("findings/calibration/F-0001-sensor.md", text.encode("utf-8")))
+    return fingerprint(parse_finding("findings/calibration/F-0001-sensor.md", text.encode("utf-8")), "/")
 
 
 def fp_in_kb(kb, finding_id: str) -> str:
-    return fingerprint(next(f for f in load_view(kb.cfg).findings if f.file_id == finding_id))
+    return fingerprint(next(f for f in load_view(kb.cfg).findings if f.file_id == finding_id), "/")
 
 
 def stage(kb, finding_id: str, slug: str, claim: str, **kw):
@@ -58,11 +58,10 @@ def test_fingerprint_ignores_reflow_title_body_and_depends_on():
         finding_text("F-0001", reflowed, extra=QUANTITY),
         finding_text("F-0001", CLAIM_A, extra=QUANTITY, title="Another title entirely"),
         finding_text("F-0001", CLAIM_A, extra=QUANTITY, body="New supporting detail paragraph."),
-        finding_text("F-0001", CLAIM_A, extra=QUANTITY + "depends_on:\n  F-0002: abcdef12\n"),
-        finding_text("F-0001", CLAIM_A, extra=QUANTITY, label="inferred"),
+        finding_text("F-0001", CLAIM_A, extra=QUANTITY + "depends_on:\n  F-0002: abcdef123456\n"),
     ]
     assert [fp_of_text(t) for t in same] == [base] * len(same)
-    assert len(base) == 8 and int(base, 16) >= 0
+    assert len(base) == 12 and int(base, 16) >= 0  # fingerprint v2 (SPEC §5.1)
 
 
 def test_fingerprint_changes_on_claim_scope_quantity_or_evidence():
@@ -99,13 +98,13 @@ def test_k3_passes_when_fingerprint_is_current(kb):
 
 def test_k3_rejects_suspect_and_unstamped(kb):
     kb.add("F-0001", "sensor", CLAIM_A)
-    kb.add("F-0002", "motor", CLAIM_B, topic="motor", extra="depends_on:\n  F-0001: deadbeef\n")
+    kb.add("F-0002", "motor", CLAIM_B, topic="motor", extra="depends_on:\n  F-0001: deadbeef0000\n")
     kb.add("F-0003", "tray", CLAIM_C, topic="tray", extra="depends_on:\n  F-0001: null\n")
     issues = rules.k3_suspect(load_view(kb.cfg))
     assert [(i.path.split("/")[-1], i.line) for i in issues] == [("F-0002-motor.md", 10), ("F-0003-tray.md", 10)]
     current = fp_in_kb(kb, "F-0001")
     assert issues[0].message == (
-        f"suspect: F-0001 was rewritten since this finding was checked against it (recorded deadbeef, "
+        f"suspect: F-0001 was rewritten since this finding was checked against it (recorded deadbeef0000, "
         f"current {current}); re-read F-0001, then run kblam ack F-0002 F-0001, or edit this finding")
     assert "has no fingerprint (unstamped)" in issues[1].message
     assert "kblam ack F-0003 F-0001" in issues[1].message
@@ -148,7 +147,7 @@ def test_stamp_quotes_a_fingerprint_yaml_would_read_as_a_number():
 def test_put_rejects_stale_fingerprint_on_incoming_finding(kb):
     kb.add("F-0001", "sensor", CLAIM_A)
     before = kb.snapshot()
-    staged = stage(kb, "F-0002", "motor", CLAIM_B, topic="motor", extra="depends_on:\n  F-0001: deadbeef\n")
+    staged = stage(kb, "F-0002", "motor", CLAIM_B, topic="motor", extra="depends_on:\n  F-0001: deadbeef0000\n")
     staged_bytes = staged.read_bytes()
     result = put(kb.cfg, staged)
     assert [i.code for i in result.issues] == ["K3"]
@@ -238,7 +237,7 @@ def test_ack_changes_only_the_fingerprint_value(kb, newline):
         "    - evidence/2026-09-22-ratio/    # indented four\n"
         "depends_on:\n"
         "  # checked against the curve page\n"
-        "  F-0001: \"deadbeef\"     # stale\n"
+        "  F-0001: \"deadbeef0000\"     # stale\n"
         "verified: 2026-09-22\n"
         "---\n"
         "\n"
@@ -251,7 +250,7 @@ def test_ack_changes_only_the_fingerprint_value(kb, newline):
     result = ack(kb.cfg, "F-0002", "F-0001")
     current = fp_in_kb(kb, "F-0001")
     assert result.changed and result.path == "findings/motor/F-0002-motor.md"
-    assert path.read_bytes() == text.replace('"deadbeef"', current).encode("utf-8")
+    assert path.read_bytes() == text.replace('"deadbeef0000"', current).encode("utf-8")
     assert (kb.findings / "INDEX.md").read_bytes() == index_before
     assert kb.issues() == []
 
@@ -264,7 +263,7 @@ def test_ack_changes_only_the_fingerprint_value(kb, newline):
 
 def test_deps_lists_dependencies_and_dependents_with_state(kb, capsys):
     kb_with_dependent(kb)
-    kb.add("F-0003", "tray", CLAIM_C, topic="tray", extra="depends_on:\n  F-0001: deadbeef\n  F-0002: null\n")
+    kb.add("F-0003", "tray", CLAIM_C, topic="tray", extra="depends_on:\n  F-0001: deadbeef0000\n  F-0002: null\n")
     current = fp_in_kb(kb, "F-0001")
     root = ["--root", str(kb.root)]
 
@@ -273,7 +272,7 @@ def test_deps_lists_dependencies_and_dependents_with_state(kb, capsys):
         "F-0001 depends on: (none)\n"
         "F-0001 dependents:\n"
         f"  F-0002  current    {current}  (Title of F-0002)\n"
-        f"  F-0003  suspect    recorded deadbeef, current {current}; re-read F-0001, then kblam ack F-0003 "
+        f"  F-0003  suspect    recorded deadbeef0000, current {current}; re-read F-0001, then kblam ack F-0003 "
         f"F-0001  (Title of F-0003)\n"
     )
     assert main(root + ["deps", "F-0003"]) == 0

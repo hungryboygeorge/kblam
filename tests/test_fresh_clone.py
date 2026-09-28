@@ -66,7 +66,7 @@ def no_jev_check(monkeypatch):
 
 def checked(kb, finding_id: str) -> bool:
     finding = next(f for f in load_view(kb.cfg).findings if f.file_id == finding_id)
-    return PairCache(kb.cfg.state_dir / CACHE_NAME).was_checked(finding_id, fingerprint(finding))
+    return PairCache(kb.cfg.state_dir / CACHE_NAME).was_checked(finding_id, fingerprint(finding, "/"))
 
 
 def run(kb, capsys, *args: str) -> tuple[int, str]:
