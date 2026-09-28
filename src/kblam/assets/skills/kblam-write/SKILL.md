@@ -1,6 +1,6 @@
 ---
 name: kblam-write
-description: Add, change or correct a finding in {{kb_root}}/ (the kblam knowledge base), and handle any kblam refusal - a denied write under {{kb_root}}/ or .kblam/ or to kblam.toml, a kblam put rejection (exit 1, 3 or 4), a Stop hook block, a failing kblam validate or pre-commit, a review or unchecked item, or a suspect dependency.
+description: Add, change or correct a finding in {{kb_root}}/ (the kblam knowledge base), and handle any kblam refusal - a denied write under {{kb_root}}/ or .kblam/ or to kblam.toml, a kblam put rejection (exit 1, 3 or 4), a Stop hook block, a failing kblam validate or pre-commit, a review or unchecked item, a suspect dependency, or a check that kblam recheck reports as failed or not approved.
 ---
 
 # Writing findings with kblam
@@ -47,7 +47,7 @@ depends_on: {F-0102: null}     # optional; put stamps F-0102's fingerprint (you 
 anchors: ["0x1A2B3C"]          # optional; quoted strings
 quantities:                    # optional; code compares these, not Jev
   - {name: type1/type0 curve ratio, value: 1.0017, unit: ratio}
-check: "uv run python evidence/2026-09-22-sensor-type-ratio/derived/ratio.py"   # optional
+check: "uv run python evidence/2026-09-22-sensor-type-ratio/derived/ratio.py"   # optional; see Checks
 verified: 2026-09-22
 ---
 
@@ -68,7 +68,8 @@ Supporting detail after it.
 
 `kblam put` exits 1 for a K rule or a request kblam will not carry out, 3 when another kblam
 write held `.kblam/lock` too long (retry), and 4 for a Jev or quantity reject. Exit 2 means no
-usable `kblam.toml` or bad arguments.
+usable `kblam.toml` or bad arguments. `kblam recheck` exits 1 when a check failed, could not run
+or is not approved (see "Checks").
 
 | Rule | Trigger | Fix |
 |---|---|---|
@@ -159,8 +160,31 @@ sends the item IDs to the librarian and carries on.
 If Jev could not be reached, the write is accepted but unchecked, and `kblam validate` fails.
 Run `kblam check --pending` once Jev is reachable.
 
+## Checks
+
+`check:` names a command whose re-run reproduces the claim's key number and exits 0 when it does.
+`kblam recheck` runs it from the repository root without a shell: write a program and its
+arguments, with `/` in paths (`\` is an escape character, as in a POSIX shell), and put a pipeline
+or a redirection in a script under `evidence/`.
+
+kblam runs a check only once a person has approved that exact command, and the files it names, on
+their machine, because anyone who can push can put a command in a finding. A new or changed
+command, or one whose script changed, is reported as not approved and is not run: ask the user to
+run `kblam recheck F-NNNN` at a terminal, where it is shown to them first. Never run the command
+yourself to get around that, and never try to approve it.
+
+A failed check means the key number did not reproduce, or the command broke. Read its output
+(`.kblam/recheck/F-NNNN.log`), then `kblam edit` the finding so it states what the evidence shows
+now, or so its `check:` runs what reproduces it. A check that ran past the time limit needs either
+a fix for whatever hangs or, from the user, a higher `recheck_timeout_seconds` in `kblam.toml`.
+
 ## Stop hook block
 
 `{{kb_root}}/` was changed outside `kblam put` and fails `kblam validate`. Fix each failure through
 kblam (`kblam edit`, `kblam put`, `kblam index`, `kblam ack`). A legitimate out-of-band change
 such as a `git pull` is accepted with `kblam validate --record` once the tree is clean.
+
+A block, or a refusal from any kblam command, that says git tracks files under `.kblam/` is not
+yours to fix: `.kblam/` is each machine's own state, and a commit that holds it replaces every
+clone's. Tell the user what it names; untracking the files and, when they came with a pull,
+resetting `.kblam/` are their decision.

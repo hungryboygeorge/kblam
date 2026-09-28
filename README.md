@@ -231,8 +231,8 @@ check raises: a coordinating agent, a librarian agent or a person. While an item
 `kblam validate` fails, and so the pre-commit hook refuses every commit in the repository.
 
 kblam is at version 0.1.0 and was built for one research project. It is installed from its GitHub
-repository, needs Python 3.11 or newer, uv and git, and comes with no warranty and no support. The
-Status section above lists what is not implemented yet.
+repository, needs Python 3.11 or newer, uv and git, and comes with no warranty and no support.
+CONTRIBUTING.md lists what is not implemented yet.
 
 ### Setting kblam up for a project
 
@@ -264,9 +264,13 @@ created or changed. Each further clone of the repository then needs `kblam init`
 
 The skill tells authors to send the review items and rejected items that their writes raise to a
 coordinator, or to a librarian agent if one is deployed. Agree with your user on who that is, and
-write it into the project's instructions; SPEC.md §8.1 describes the librarian role. A Claude Code
-agent definition with an explicit tool list needs the Skill tool in that list to load the
-`kblam-write` skill, or an instruction to read the skill's file.
+write it into the project's instructions; SPEC.md §8.1 describes the librarian role. To deploy one,
+copy `agents/librarian.md` from kblam's repository into the project's `.claude/agents/`. Its model
+is your user's choice, set with a `model:` line in its frontmatter. `kblam init` writes
+`adjudicators = []` into `kblam.toml`, which leaves `kblam resolve` and `kblam rm` to the main
+session, so your user adds `"librarian"` to that list. A Claude Code agent definition with an
+explicit tool list needs the Skill tool in that list to load the `kblam-write` skill, or an
+instruction to read the skill's file.
 
 If the project already keeps its findings in long documents, SPEC.md §11 describes moving them into
 kblam one topic at a time, with every claim staged and put like any other. The `kblam migrate`

@@ -6,12 +6,16 @@ and the hook is silent. A hook never stops an agent's unrelated work: with an un
 kblam.toml, malformed input or any unexpected error it allows the action and prints a note.
 
 - PreToolUse (Write, Edit, NotebookEdit): deny a target under findings/, under .kblam/ outside
-  .kblam/staging/ (kblam's state), or the repository's kblam.toml (its rules and where the key goes).
-- PreToolUse (Bash, PowerShell): deny a command that visibly writes under findings/, or writes or
-  removes under .kblam/ outside .kblam/staging/ or kblam.toml (best effort, §8 items 1-2).
+  .kblam/staging/ (kblam's state), the repository's kblam.toml (its rules and where the key goes) or
+  its kblam.resolutions.jsonl (the adjudicator's resolutions, which only kblam resolve writes).
+- PreToolUse (Bash, PowerShell): deny a command that visibly writes under findings/, removes a
+  finding (a finding file, or the KB root or a topic folder holding one), or writes or removes under
+  .kblam/ outside .kblam/staging/, kblam.toml or kblam.resolutions.jsonl (best effort, §8 items 1-2).
+  With [kb] adjudicators set, also deny kblam resolve and kblam rm to an agent type not listed there.
 - Stop, SubagentStop: silent while findings/ is as kblam last wrote it (tree.hash); otherwise check
-  and validate, and block with the failures. SubagentStop is silent for Claude Code's internal
-  agents (empty agent_type), which cannot fix findings/.
+  and validate, and block with the failures. With no tree.hash (a new clone, or .kblam/ deleted) only
+  the deterministic rules run, never Jev. SubagentStop is silent for Claude Code's internal agents
+  (empty agent_type), which cannot fix findings/.
 
 Only the Stop path imports the validator and the Jev client, so a PreToolUse call stays fast.
 """
@@ -25,19 +29,34 @@ import shlex
 import sys
 from pathlib import Path
 
-from kblam.config import CONFIG_NAME, Config, ConfigError, NoConfig, load_config
+from kblam.config import CONFIG_NAME, RESOLUTIONS_NAME, Config, ConfigError, NoConfig, load_config
+from kblam.gitdir import kblam_git_dir
 
 SKILL_POINTER = "Load the kblam-write skill for how to fix this."
 STATE_USE = (".kblam/ holds kblam's own state and only kblam writes it; stage findings under .kblam/staging/ "
              "(kblam new, kblam edit).")
 CONFIG_USE = (f"{CONFIG_NAME} sets the rules kblam enforces and where kblam sends the Jev API key, so only a "
               f"person changes it; ask the user to make the change you need.")
+RESOLUTIONS_USE = (f"{RESOLUTIONS_NAME} records the adjudicator's resolutions, and only kblam resolve writes "
+                   f"it: the adjudicator closes an item Jev misread with kblam resolve <item-id> --distinct "
+                   f"\"<reason>\", and any other agent sends the item ID to the coordinator or librarian.")
+APPROVALS_USE = ("That folder holds the check: commands a person approved on this machine, and only kblam recheck "
+                 "writes it, after showing each command to a person at a terminal; an agent asks the user to run "
+                 "kblam recheck, and never approves or runs a check: command itself.")
+REMOVAL_USE = ("Removing a finding is the adjudicator's decision: once a merge has moved everything a finding "
+               "states into another, the adjudicator removes it with kblam rm <id> --merged-into <target>. "
+               "Any other agent sends the finding IDs to the coordinator or librarian.")
 
 FILE_TOOLS = {"Write": "file_path", "Edit": "file_path", "NotebookEdit": "notebook_path"}  # no MultiEdit tool
 SHELL_TOOLS = ("Bash", "PowerShell")
 STOP_EVENTS = ("Stop", "SubagentStop")
 STOP_BLOCK_NAME = "stop-block"     # .kblam/stop-block: the tree digest at the Stop hook's last block
 MAX_BLOCK_LINES = 30               # failures quoted in a Stop block; the rest are counted
+ADJUDICATOR_COMMANDS = ("resolve", "rm")  # the kblam subcommands the adjudicator gate keeps (SPEC §8 item 2)
+# A finding's filename, as kblam.finding.FILENAME_RE has it (that module imports ruamel, too slow to load
+# here). On Windows the paths it is matched against are case-folded by os.path.normcase.
+FINDING_NAME_RE = re.compile(r"^F-\d{4,}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$",
+                             re.IGNORECASE if sys.platform == "win32" else 0)
 
 # --- output -------------------------------------------------------------------------------------
 
@@ -102,9 +121,33 @@ def _forms(path: str) -> set[str]:
 
 def _within(path: str, directory: Path) -> bool:
     """Whether `path` (one of _forms) is `directory` or inside it, as written or resolved."""
+    return bool(_below(path, directory))
+
+
+def _below(path: str, directory: Path) -> list[tuple[str, ...]]:
+    """The segments of `path` (one of _forms) below each form of `directory` that holds it: () for the
+    directory itself, nothing when `path` is outside it."""
+    found = []
     for top in _forms(os.path.normcase(os.path.normpath(directory))):
-        if path == top or path.startswith(top.rstrip(os.sep) + os.sep):
-            return True
+        if path == top:
+            found.append(())
+        elif path.startswith(top.rstrip(os.sep) + os.sep):
+            found.append(tuple(path[len(top.rstrip(os.sep)) + 1:].split(os.sep)))
+    return found
+
+
+def _holds_findings(directory: str, depth: int) -> bool:
+    """Whether a finding file lies, on disk, directly in `directory` (depth 0: a topic folder) or directly
+    in one of its folders (depth 1: the KB root)."""
+    try:
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if depth and entry.is_dir() and _holds_findings(entry.path, depth - 1):
+                    return True
+                if not depth and FINDING_NAME_RE.match(entry.name) and entry.is_file():
+                    return True
+    except OSError:  # missing, not a directory, unreadable: nothing to remove there
+        pass
     return False
 
 
@@ -203,6 +246,24 @@ def _command_removals(words: list[str]) -> list[str]:
     return []
 
 
+def _kblam_subcommand(words: list[str]) -> list[str]:
+    """[the kblam subcommand] one simple command runs, for the adjudicator gate (SPEC §8 item 2): its
+    program, after VAR=value words and wrappers, is kblam, kblam.exe or a path ending in either (with `/`
+    or `\\`), and the subcommand is the first word after it that is not an option (`--root <dir>` skipped).
+    The same parsing serves Bash and PowerShell, whose tokens keep a backslash path whole."""
+    _name, words, _options, _operands = _simple_command(words)
+    if not words or re.split(r"[\\/]", words[0])[-1].lower().removesuffix(".exe") != "kblam":
+        return []
+    rest = words[1:]
+    while rest:
+        word, rest = rest[0], rest[1:]
+        if word == "--root":
+            rest = rest[1:]
+        elif not word.startswith("-"):  # --root=<dir>, --help and the like are options
+            return [word]
+    return []
+
+
 PS_WRITERS = {  # cmdlet or alias -> (parameters naming the written path, position it takes unnamed)
     "set-content": (("path", "literalpath"), 1), "add-content": (("path", "literalpath"), 1),
     "ac": (("path", "literalpath"), 1), "out-file": (("filepath", "path", "literalpath"), 1),
@@ -297,8 +358,19 @@ def powershell_removal_targets(command: str) -> list[str]:
     return _write_targets(_tokens(command, backslash_escapes=False), _ps_command_removals, redirections=False)
 
 
+def bash_kblam_subcommands(command: str) -> list[str]:
+    """The kblam subcommands a Bash `command` runs, one per simple command that runs kblam."""
+    return _write_targets(_tokens(_strip_heredocs(command)), _kblam_subcommand, redirections=False)
+
+
+def powershell_kblam_subcommands(command: str) -> list[str]:
+    """The same for a PowerShell `command`."""
+    return _write_targets(_tokens(command, backslash_escapes=False), _kblam_subcommand, redirections=False)
+
+
 def _write_targets(tokens: list[str], command_targets, *, redirections: bool = True) -> list[str]:
-    """command_targets of each simple command in `tokens`, plus redirection targets if `redirections`."""
+    """command_targets of each simple command in `tokens` (paths it writes or removes, or the kblam
+    subcommand it runs), plus redirection targets if `redirections`."""
     targets: list[str] = []
     words: list[str] = []
     i = 0
@@ -352,6 +424,28 @@ def _pre_tool_use(cfg: Config, data: dict) -> int:
         """The repository's kblam.toml (SPEC §8): it sets the rules and where the API key goes."""
         return any(_within(form, cfg.repo_root / CONFIG_NAME) for form in forms(path))
 
+    def resolutions(path: str) -> bool:
+        """The repository's kblam.resolutions.jsonl (SPEC §8): the adjudicator's resolutions (§6.4)."""
+        return any(_within(form, cfg.resolutions_path) for form in forms(path))
+
+    approvals_dir = kblam_git_dir(cfg)
+
+    def approvals(path: str) -> bool:
+        """<git common dir>/kblam/ (SPEC §7 recheck, §8): the check: commands a person approved here."""
+        return approvals_dir is not None and any(_within(form, approvals_dir) for form in forms(path))
+
+    def removes_findings(path: str) -> bool:
+        """A finding file (F-NNNN-<slug>.md directly in a topic folder), or the KB root or a topic folder
+        that holds one on disk (SPEC §8 item 2): removing a finding is the adjudicator's decision. Any
+        other file under the KB root, such as a stray file K8 reports, may be removed."""
+        for form in forms(path):
+            for rel in _below(form, findings):
+                if len(rel) == 2 and FINDING_NAME_RE.match(rel[1]):
+                    return True
+                if len(rel) < 2 and _holds_findings(form, 1 - len(rel)):
+                    return True
+        return False
+
     if tool in FILE_TOOLS:
         path = tool_input.get(FILE_TOOLS[tool])
         if not isinstance(path, str):
@@ -362,15 +456,24 @@ def _pre_tool_use(cfg: Config, data: dict) -> int:
             return _deny(f"kblam: {tool} of {path} under .kblam/ denied. {STATE_USE}")
         if config(path):
             return _deny(f"kblam: {tool} of {path} denied. {CONFIG_USE}")
+        if resolutions(path):
+            return _deny(f"kblam: {tool} of {path} denied. {RESOLUTIONS_USE}")
+        if approvals(path):
+            return _deny(f"kblam: {tool} of {path} denied. {APPROVALS_USE}")
         return 0
     command = tool_input.get("command")
     if not isinstance(command, str):
         return _note("PreToolUse", f"{tool} has no command string")
+    agent = data.get("agent_type")
+    gated = (cfg.adjudicators is not None and isinstance(agent, str) and agent != ""
+             and agent not in cfg.adjudicators)  # no agent_type: the main session, or a person (§8 item 2)
     try:
         if tool == "Bash":
             targets, removals = bash_write_targets(command), bash_removal_targets(command)
+            runs = bash_kblam_subcommands(command) if gated else []
         else:
             targets, removals = powershell_write_targets(command), powershell_removal_targets(command)
+            runs = powershell_kblam_subcommands(command) if gated else []
     except ValueError:
         return 0  # unbalanced quoting: the shell will refuse it too; the Stop hook covers the rest
     reasons = []
@@ -378,48 +481,83 @@ def _pre_tool_use(cfg: Config, data: dict) -> int:
     if hits:
         reasons.append(f"kblam: this command writes under {cfg.findings_dir}/ ({', '.join(hits)}), so it is "
                        f"denied. {use}")
-    for protected, where, why in ((state, " under .kblam/", STATE_USE), (config, "", CONFIG_USE)):
+    lost = [t for t in removals if removes_findings(t)]
+    if lost:
+        reasons.append(f"kblam: this command removes findings ({', '.join(lost)}), so it is denied. "
+                       f"{REMOVAL_USE}")
+    for protected, where, why in ((state, " under .kblam/", STATE_USE), (config, "", CONFIG_USE),
+                                  (resolutions, "", RESOLUTIONS_USE),
+                                  (approvals, " (kblam recheck's approvals)", APPROVALS_USE)):
         written, removed = [t for t in targets if protected(t)], [t for t in removals if protected(t)]
         if written or removed:
             what = " and ".join(f"{verb} {', '.join(paths)}" for verb, paths in
                                 (("writing", written), ("removing", removed)) if paths)
             reasons.append(f"kblam: {what}{where} denied. {why}")
+    adjudicated = [c for c in dict.fromkeys(runs) if c in ADJUDICATOR_COMMANDS]
+    if adjudicated:
+        reasons.append(_gate_reason(cfg, agent, adjudicated))
     return _deny(" ".join(reasons)) if reasons else 0
 
 
+def _gate_reason(cfg: Config, agent: str, commands: list[str]) -> str:
+    """Why the adjudicator gate (SPEC §8 item 2) denies `commands` to agent type `agent`."""
+    names = " and ".join(f"kblam {c}" for c in commands)
+    listed = (f"which lists {', '.join(cfg.adjudicators)}" if cfg.adjudicators
+              else "which is empty, so only the main session adjudicates")
+    return (f"kblam: this command runs {names}, the adjudicator's command{'' if len(commands) == 1 else 's'}, "
+            f"and agent type \"{agent}\" is not in [kb] adjudicators in {CONFIG_NAME} ({listed}), so it is "
+            f"denied. Send the item or finding IDs to the coordinator or librarian, who decides them, and carry "
+            f"on.")
+
+
 def _stop(cfg: Config, event: str, data: dict) -> int:
+    from kblam.gitdir import tracked_state, tracked_state_problem
     from kblam.review import check_findings, open_items
     from kblam.rules import validate
     from kblam.treehash import read_tree_hash, tree_digest
     from kblam.view import load_view
 
-    recorded = read_tree_hash(cfg)
-    if recorded is None and not cfg.findings_path.exists():
+    # SPEC §8.3: while git tracks files under .kblam/, a pull may have written another machine's tree.hash and
+    # review items there, so none of it is trusted: the tree is checked as a new clone's, and the stop blocked.
+    tracked = tracked_state(cfg)
+    recorded = None if tracked else read_tree_hash(cfg)
+    if recorded is None and not cfg.findings_path.exists() and not tracked:
         return 0  # no knowledge base yet
     digest = tree_digest(load_view(cfg))
     if digest == recorded:
         return 0
-    check_findings(cfg, None, command=f"hook {event}")
+    if recorded is not None:
+        check_findings(cfg, None, command=f"hook {event}")
+    # else a new clone, or .kblam/ was deleted or is tracked (SPEC §8 item 3): checking every finding with Jev
+    # could not finish within the hook's timeout, so only the deterministic rules run, which the committing
+    # machines' pre-commit hooks already ran. Nothing is recorded; kblam validate --record accepts the tree.
     view = load_view(cfg)
-    lines = [issue.format(view) for issue in validate(view)] + [item.describe() for item in open_items(cfg, view)]
+    lines = [issue.format(view) for issue in validate(view)]
+    if not tracked:
+        lines += [item.describe() for item in open_items(cfg, view)]
     marker = cfg.state_dir / STOP_BLOCK_NAME
-    if not lines:
+    if not lines and not tracked:
         return 0
     last = marker.read_text(encoding="ascii").strip() if marker.is_file() else None
     if data.get("stop_hook_active") is True and last == tree_digest(view):
-        return _note(event, f"{cfg.findings_dir}/ still fails kblam validate ({len(lines)} failure(s)) and is "
-                            f"unchanged since the last block, so the stop is not blocked again")
+        what = ("git still tracks files under .kblam/" if tracked
+                else f"{cfg.findings_dir}/ still fails kblam validate ({len(lines)} failure(s))")
+        return _note(event, f"{what} and {cfg.findings_dir}/ is unchanged since the last block, so the stop is not "
+                            f"blocked again")
     from kblam.store import atomic_write
 
     atomic_write(marker, (tree_digest(view) + "\n").encode("ascii"))
     shown = lines[:MAX_BLOCK_LINES]
     if len(lines) > len(shown):
         shown.append(f"... and {len(lines) - len(shown)} more; run kblam validate for all of them")
+    fix = (f"Fix each failure through kblam (kblam edit <id>, change the staged copy, kblam put it); never write "
+           f"under {cfg.findings_dir}/ directly. Once the tree is clean, kblam validate --record accepts the change.")
+    if tracked:
+        return _block(f"kblam: {tracked_state_problem(tracked)}. Until then the knowledge base is checked as on a new "
+                      f"clone" + (", and it fails kblam validate:\n" + "\n".join(shown) + "\n" + fix if shown else "."))
     return _block(
         f"kblam: {cfg.findings_dir}/ was changed outside kblam put, and the knowledge base fails kblam "
-        f"validate:\n" + "\n".join(shown) + "\n"
-        f"Fix each failure through kblam (kblam edit <id>, change the staged copy, kblam put it); never write "
-        f"under {cfg.findings_dir}/ directly. Once the tree is clean, kblam validate --record accepts the change."
+        f"validate:\n" + "\n".join(shown) + "\n" + fix
     )
 
 

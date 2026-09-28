@@ -204,6 +204,7 @@ def test_lock_held_by_a_dead_process_is_broken(kb, capsys):
 
 def test_lock_older_than_stale_age_is_broken(kb, capsys):
     set_lock_config(kb, lock_wait_seconds=0.3, lock_stale_seconds=60)
-    hold_lock(kb, pid=os.getpid(), age=120)
+    lock = hold_lock(kb, pid=os.getpid(), age=120)
+    os.utime(lock, (time.time() - 120,) * 2)  # and not refreshed since: staleness is the last refresh's age
     kb.reindex()
     assert "older than lock_stale_seconds (60s)" in capsys.readouterr().err

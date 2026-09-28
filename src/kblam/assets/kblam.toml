@@ -10,6 +10,9 @@ root = "findings"
 evidence_roots = ["evidence"]  # directories that finding evidence may cite; edit for this project
 labels = ["observed", "decoded", "inferred", "unknown", "reported"]
 scopes = ["any"]               # where a finding applies; edit for this project
+scope_separator = "/"          # a scope value "A/B" stands for both A and B; "" = a value never splits
+scope_wildcard = "any"         # the scope value that overlaps every other; "" = none does
+topics = []                    # K1: the allowed topics (subjects, not work packages); empty = any
 reported_label = "reported"   # K11: a claim only a retired document states; "" turns those checks off
 history_dirs = ["history"]    # K11: where retired documents live; never evidence for other labels
 max_lines = 300
@@ -23,10 +26,19 @@ history_terms = ["was wrong", "were wrong", "wrong about", "supersed", "withdraw
                  "do not revive", "removed from this list"]
 # Each term is used only in an unwanted sense in a classified corpus (SPEC §9). Add project
 # conventions here; bare "previously", "no longer" or "correction:" have legitimate uses.
+history_id_terms = ["wrong", "incorrect", "mistaken", "erroneous", "corrects", "corrected",
+                    "correction", "replaces", "replaced", "instead of", "contradicts",
+                    "contradicted", "outdated", "obsolete", "invalid", "revises", "revised"]
+# K5: words that describe another finding as wrong or replaced when they stand within
+# history_id_window words of its ID. No corpus has tested them yet (SPEC §13): check them against
+# this project's findings and drop any that has a legitimate use there.
 duplicate_similarity = 0.9     # K9
 history_id_window = 10         # K5, words
+verbatim_blockquotes = true    # K12: every blockquote is a verbatim excerpt, which K10 checks
+adjudicators = []              # agent types that may run kblam resolve and kblam rm; [] = main session only
 lock_wait_seconds = 30         # how long new/edit/put/ack/index wait for .kblam/lock
 lock_stale_seconds = 300       # a lock older than this (or whose holder is dead) is broken
+recheck_timeout_seconds = 600  # kblam recheck: a check: command running longer is killed and fails
 
 # The [jev] section and its thresholds belong to the model, not the project: keep them as written.
 [jev]
@@ -47,7 +59,8 @@ workers = 6                    # parallel pair requests
 
 [jev.thresholds]      # calibrated on this default prompt (SPEC §10.6); a verdict with no entry is disabled
 served_model = "typesafe/jev-1.13-20260917"
-prompt_id = "4dda2f781f12"
+relation_prompt_id = "6d79e4e0e409"   # the id of each question's wording (SPEC §6.2; kblam prompt-id prints them)
+revision_prompt_id = "d9a34c823fe3"
 same_fact            = { p = 0.69, confidence = 0.61, mode = "reject" }
 cannot_both_be_true  = { p = 0.58, confidence = 0.46, mode = "reject" }
 restates_and_extends = { p = 0.48, confidence = 0.34, mode = "review" }

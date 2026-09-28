@@ -267,7 +267,7 @@ def test_model_or_prompt_mismatch_turns_rejects_into_review(jkb, capsys, change)
     assert run(jkb, "put", str(stage(jkb, "F-0002", "drift", N))) == 0
     out = capsys.readouterr().out
     assert "WARNING: the [jev.thresholds] in kblam.toml were calibrated on typesafe/jev-1.13-20260917" in out
-    assert "Nothing is rejected" in out and "Re-calibrate (SPEC §10)" in out
+    assert "No Jev verdict of this check rejects" in out and "Re-calibrate (SPEC §10)" in out
     if change == "prompt":  # the warning names both ids: what the check used, and what it recorded
         assert f"prompt {DEFAULT_PROMPT_ID} (thresholds: 0123456789ab)" in out
     item, = load_items(jkb.cfg)
@@ -673,11 +673,12 @@ def test_validate_record_checks_changed_findings_first(jkb, capsys):
     jkb.add("F-0001", "motor", E1)
     jkb.add("F-0002", "drift", N)  # written outside put: never checked
     jkb.fake.relations[(E1, N)] = ("same_fact", 0.93, 0.91)
-    (jkb.root / ".kblam" / "tree.hash").unlink()
+    # A stale tree.hash, not none: with none, --record accepts the tree without Jev (test_fresh_clone.py).
+    (jkb.root / ".kblam" / "tree.hash").write_text("stale\n", encoding="ascii")
     assert run(jkb, "validate", "--record") == 1
     out = capsys.readouterr().out
     assert "same_fact F-0002 vs F-0001" in out and "tree.hash not recorded" in out
-    assert read_tree_hash(jkb.cfg) is None
+    assert read_tree_hash(jkb.cfg) == "stale"
     item_id, = open_ids(jkb)
     assert run(jkb, "resolve", item_id, "--distinct", "one is the MX-100 figure") == 0
     assert run(jkb, "validate", "--record") == 0
@@ -720,7 +721,8 @@ def test_spec_section_9_jev_config_is_accepted(jkb):
      "prompt_id must be the id of the prompt"),
     ({"served_model": SERVED, "prompt_version": 2, "low_confidence_review": 1.5},
      "[jev.thresholds] prompt_version is gone: the Jev questions now live in kblam.toml under "
-     "[jev.prompt.relation] and [jev.prompt.revision], and [jev.thresholds] carries prompt_id"),
+     "[jev.prompt.relation] and [jev.prompt.revision], and [jev.thresholds] carries relation_prompt_id and "
+     "revision_prompt_id"),
     ({"served_model": SERVED, "prompt_id": DEFAULT_PROMPT_ID, "low_confidence_review": 1.5},
      "low_confidence_review must be a number from 0 to 1"),
 ])

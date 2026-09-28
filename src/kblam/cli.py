@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections import Counter
 from pathlib import Path
 
-from kblam import approval
+from kblam import approval, recheck
 from kblam.approval import ApprovalError
 from kblam.check import parse_policy
 from kblam.config import CONFIG_NAME, ConfigError, load_config
 from kblam.finding import ID_RE
+from kblam.gitdir import tracked_state, tracked_state_problem
 from kblam.hook import SKILL_POINTER
 from kblam.hook import run as run_hook
 from kblam.jev import CallInfo, CostBucket, JevClient, JevUnavailable, cost_summary, jev_settings, smoke_sides
 from kblam.lock import LockError, kb_lock
+from kblam.recheck import RecheckError, shown
 from kblam.review import Recorded, ReviewError, audit, check_findings, check_pending, open_items, resolve
 from kblam.rules import Dependency, dependencies, validate
 from kblam.store import StoreError, ack, edit_finding, new_finding, put, regenerate_index
@@ -30,14 +33,20 @@ EXIT_REJECTED = 4
 EXIT_HELP = """\
 exit status:
   0  success
-  1  refused: validation errors, open review or unchecked items, or a request kblam will not carry
-     out; Jev unavailable
+  1  refused: validation errors, open review or unchecked items, a recheck that failed, could not run
+     or was not approved, or a request kblam will not carry out; Jev unavailable
   2  no usable kblam.toml, or bad command-line arguments
   3  timed out waiting for .kblam/lock (another kblam write is running); retry later
   4  put rejected by the Jev check or a quantity conflict (SPEC §6.4); findings/ is unchanged"""
 
 
-def _validate(cfg, args) -> int:
+def _validate(cfg, args, *, baseline: bool = False) -> int:
+    """`kblam validate`, with --record and --commit. `baseline`: --record on a tree kblam has no tree.hash
+    for (a new clone, or .kblam/ deleted), whose findings are accepted from the repository (SPEC §8 item 3)."""
+    from kblam.commit_checks import check_commit
+    from kblam.config import RESOLUTIONS_NAME
+    from kblam.treehash import accept_from_repository
+
     view = load_view(cfg)
     issues = validate(view)
     for issue in issues:
@@ -46,17 +55,34 @@ def _validate(cfg, args) -> int:
     for item in items:
         print(item.describe())
     config = approval.commit_problems(cfg) if args.commit else []
+    commit = check_commit(cfg, view) if args.commit else None
+    blocking = items if commit is None or commit.changes_kb else []  # SPEC §8 item 4: only commits to the KB
+    if items and not blocking:
+        print(f"kblam validate: note: this commit changes nothing under {cfg.findings_dir}/ or "
+              f"{RESOLUTIONS_NAME}, so the {len(items)} open item(s) above do not block it")
     for problem in config:
         print(f"kblam validate: {problem}")
-    if issues or items or config:
+    refusals = commit.problems if commit else []
+    for problem in refusals:
+        print(f"kblam validate: {problem}")
+    for warning in commit.warnings if commit else []:
+        print(f"kblam validate: warning: {warning}")
+    if issues or blocking or config or refusals:
         print(f"kblam validate: {len(issues)} error(s) in {cfg.findings_dir}/"
-              + (f", {len(items)} open item(s) in .kblam/review.jsonl" if items else "")
+              + (f", {len(blocking)} open item(s) in .kblam/review.jsonl" if blocking else "")
+              + (f", {len(refusals)} problem(s) with the commit being made" if refusals else "")
               + (f", and {CONFIG_NAME} needs approval before this commit" if config else "")
               + ("; tree.hash not recorded" if args.record else ""))
         return EXIT_INVALID
     if args.record:
+        # The marks go first, so a failure while writing them leaves no tree.hash and the next run starts over.
+        accepted = accept_from_repository(cfg, view) if baseline else 0
         write_tree_hash(cfg, tree_digest(view))
         print(f"kblam validate: OK ({len(view.findings)} findings); recorded .kblam/tree.hash for this tree")
+        if baseline:
+            print(f"kblam validate: there was no .kblam/tree.hash (a new clone, or .kblam/ was deleted), so "
+                  f"Jev was not asked: {accepted} finding(s) accepted from the repository as checked at their "
+                  f"current fingerprints. kblam audit checks them with Jev")
     else:
         print(f"kblam validate: OK ({len(view.findings)} findings)")
     return EXIT_OK
@@ -65,6 +91,12 @@ def _validate(cfg, args) -> int:
 def _cmd_validate(cfg, args) -> int:
     if not args.record:
         return _validate(cfg, args)
+    if read_tree_hash(cfg) is None:
+        # A new clone, or .kblam/ deleted (SPEC §8 item 3): validate and record the tree without asking Jev.
+        # Decided again under the lock, since a put, ack or index may record a tree.hash meanwhile.
+        with kb_lock(cfg, "validate --record"):
+            if read_tree_hash(cfg) is None:
+                return _validate(cfg, args, baseline=True)
     _print_checks("validate --record", check_findings(cfg, None, command="validate --record",
                                                      client_factory=JevClient))
     with kb_lock(cfg, "validate --record"):
@@ -133,9 +165,14 @@ def _check_notes(command: str, check) -> None:
 
 def _cmd_put(cfg, args) -> int:
     result = put(cfg, Path(args.file), client_factory=JevClient)
+    # Errors that were in findings/ before this put do not block it (SPEC §7 put, Validation); they are printed as
+    # warnings after the put's own report, and before the final line of a refusal.
+    warnings = [f"kblam put: warning: {issue.format(result.view)}" for issue in result.warnings]
     if result.issues:
         for issue in result.issues:
             print(issue.format(result.view))
+        for line in warnings:
+            print(line)
         print(f"kblam put: rejected {result.finding_id} ({len(result.issues)} error(s)); "
               f"{cfg.findings_dir}/ is unchanged. Fix the staged file and put it again. {SKILL_POINTER}")
         return EXIT_INVALID
@@ -147,6 +184,8 @@ def _cmd_put(cfg, args) -> int:
             print(item.describe() if item else f"{verdict.mode} {verdict.describe()}")
         for line in result.check.unavailable:
             print(f"unchecked {line}")
+        for line in warnings:
+            print(line)
         print(f"kblam put: rejected {result.finding_id} by the Jev check ({len(result.check.rejected)} reject "
               f"verdict(s)); {cfg.findings_dir}/ is unchanged. Fix every verdict above and put it again. {SKILL_POINTER}")
         return EXIT_REJECTED
@@ -163,6 +202,11 @@ def _cmd_put(cfg, args) -> int:
               f"edit {dependent}. kblam validate fails until then")
     for item in result.review + ([result.unchecked] if result.unchecked else []):
         print(f"kblam put: {item.describe()}. kblam validate fails until it is closed")
+    for line in warnings:
+        print(line)
+    if warnings:
+        print(f"kblam put: the {len(warnings)} warning(s) above were already in {cfg.findings_dir}/ before this "
+              f"put, so they did not block it; kblam validate fails until each is fixed")
     return EXIT_OK
 
 
@@ -213,12 +257,88 @@ def _cmd_resolve(cfg, args) -> int:
     for item in resolve(cfg, args.id, args.distinct):
         print(f"kblam resolve: closed {item.id} ({item.verdict} {item.new_id}"
               + (f" vs {item.existing_id}" if item.existing_id else "") + f"): {item.close_reason}")
+    print(f"kblam resolve: recorded the resolution in {cfg.resolutions_path.name} (SPEC §6.4); commit it, so "
+          f"every clone of the repository has it")
+    return EXIT_OK
+
+
+def _refused(command: str, exc: Exception) -> int:
+    """A refused `rm` or `renumber` leaves findings/ unchanged; like a refused put, its message ends with the
+    skill pointer (SPEC §8 item 6)."""
+    print(f"kblam {command}: {exc}. {SKILL_POINTER}", file=sys.stderr)
+    return EXIT_LOCKED if isinstance(exc, LockError) else EXIT_INVALID
+
+
+def _cmd_rm(cfg, args) -> int:
+    from kblam.store import remove_finding
+
+    try:
+        result = remove_finding(cfg, args.id, args.merged_into)
+    except (StoreError, LockError, ReviewError) as exc:
+        return _refused("rm", exc)
+    print(f"kblam rm: removed {result.finding_id} ({result.path}), merged into {result.target_id}")
+    if result.folder:
+        print(f"kblam rm: removed {result.folder}, which the removal left empty")
+    print(f"kblam rm: regenerated {result.index_path}" + (" and .kblam/tree.hash" if result.recorded else ""))
+    for item in result.closed:
+        pair = item.new_id + (f" vs {item.existing_id}" if item.existing_id else "")
+        print(f"kblam rm: closed {item.kind} item {item.id} ({item.verdict or 'unchecked'} {pair}): "
+              f"{item.close_reason}")
+    for staged in result.staged:
+        print(f"kblam rm: {staged} is a staged copy of {result.finding_id}; putting it would add "
+              f"{result.finding_id} again, so delete it unless that is what you want")
+    title = f" ({result.title})" if result.title else ""
+    print(f"kblam rm: commit this with the reason for the removal in the message, e.g.: Remove "
+          f"{result.finding_id}{title}, merged into {result.target_id}: <what made it redundant>")
+    return EXIT_OK
+
+
+def _cmd_renumber(cfg, args) -> int:
+    from kblam.store import renumber
+
+    try:
+        result = renumber(cfg, Path(args.path))
+    except (StoreError, LockError) as exc:
+        return _refused("renumber", exc)
+    print(f"kblam renumber: {result.old_id} -> {result.new_id}: {result.old_path} is now {result.new_path} "
+          f"(fingerprint {result.fingerprint}); {result.old_id} stays with {', '.join(result.kept)}")
+    for dependent, path in result.rekeyed:
+        print(f"kblam renumber: {dependent} depends_on {result.old_id} is now {result.new_id}: "
+              f"{result.fingerprint} ({path}), since its fingerprint showed it meant {result.old_path}")
+    print(f"kblam renumber: regenerated {result.index_path}" + (" and .kblam/tree.hash" if result.recorded else ""))
+    if result.mentions:
+        print(f"kblam renumber: {len(result.mentions)} other mention(s) of {result.old_id} may mean either "
+              f"finding; a person checks each and points it at {result.new_id} where it meant the renumbered one:")
+        for mention in result.mentions:
+            print(f"  {mention}")
+    else:
+        print(f"kblam renumber: no other mention of {result.old_id} in {cfg.findings_dir}/")
+    return EXIT_OK
+
+
+def _cmd_items(cfg, args) -> int:
+    from kblam import items
+
+    view = load_view(cfg)
+    lines = [] if args.reworded or args.stats else items.listing_lines(items.open_items(cfg, view))
+    if args.reworded:
+        lines += items.reworded_lines(items.reworded(cfg, view))
+    if args.stats:
+        lines += items.stats_lines(items.stats(cfg, view))
+    for line in lines:
+        print(line)
     return EXIT_OK
 
 
 def _cmd_ack(cfg, args) -> int:
     result = ack(cfg, args.dependent, args.target)
     if result.changed:
+        # SPEC §7 ack: the target as the dependent recorded it, beside its current claim, for the re-reading
+        if result.claim_then is not None:
+            print(f"{args.target} as recorded (commit {result.then_commit}): {result.claim_then}")
+        else:
+            print(f"kblam ack: {result.history_note}")
+        print(f"{args.target} now: {result.claim_now}")
         print(f"kblam ack: {args.dependent} depends_on {args.target} set to {result.fingerprint} "
               f"({result.path})" + (" and .kblam/tree.hash rewritten" if result.recorded else ""))
     else:
@@ -288,10 +408,126 @@ def _cmd_cost(cfg, args) -> int:
     return EXIT_OK
 
 
+def _cmd_recheck(cfg, args) -> int:
+    """Run the check: commands a person has approved on this machine (SPEC §7). At a terminal, ask about
+    each new or changed one first; without one, report those as not approved."""
+    recheck.check_state_paths(cfg)
+    checks, problems = recheck.collect(cfg, args.ids)
+    approvals = recheck.load_approvals(cfg)
+    states = {c.finding_id: recheck.approval_state(c, approvals) for c in checks}
+    if args.list:
+        return _list_rechecks(checks, states, problems)
+    terminal = recheck.at_terminal()
+    declined = set()
+    if terminal:  # a person is here: ask about every command that needs it before running any
+        for c in checks:
+            if c.problem is None and not states[c.finding_id].approved:
+                print(recheck.approval_prompt(cfg, c, states[c.finding_id]))
+                try:
+                    answer = input(f"Run it, and approve it for {c.finding_id} on this machine? [y/N] ")
+                except EOFError:
+                    answer = ""
+                if answer.strip().lower() in ("y", "yes"):
+                    recheck.record_approval(cfg, c)
+                    states[c.finding_id] = recheck.State(True)
+                else:
+                    declined.add(c.finding_id)
+                    states[c.finding_id] = recheck.State(False, "you did not approve it")
+    counts = Counter(_recheck_one(cfg, c, states[c.finding_id], terminal, c.finding_id in declined)
+                     for c in checks)
+    for problem in problems:
+        print(f"kblam recheck: {problem}")
+    if not checks and not problems:
+        print("kblam recheck: no finding has a check: command")
+        return EXIT_OK
+    parts = [f"{counts['passed']} passed"] + [f"{counts[k]} {k}" for k in ("failed", "could not run", "not approved")
+                                              if counts[k]]
+    if problems:
+        parts.append(f"{len(problems)} finding(s) not considered")
+    bad = len(checks) - counts["passed"] + len(problems)
+    print(f"kblam recheck: {len(checks)} check(s): {', '.join(parts)}" + (f". {SKILL_POINTER}" if bad else ""))
+    return EXIT_INVALID if bad else EXIT_OK
+
+
+def _recheck_one(cfg, c: recheck.Check, state: recheck.State, terminal: bool, declined: bool) -> str:
+    """Run or report one check; the summary's category for it."""
+    if c.problem:
+        print(f"kblam recheck: {c.finding_id} could not run: {c.problem}")
+        recheck.log(cfg, c, "not_started", terminal=terminal)
+        return "could not run"
+    if state.approved:
+        now = recheck.named_files(cfg.repo_root, c.argv)
+        if now != c.files:  # changed while this run asked, or ran an earlier check
+            state = recheck.State(False, f"{recheck.changed_files(c.files, now)} changed since approval")
+    if not state.approved:
+        print(f"kblam recheck: {c.finding_id} not run: not approved on this machine ({state.reason}): "
+              f"{shown(c.command)}")
+        if not terminal:
+            print(f"  A person approves it by running kblam recheck {c.finding_id} at a terminal, which shows the "
+                  f"command first; an agent asks the user to do that. Anyone who can push to this repository "
+                  f"can put a command in a finding, so an agent never runs an unapproved one itself.")
+        elif not declined:
+            print(f"  Run kblam recheck {c.finding_id} again to see it and decide.")
+        recheck.log(cfg, c, "declined" if declined else "not_approved", terminal=terminal)
+        return "not approved"
+    print(f"kblam recheck: {c.finding_id} running: {shown(c.command)}", flush=True)
+    result = recheck.run_check(cfg, c)
+    recheck.log(cfg, c, result.status, terminal=terminal, result=result)
+    if result.status == "passed":
+        print(f"kblam recheck: {c.finding_id} passed ({result.detail} after {result.seconds:.1f} s)")
+        return "passed"
+    if result.status == "not_started":
+        print(f"kblam recheck: {c.finding_id} could not run: {result.detail}")
+        return "could not run"
+    output = recheck.output_path(cfg, c.finding_id).relative_to(cfg.repo_root).as_posix()
+    what = result.detail if result.status == "timed_out" else f"{result.detail} after {result.seconds:.1f} s"
+    print(f"kblam recheck: {c.finding_id} FAILED ({what}); its output is in {output}"
+          + (", ending:" if result.tail else ", and is empty"))
+    for line in result.tail:
+        print(f"  | {line}")
+    if result.status == "timed_out":
+        print(f"  {c.finding_id}'s check did not finish. If it needs longer, ask the user to raise [kb] "
+              f"recheck_timeout_seconds in kblam.toml; otherwise find out why it hangs, and kblam edit "
+              f"{c.finding_id} to fix its check:.")
+    else:
+        print(f"  {c.finding_id}'s key number did not reproduce, or its command broke. Read the output, then "
+              f"kblam edit {c.finding_id} so the finding states what its evidence shows now, or so its check: "
+              f"runs what reproduces it.")
+    return "failed"
+
+
+def _list_rechecks(checks: list[recheck.Check], states: dict[str, recheck.State], problems: list[str]) -> int:
+    """`kblam recheck --list`: each check: command and its approval state on this machine; nothing runs."""
+    approved = broken = 0
+    for c in checks:
+        state = states[c.finding_id]
+        if c.problem:
+            broken += 1
+            label = "cannot run"
+        elif state.approved:
+            approved += 1
+            label = "approved"
+        else:
+            label = f"not approved ({state.reason})"
+        print(f"kblam recheck: {c.finding_id} {label}: {shown(c.command)}")
+        if c.problem:
+            print(f"  {c.problem}")
+    for problem in problems:
+        print(f"kblam recheck: {problem}")
+    print(f"kblam recheck --list: {len(checks)} check(s): {approved} approved, "
+          f"{len(checks) - approved - broken} not approved on this machine"
+          + (f", {broken} cannot run" if broken else "") + "; nothing was run")
+    return EXIT_OK
+
+
 def _cmd_prompt_id(cfg, args) -> int:
-    """The id of this project's Jev prompt: the wording in its [jev.prompt] tables (§6.2, §9)."""
+    """The ids of this project's Jev prompt, the wording in its [jev.prompt] tables (§6.2, §9): the
+    combined id, then each question's own, which [jev.thresholds] records as relation_prompt_id and
+    revision_prompt_id."""
     settings = jev_settings(cfg)
     print(f"kblam prompt-id: {settings.prompt_id}")
+    print(f"relation: {settings.relation_prompt_id}")
+    print(f"revision: {settings.revision_prompt_id}")
     return EXIT_OK
 
 
@@ -382,8 +618,33 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--distinct", required=True, metavar="REASON",
                    help="why they are distinct; stored so the pair at these fingerprints is not raised again")
     p.set_defaults(func=_cmd_resolve)
+    p = sub.add_parser("rm", help="remove a finding after a merge moved everything it stated into another one "
+                                  "(an adjudicator's command); the reason goes in the commit message")
+    p.add_argument("id", metavar="F-NNNN")
+    p.add_argument("--merged-into", required=True, metavar="F-NNNN", dest="merged_into",
+                   help="the finding that now states what the removed one stated")
+    p.set_defaults(func=_cmd_rm)
+    p = sub.add_parser("renumber", help="give a new ID to one of two findings that share an ID (K1, after the work "
+                                        "of two clones is merged), re-keying the depends_on entries that mean it")
+    p.add_argument("path", help="the finding file under the KB root to renumber")
+    p.set_defaults(func=_cmd_renumber)
+    p = sub.add_parser("items", help="list the open review, rejected and unchecked items in .kblam/review.jsonl")
+    p.add_argument("--reworded", action="store_true",
+                   help="instead, list the rejected items whose finding went in later at another fingerprint while "
+                        "the other side stayed as it was: a correction, or rewording to pass the check")
+    p.add_argument("--stats", action="store_true",
+                   help="instead, count each verdict's closed items as closed distinct or otherwise, and say "
+                        "whether its recalibration is due (SPEC §10.7)")
+    p.set_defaults(func=_cmd_items)
     p = sub.add_parser("cost", help="summarise .kblam/calls.jsonl: Jev requests, tokens and cost, per day and kind")
     p.set_defaults(func=_cmd_cost)
+    p = sub.add_parser("recheck", help="run the check: commands of the given findings, or of every finding; a "
+                                       "new or changed command runs only once a person approves it at a "
+                                       "terminal")
+    p.add_argument("ids", nargs="*", metavar="F-NNNN")
+    p.add_argument("--list", action="store_true",
+                   help="print each check: command and whether it is approved on this machine; run nothing")
+    p.set_defaults(func=_cmd_recheck)
     p = sub.add_parser("prompt-id", help="print the id of this project's Jev prompt (its [jev.prompt] tables): "
                                          "the value [jev.thresholds] records and calibration is tied to")
     p.set_defaults(func=_cmd_prompt_id)
@@ -418,8 +679,12 @@ def main(argv: list[str] | None = None) -> int:
         return run_init(args.update)
     try:
         cfg = load_config(root=args.root)
+        tracked = tracked_state(cfg)
+        if tracked:  # SPEC §8.3: a pull may have written someone else's state there
+            print(f"kblam {args.command}: {tracked_state_problem(tracked)}. {SKILL_POINTER}", file=sys.stderr)
+            return EXIT_INVALID
         return args.func(cfg, args)
-    except (ConfigError, StoreError, LockError, JevUnavailable, ReviewError, ApprovalError) as exc:
+    except (ConfigError, StoreError, LockError, JevUnavailable, ReviewError, ApprovalError, RecheckError) as exc:
         pointer = f" {SKILL_POINTER}" if args.command == "put" and not isinstance(exc, ConfigError) else ""
         print(f"kblam {args.command}: {exc}{pointer}", file=sys.stderr)
         if isinstance(exc, LockError):

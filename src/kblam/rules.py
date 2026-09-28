@@ -1,4 +1,4 @@
-"""Deterministic validator rules K1-K11 (SPEC §5).
+"""Deterministic validator rules K1-K12 (SPEC §5).
 
 Each rule takes a KBView and returns Issues. Messages are addressed to an agent: they name the
 rule, the place, and what to do about it.
@@ -9,6 +9,7 @@ from __future__ import annotations
 import bisect
 import functools
 import math
+import posixpath
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -37,9 +38,11 @@ NOT_PROSE_PREFIXES = ("#", "```", "~~~", ">", "<!--", "|")
 VERBATIM_START_RE = re.compile(r"^\s*<!--\s*verbatim\b", re.IGNORECASE)
 VERBATIM_RE = re.compile(
     r"^\s*<!--\s*verbatim:\s*(?P<path>.+?):"
-    r"(?:(?P<first>\d+)(?:-(?P<last>\d+))?|@0x(?P<offset>[0-9A-Fa-f]+))\s*-->\s*$"
+    r"(?:(?P<first>\d+)(?:-(?P<last>\d+))?|@0x(?P<offset>[0-9A-Fa-f]+)(?P<hex>\s+hex)?)\s*-->\s*$"
 )
 FENCE_RE = re.compile(r"^ {0,3}(?P<fence>`{3,}|~{3,})")
+BLOCKQUOTE_RE = re.compile(r"^ {0,3}>")  # K12; four spaces would make an indented code block
+HEX_DIGITS_RE = re.compile(r"[0-9A-Fa-f]+")
 WORD_TOKEN_RE = re.compile(r"[a-z0-9]+(?:[.\-/:][a-z0-9]+)*")
 
 
@@ -78,6 +81,36 @@ def _repo_path(view: KBView, raw: str) -> tuple[Path | None, str | None]:
     if not full.is_relative_to(root):
         return None, "points outside the repository root"
     return full, None
+
+
+def _segments(raw: str) -> tuple[str, ...]:
+    """A repo-relative path as whole segments, with `\\` read as `/`. `.`, `..` and empty segments are
+    resolved as text, so `./evidence/run/` is (evidence, run) and `evidence/../src/a.py` is (src, a.py)."""
+    normal = posixpath.normpath(raw.replace("\\", "/"))
+    return () if normal == "." else tuple(normal.split("/"))
+
+
+def _folders(names) -> list[tuple[str, ...]]:
+    """Configured folders ([kb] evidence_roots, history_dirs) as segments. A `/` at either end is dropped,
+    and a folder naming the repository root itself is left out, since it would hold every path."""
+    return [folder for folder in (_segments(name.strip("/\\")) for name in names) if folder]
+
+
+def _under(raw: str, folders: list[tuple[str, ...]]) -> bool:
+    """Whether a repo-relative path lies under one of `folders`, matched by whole leading path segments:
+    evidence/ holds evidence/run/log.txt, not evidence-old/log.txt."""
+    parts = _segments(raw)
+    return any(parts[:len(folder)] == folder for folder in folders)
+
+
+def _shown(folders: list[tuple[str, ...]]) -> str:
+    return ", ".join("/".join(folder) + "/" for folder in folders)
+
+
+def _reported_label(cfg) -> str:
+    """The label of reported findings (SPEC §4), or "" when reported_label is "" or not in labels: then
+    no finding is reported, and K2's history exception and K11's label checks are off."""
+    return cfg.reported_label if cfg.reported_label in cfg.labels else ""
 
 
 def _mapping_key_line(f: Finding, mapping, key, fallback_key: str) -> int | None:
@@ -143,9 +176,14 @@ def _k1_fields(view: KBView, f: Finding) -> list[Issue]:
         if not isinstance(value, str) or not TOPIC_RE.match(value):
             add(f.key_line("topic"), f"topic {value!r} must be a folder name of lowercase letters, digits, "
                                      f"'-' or '_'")
-        elif value != folder:
-            add(f.key_line("topic"), f"topic '{value}' does not match the folder '{folder}'; the topic field "
-                                     f"and the folder must agree (kblam put files a finding under its topic)")
+        else:
+            if cfg.topics and value not in cfg.topics:  # [kb] topics: empty allows any (SPEC §3)
+                add(f.key_line("topic"), f"topic '{value}' is not in the vocabulary; use one of: "
+                                         f"{', '.join(cfg.topics)}")
+            if value != folder:
+                add(f.key_line("topic"), f"topic '{value}' does not match the folder '{folder}'; the topic "
+                                         f"field and the folder must agree (kblam put files a finding under "
+                                         f"its topic)")
 
     if "label" in meta and meta["label"] not in cfg.labels:
         add(f.key_line("label"), f"label {meta['label']!r} is not in the vocabulary; use one of: "
@@ -231,24 +269,41 @@ def _k1_fields(view: KBView, f: Finding) -> list[Issue]:
 
 
 def k2_references(view: KBView) -> list[Issue]:
+    """Evidence and depends_on targets exist (SPEC §5 K2). Evidence lies under an [kb] evidence_roots folder;
+    a reported finding's may also lie under a history_dirs folder, where the document it quotes is (§4)."""
+    cfg = view.cfg
     issues: list[Issue] = []
     ids = {f.file_id for f in view.findings}
+    roots, history = _folders(cfg.evidence_roots), _folders(cfg.history_dirs)
+    shown_roots = _shown(roots) or "none are set in [kb] evidence_roots"
+    reported = _reported_label(cfg)
     for f in _parsed(view):
         evidence = f.meta.get("evidence")
         if not _is_str_list(evidence) or not evidence:
             line = f.key_line("evidence") if "evidence" in f.meta else 1
             issues.append(_issue(
                 "K2", f, line,
-                "evidence must be a list of at least one repo-relative path (evidence/ folder, capture, "
-                "source file) that supports the claim",
+                f"evidence must be a list of at least one repo-relative path under an evidence root "
+                f"({shown_roots}) that supports the claim: an evidence package, a capture or a log",
             ))
         if isinstance(evidence, list):
+            is_reported = bool(reported) and f.meta.get("label") == reported
+            allowed = roots + history if is_reported else roots
+            where = f"an evidence root ({shown_roots})"
+            if is_reported and history:
+                where += f" or a history folder ({_shown(history)})"
             for i, item in enumerate(evidence):
                 if not isinstance(item, str):
                     continue
                 full, problem = _repo_path(view, item)
                 if problem:
                     issues.append(_issue("K2", f, f.item_line("evidence", i), f"evidence path {item} {problem}"))
+                elif not _under(item, allowed):
+                    issues.append(_issue(
+                        "K2", f, f.item_line("evidence", i),
+                        f"evidence path {item} is not under {where}; cite evidence that lies there, relative "
+                        f"to the repository root",
+                    ))
                 elif not full.exists():
                     issues.append(_issue(
                         "K2", f, f.item_line("evidence", i),
@@ -371,10 +426,9 @@ def _any_term_pattern(terms: tuple[str, ...]) -> re.Pattern:
     return re.compile("|".join(f"(?:{_term_pattern(term).pattern})" for term in terms), re.IGNORECASE)
 
 
-def _history_hits(view: KBView, text: str) -> list[tuple[int, str]]:
-    """(char offset, term) for every history term in text."""
-    terms = view.cfg.history_terms
-    if _any_term_pattern(terms).search(text) is None:
+def _history_hits(terms: tuple[str, ...], text: str) -> list[tuple[int, str]]:
+    """(char offset, term) for every one of `terms` in text."""
+    if not terms or _any_term_pattern(terms).search(text) is None:
         return []
     hits = []
     for term in terms:
@@ -383,19 +437,21 @@ def _history_hits(view: KBView, text: str) -> list[tuple[int, str]]:
     return sorted(hits)
 
 
-def _history_segments(view: KBView, f: Finding) -> list[tuple[int, str, list[tuple[int, str]]]]:
-    """(first file line, text, history hits) for each of _prose_segments; once per finding per view,
-    since K4 and K5 both read them."""
+def _history_segments(view: KBView, f: Finding,
+                      terms: tuple[str, ...]) -> list[tuple[int, str, list[tuple[int, str]]]]:
+    """(first file line, text, hits of `terms`) for each of _prose_segments; once per finding and term
+    list per view, since K4 and K5 both read them (with one list while [kb] history_id_terms is absent)."""
     memo = view.memo.setdefault("history", {})
-    if f.path not in memo:
-        memo[f.path] = [(line, text, _history_hits(view, text)) for line, text in _prose_segments(view, f)]
-    return memo[f.path]
+    key = (f.path, terms)
+    if key not in memo:
+        memo[key] = [(line, text, _history_hits(terms, text)) for line, text in _prose_segments(view, f)]
+    return memo[key]
 
 
 def k4_history_language(view: KBView) -> list[Issue]:
     issues: list[Issue] = []
     for f in _parsed(view):
-        for first_line, text, hits in _history_segments(view, f):
+        for first_line, text, hits in _history_segments(view, f, view.cfg.history_terms):
             seen = set()
             for offset, term in hits:
                 line = first_line + text.count("\n", 0, offset)
@@ -412,10 +468,15 @@ def k4_history_language(view: KBView) -> list[Issue]:
 
 
 def k5_id_near_history(view: KBView) -> list[Issue]:
-    window = view.cfg.history_id_window
+    """Another finding's ID near a term that describes it as wrong or replaced: K5's own [kb]
+    history_id_terms, or K4's history_terms while that key is absent (SPEC §5, §9)."""
+    cfg = view.cfg
+    terms = cfg.history_terms if cfg.history_id_terms is None else cfg.history_id_terms
+    window = cfg.history_id_window
     issues: list[Issue] = []
     for f in _parsed(view):
-        for first_line, text, hits in _history_segments(view, f):
+        seen = set()  # one issue per (ID, term) in the finding, title and body together
+        for first_line, text, hits in _history_segments(view, f, terms):
             if not hits:
                 continue
             starts = [m.start() for m in re.finditer(r"\S+", text)]
@@ -423,7 +484,6 @@ def k5_id_near_history(view: KBView) -> list[Issue]:
             def word_index(offset: int) -> int:
                 return bisect.bisect_right(starts, offset) - 1
 
-            seen = set()
             for match in ID_IN_TEXT_RE.finditer(text):
                 other = match.group(0)
                 if other == f.file_id:
@@ -436,8 +496,9 @@ def k5_id_near_history(view: KBView) -> list[Issue]:
                         issues.append(_issue(
                             "K5", f, line,
                             f"{other} appears within {window} words of \"{term}\". Do not describe "
-                            f"another finding as wrong or changed; if {other} is wrong, rewrite it in "
-                            f"place (kblam edit {other}) so it states the current fact",
+                            f"another finding as wrong, changed or replaced; if {other} is wrong or out "
+                            f"of date, rewrite it in place (kblam edit {other}) so it states the current "
+                            f"fact",
                         ))
     return issues
 
@@ -585,23 +646,38 @@ class Excerpt:
     start: int
     end: int
     problem: str | None    # the K10 failure, or None
-    verified: bool         # the excerpt was found in a text source
+    verified: bool         # found in its source: text in a text source, or hex bytes in any source
 
 
-def _excerpt_after(body: list[str], i: int) -> tuple[str | None, int, str | None]:
-    """The fenced block or blockquote starting at body[i]: (excerpt, end index, problem)."""
-    follow = "a verbatim tag must be directly followed (next line) by a fenced code block or a blockquote"
+def _closes_fence(line: str, marker: str) -> bool:
+    """Whether `line` closes a fenced block opened by `marker`: its character, at least as many times,
+    and nothing else."""
+    stripped = line.strip()
+    return stripped.startswith(marker) and not stripped.strip(marker[0])
+
+
+def _excerpt_after(body: list[str], i: int, *,
+                   hex_excerpt: bool = False) -> tuple[str | None, int, str | None]:
+    """The fenced block or blockquote starting at body[i]: (excerpt, end index, problem). A hex excerpt
+    is a fenced block only."""
+    if hex_excerpt:
+        follow = ("a hex verbatim tag must be directly followed (next line) by a fenced code block of hex "
+                  "byte pairs")
+    else:
+        follow = "a verbatim tag must be directly followed (next line) by a fenced code block or a blockquote"
     if i >= len(body):
         return None, i, follow
     fence = FENCE_RE.match(body[i])
     if fence:
         marker = fence.group("fence")
         for j in range(i + 1, len(body)):
-            stripped = body[j].strip()
-            if stripped.startswith(marker) and not stripped.strip(marker[0]):
+            if _closes_fence(body[j], marker):
                 return "\n".join(body[i + 1:j]), j + 1, None
         return None, i, "the fenced block after the verbatim tag is never closed"
     if body[i].lstrip().startswith(">"):
+        if hex_excerpt:
+            return None, i, ("a hex excerpt is a fenced code block of hex byte pairs, not a blockquote: put "
+                             "the bytes between ``` lines")
         lines = []
         j = i
         while j < len(body) and body[j].lstrip().startswith(">"):
@@ -664,10 +740,11 @@ def _verbatim_excerpts(view: KBView, f: Finding) -> list[Excerpt]:
         tag = VERBATIM_RE.match(line)
         if not tag:
             excerpts.append(Excerpt(i, i + 1, "malformed verbatim tag; use <!-- verbatim: path:LINE -->, "
-                                              "<!-- verbatim: path:FIRST-LAST --> or "
-                                              "<!-- verbatim: path:@0xOFFSET -->", False))
+                                              "<!-- verbatim: path:FIRST-LAST -->, "
+                                              "<!-- verbatim: path:@0xOFFSET --> or, to quote bytes as hex, "
+                                              "<!-- verbatim: path:@0xOFFSET hex -->", False))
             continue
-        excerpt, end, problem = _excerpt_after(body, i + 1)
+        excerpt, end, problem = _excerpt_after(body, i + 1, hex_excerpt=bool(tag.group("hex")))
         excerpts.append(_check_excerpt(view, tag, i, end, excerpt, problem))
     return excerpts
 
@@ -679,7 +756,12 @@ def _check_excerpt(view: KBView, tag: re.Match, start: int, end: int, excerpt: s
 
     if problem:
         return failed(problem)
-    if not excerpt.strip():
+    quoted = None  # the bytes a hex excerpt spells
+    if tag.group("hex"):
+        quoted, problem = _hex_bytes(excerpt)
+        if problem:
+            return failed(problem)
+    elif not excerpt.strip():
         return failed("the verbatim excerpt is empty")
     source = tag.group("path").strip()
     full, problem = _repo_path(view, source)
@@ -689,12 +771,58 @@ def _check_excerpt(view: KBView, tag: re.Match, start: int, end: int, excerpt: s
     if found is None:
         return failed(f"verbatim source {source} does not exist; cite an existing file relative to the "
                       f"repository root")
-    if found.text is None:
-        # Binary source: K10 does not check it (the finding's check: command does), and an
-        # unchecked excerpt is not exempt from K4/K5.
+    if quoted is not None:
+        # Bytes compare in any source, so a hex excerpt checks a binary one too (SPEC §5 K10).
+        problem = _hex_problem(int(tag.group("offset"), 16), source, quoted, found.data)
+    elif found.text is None:
+        # Binary source: K10 does not check a text excerpt of it (the finding's check: command does),
+        # and an unchecked excerpt is not exempt from K4/K5.
         return Excerpt(start, end, None, False)
-    problem = _excerpt_problem(tag, source, excerpt, found)
+    else:
+        problem = _excerpt_problem(tag, source, excerpt, found)
     return failed(problem) if problem else Excerpt(start, end, None, True)
+
+
+def _hex_bytes(block: str) -> tuple[bytes | None, str | None]:
+    """The bytes a hex excerpt's fenced block spells, or its problem (SPEC §5 K10).
+
+    Whitespace only separates groups, so any layout reads the same: one byte per group, four-byte
+    groups, or the unbroken lines of `xxd -p`. A group may start with `0x`, as C arrays and many dump
+    tools write bytes. Each group holds whole bytes: a group with an odd number of digits (`0x7`) is
+    refused, since reading it as half a byte would shift every byte after it.
+    """
+    digits = []
+    for group in block.split():
+        pairs = group[2:] if group[:2] in ("0x", "0X") else group
+        if not HEX_DIGITS_RE.fullmatch(pairs):
+            shown = group if len(group) <= 24 else group[:24] + "..."
+            return None, (f"the hex excerpt holds {shown!r}, which is not hex digits; write the bytes as hex "
+                          f"pairs separated by whitespace, e.g. 7f 45 4c 46 (a group may start with 0x)")
+        if len(pairs) % 2:
+            return None, (f"the hex excerpt holds {group}, an odd number of hex digits; write every byte as "
+                          f"two digits (07, not 7)")
+        digits.append(pairs)
+    if not digits:
+        return None, ("the hex excerpt is empty; write the source's bytes at the cited offset as hex pairs, "
+                      "e.g. 7f 45 4c 46")
+    return bytes.fromhex("".join(digits)), None
+
+
+def _hex_problem(offset: int, source: str, quoted: bytes, data: bytes) -> str | None:
+    """None when a hex excerpt's bytes are the source's at `offset`; otherwise where they first differ."""
+    if data.startswith(quoted, offset):
+        return None
+    if offset + len(quoted) > len(data):
+        problem = (f"the hex excerpt's {len(quoted)} bytes from byte offset 0x{offset:X} run past the end of "
+                   f"{source}, which has {len(data)} bytes")
+    else:
+        k = next(k for k in range(len(quoted)) if quoted[k] != data[offset + k])
+        problem = (f"the hex excerpt differs from {source} at byte offset 0x{offset + k:X}: it has "
+                   f"{quoted[k]:02x} where the source has {data[offset + k]:02x}")
+    where = data.find(quoted)
+    if where >= 0:
+        return f"{problem}; these bytes occur at byte offset 0x{where:X}, so check the cited offset"
+    return f"{problem}; copy the bytes from a hex dump of the source, never retype them"
 
 
 def k10_verbatim(view: KBView) -> list[Issue]:
@@ -736,15 +864,13 @@ def _excerpt_problem(tag: re.Match, source: str, excerpt: str, found: _Source) -
 
 
 def _in_history(view: KBView, raw: str) -> bool:
-    parts = PurePosixPath(raw.replace("\\", "/")).parts
-    parts = parts[1:] if parts[:1] == (".",) else parts
-    return any(parts[:len(d.split("/"))] == tuple(d.split("/")) for d in view.cfg.history_dirs if d)
+    return _under(raw, _folders(view.cfg.history_dirs))
 
 
 def k11_reported(view: KBView) -> list[Issue]:
     """A reported claim quotes the retired document that states it; nothing else rests on one."""
     cfg = view.cfg
-    reported = cfg.reported_label if cfg.reported_label in cfg.labels else ""
+    reported = _reported_label(cfg)
     labels = {f.file_id: f.meta.get("label") for f in _parsed(view)}
     history = " or ".join(f"{d}/" for d in cfg.history_dirs if d) or "a history folder"
     issues: list[Issue] = []
@@ -782,6 +908,49 @@ def k11_reported(view: KBView) -> list[Issue]:
     return issues
 
 
+# --- K12 ------------------------------------------------------------------------------------
+
+
+def _blockquote_starts(body: list[str]) -> list[int]:
+    """The index of each blockquote's first line in `body`: a blockquote is a run of lines that start
+    with `>` after at most three spaces, outside fenced code blocks (an unclosed fence runs to the end,
+    as in Markdown)."""
+    starts: list[int] = []
+    fence = None  # the marker of the open fenced block
+    for i, line in enumerate(body):
+        if fence is not None:
+            if _closes_fence(line, fence):
+                fence = None
+            continue
+        opened = FENCE_RE.match(line)
+        if opened:
+            fence = opened.group("fence")
+        elif BLOCKQUOTE_RE.match(line) and not (i and BLOCKQUOTE_RE.match(body[i - 1])):
+            starts.append(i)
+    return starts
+
+
+def k12_blockquotes(view: KBView) -> list[Issue]:
+    """With [kb] verbatim_blockquotes, every blockquote in a finding's body is a verbatim excerpt, so no
+    quotation escapes K10 (SPEC §5 K12); off by default. A blockquote passes when the line directly before
+    it is a verbatim tag of any form, a malformed one included, since K10 reads that tag and reports it."""
+    if not view.cfg.verbatim_blockquotes:
+        return []
+    issues: list[Issue] = []
+    for f in _parsed(view):
+        body = f.body_lines
+        for i in _blockquote_starts(body):
+            if i and VERBATIM_START_RE.match(body[i - 1]):
+                continue
+            issues.append(_issue(
+                "K12", f, f.body_start_line + i,
+                "a blockquote must be a verbatim excerpt here ([kb] verbatim_blockquotes): put "
+                "<!-- verbatim: path:LINES --> on the line directly before it, citing the source lines it "
+                "copies exactly, or write the paraphrase as prose, without >",
+            ))
+    return issues
+
+
 # --- entry point ----------------------------------------------------------------------------
 
 
@@ -799,5 +968,7 @@ def validate(view: KBView, focus: frozenset[str] = frozenset()) -> list[Issue]:
         + k9_duplicates(view, focus)
         + k10_verbatim(view)
         + k11_reported(view)
+        + k12_blockquotes(view)
     )
+    # by rule number, so K12 sorts after K11 (as a string it would sort before K2)
     return sorted(set(issues), key=lambda i: (i.path, i.line, int(i.code[1:]), i.message))

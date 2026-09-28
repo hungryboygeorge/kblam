@@ -4,7 +4,8 @@ Candidate selection (§6.1), scope gating and quantity comparison (§6.3) are co
 are scored by a local ollama embedding when one is available and by BM25 otherwise, with one
 mechanism for the whole check (§6.1 Choosing, M6.7). Jev is asked only the questions an enabled
 verdict reads: a KB whose `[jev.thresholds]` enables no verdict sends nothing, and only §6.3
-applies. Each check is logged to `.kblam/checks.jsonl` (IDs, fingerprints and verdicts; never
+applies. A verdict that the committed resolutions (kblam.resolutions.jsonl, §6.4) cover is
+suppressed. Each check is logged to `.kblam/checks.jsonl` (IDs, fingerprints and verdicts; never
 finding text).
 """
 
@@ -17,11 +18,21 @@ from collections import Counter
 from dataclasses import dataclass, field, replace
 from pathlib import PurePosixPath
 
-from kblam import jev_prompts
+from kblam import jev_prompts, resolutions
 from kblam.config import CONFIG_NAME, Config, ConfigError
 from kblam.embed import EmbedUnavailable, Embedder, probe, title_and_claim
 from kblam.finding import Finding, fingerprint, id_number, plain_data
-from kblam.jev import CACHE_NAME, CallLog, JevClient, JevSettings, JevUnavailable, PairCache, Side, jev_settings
+from kblam.jev import (
+    CACHE_NAME,
+    CallLog,
+    JevClient,
+    JevSettings,
+    JevUnavailable,
+    PairCache,
+    Side,
+    cache_key,
+    jev_settings,
+)
 from kblam.view import KBView
 
 CHECK_LOG_NAME = "checks.jsonl"
@@ -34,7 +45,6 @@ QUANTITY_CONFLICT = "quantity_conflict"
 LOW_CONFIDENCE = "low_confidence"
 RELATION_VERDICTS = (SAME_FACT, CONFLICT, RESTATES)  # relation options a threshold can make fire
 MODES = ("reject", "review")
-ANY_SCOPE = "any"
 
 # §6.1 similarity: BM25 over each finding's title and claim paragraph.
 BM25_K1 = 1.2
@@ -62,12 +72,16 @@ class Threshold:
 
 @dataclass(frozen=True)
 class Policy:
-    """`[jev.thresholds]`. A verdict with no entry is disabled."""
+    """`[jev.thresholds]`. A verdict with no entry is disabled. Each question's thresholds hold for the
+    wording whose id they record (§6.2, §6.4): relation_prompt_id and revision_prompt_id, or, in a table
+    written before M6.10, the combined prompt_id, which stands for both questions while it is current."""
 
     served_model: str | None
-    prompt_id: str | None
+    prompt_id: str | None                   # the combined id; None when each question's id is recorded
     verdicts: dict[str, Threshold]
     low_confidence_review: float | None
+    relation_prompt_id: str | None = None
+    revision_prompt_id: str | None = None
 
     @property
     def asks_relation(self) -> bool:
@@ -88,17 +102,31 @@ def _unit_number(where: str, value) -> float:
     return float(value)
 
 
+# §6.2: the id of each question's wording, as `[jev.thresholds]` records it; (key, question, the default's id)
+QUESTION_IDS = (("relation_prompt_id", jev_prompts.RELATION_KEY, "6d79e4e0e409"),
+                ("revision_prompt_id", jev_prompts.REVISION_KEY, "d9a34c823fe3"))
+
+
 def parse_policy(thresholds: dict) -> Policy:
-    """SPEC §9 `[jev.thresholds]`: served_model, prompt_id, one inline table per verdict, and
-    optional low_confidence_review."""
+    """SPEC §9 `[jev.thresholds]`: served_model, the prompt ids, one inline table per verdict, and
+    optional low_confidence_review. The prompt ids are relation_prompt_id and revision_prompt_id, one
+    per question (§6.2), or the combined prompt_id recorded before M6.10, but not both styles. An
+    enabled verdict needs served_model and the id of every question an enabled verdict reads."""
     if "prompt_version" in thresholds:
         raise ConfigError(f"{CONFIG_NAME}: [jev.thresholds] prompt_version is gone: "
                           f"{jev_prompts.PROMPT_MOVED}")
-    allowed = ("served_model", "prompt_id", "low_confidence_review", *RELATION_VERDICTS, REVISION)
+    allowed = ("served_model", "relation_prompt_id", "revision_prompt_id", "prompt_id", "low_confidence_review",
+               *RELATION_VERDICTS, REVISION)
     unknown = sorted(set(thresholds) - set(allowed))
     if unknown:
         raise ConfigError(f"{CONFIG_NAME}: unknown [jev.thresholds] key(s) {', '.join(unknown)}; "
                           f"allowed: {', '.join(allowed)}")
+    per_question = [key for key, _question, _default in QUESTION_IDS if key in thresholds]
+    if "prompt_id" in thresholds and per_question:
+        raise ConfigError(f"{CONFIG_NAME}: [jev.thresholds] records both prompt_id and "
+                          f"{' and '.join(per_question)}. prompt_id is the id of the whole prompt, recorded before "
+                          f"each question had its own; record relation_prompt_id and revision_prompt_id (kblam "
+                          f"prompt-id prints them) and delete prompt_id")
     verdicts = {}
     for name in (*RELATION_VERDICTS, REVISION):
         if name not in thresholds:
@@ -119,15 +147,26 @@ def parse_policy(thresholds: dict) -> Policy:
         low = _unit_number("low_confidence_review", low)
 
     served, prompt = thresholds.get("served_model"), thresholds.get("prompt_id")
-    if verdicts or low is not None:
+    policy = Policy(served, prompt, verdicts, low, thresholds.get("relation_prompt_id"),
+                    thresholds.get("revision_prompt_id"))
+    if policy.enabled:
         if not isinstance(served, str) or not served:
             raise ConfigError(f"{CONFIG_NAME}: [jev.thresholds] served_model must name the served model "
                               f"the thresholds were calibrated on, e.g. \"typesafe/jev-1.13-20260917\"")
-        if not isinstance(prompt, str) or not prompt:
-            raise ConfigError(f"{CONFIG_NAME}: [jev.thresholds] prompt_id must be the id of the prompt these "
-                              f"thresholds were calibrated on, as kblam prompt-id prints it, "
-                              f"e.g. \"4dda2f781f12\"")
-    return Policy(served, prompt, verdicts, low)
+        if "prompt_id" in thresholds:  # the combined id stands for both questions
+            if not isinstance(prompt, str) or not prompt:
+                raise ConfigError(f"{CONFIG_NAME}: [jev.thresholds] prompt_id must be the id of the prompt these "
+                                  f"thresholds were calibrated on, as kblam prompt-id prints it, "
+                                  f"e.g. \"4dda2f781f12\"")
+            return policy
+        enabled = {jev_prompts.RELATION_KEY: policy.asks_relation, jev_prompts.REVISION_KEY: policy.asks_revision}
+        for key, question, default in QUESTION_IDS:
+            value = thresholds.get(key)
+            if enabled[question] and (not isinstance(value, str) or not value):
+                raise ConfigError(f"{CONFIG_NAME}: [jev.thresholds] {key} must be the id of the prompt's "
+                                  f"{question} question these thresholds were calibrated on, as kblam prompt-id "
+                                  f"prints it (its \"{question}:\" line), e.g. \"{default}\"")
+    return policy
 
 
 # --- §6.1 candidates --------------------------------------------------------------------------
@@ -137,18 +176,24 @@ def _meta(finding: Finding) -> dict:
     return finding.meta if isinstance(finding.meta, dict) else {}
 
 
-def scope_parts(values) -> frozenset[str]:
-    """A scope value containing `/` stands for each of its parts."""
+def scope_parts(values, separator: str = "/") -> frozenset[str]:
+    """A scope value containing `separator` stands for each of its parts, and with "" no value splits
+    ([kb] scope_separator, SPEC §4, §9)."""
     parts = set()
     for value in values or ():
-        parts.update(p.strip() for p in str(value).split("/") if p.strip())
+        pieces = str(value).split(separator) if separator else [str(value)]
+        parts.update(p.strip() for p in pieces if p.strip())
     return frozenset(parts)
 
 
-def scopes_overlap(a, b) -> bool:
-    """`any` overlaps every scope; otherwise the part sets must intersect."""
-    pa, pb = scope_parts(a), scope_parts(b)
-    return ANY_SCOPE in pa or ANY_SCOPE in pb or bool(pa & pb)
+def scopes_overlap(a, b, separator: str = "/", wildcard: str = "any") -> bool:
+    """`wildcard` overlaps every scope, and with "" none does; otherwise the part sets must intersect
+    ([kb] scope_separator and scope_wildcard, SPEC §6.1 Scope gating, §9). A check passes its view's
+    configuration; the defaults are [kb]'s."""
+    pa, pb = scope_parts(a, separator), scope_parts(b, separator)
+    if wildcard and (wildcard in pa or wildcard in pb):
+        return True
+    return bool(pa & pb)
 
 
 def _scope(finding: Finding) -> list:
@@ -345,7 +390,8 @@ def select_candidates(view: KBView, finding: Finding, max_candidates: int, topic
             similar=similar,
             bonus=similarity.topic_bonus * top if same_topic and similar > 0 else 0.0,
             link_bonus=link_bonus * top if shared_anchors or shared_evidence else 0.0,
-            scope_overlap=scopes_overlap(scope, _scope(other)),
+            scope_overlap=scopes_overlap(scope, _scope(other), view.cfg.scope_separator,
+                                         view.cfg.scope_wildcard),
             embedding=similarity.embedding,
         )
         # BM25 excludes a finding that shares no token; an embedding excludes none (SPEC §6.1)
@@ -408,7 +454,9 @@ def quantity_conflicts(existing: Finding, new: Finding, tolerance: float) -> lis
 
 @dataclass(frozen=True)
 class Verdict:
-    """One verdict that fired. `mode` is the effective one (after a model/prompt mismatch downgrade)."""
+    """One verdict that fired. `mode` is the effective one (after a model/prompt mismatch downgrade).
+    Each side is named by its ID, its fingerprint, which items carry, and its state hash (§6.5), which
+    resolutions are keyed by."""
 
     verdict: str
     mode: str
@@ -421,6 +469,8 @@ class Verdict:
     p: float | None = None
     confidence: float | None = None
     noul: float | None = None
+    new_state: str | None = None
+    existing_state: str | None = None   # None for revision
 
     def scores(self) -> str:
         parts = []
@@ -473,7 +523,7 @@ class CheckResult:
     over_budget: list[str] = field(default_factory=list)
     different_scope: list[str] = field(default_factory=list)
     verdicts: list[Verdict] = field(default_factory=list)     # fired and not resolved as distinct
-    suppressed: list[Verdict] = field(default_factory=list)   # fired, but resolved --distinct at these fingerprints
+    suppressed: list[Verdict] = field(default_factory=list)   # fired, but a resolution covers it (§6.4)
     unavailable: list[str] = field(default_factory=list)      # questions Jev could not answer, with the reason
     mismatch: str | None = None                               # re-calibration warning (§6.4)
     jev_enabled: bool = True
@@ -490,12 +540,18 @@ class CheckResult:
 # --- the checker ------------------------------------------------------------------------------
 
 
-def _relation_key(existing_fp: str, new_fp: str) -> tuple:
-    return ("relation", existing_fp, new_fp)
+# The checker's answers are keyed, like the pair cache, by the sides' state hashes (§6.5).
+def _relation_key(existing_state: str, new_state: str) -> tuple:
+    return ("relation", existing_state, new_state)
 
 
-def _revision_key(new_fp: str) -> tuple:
-    return ("revision", new_fp)
+def _revision_key(new_state: str) -> tuple:
+    return ("revision", new_state)
+
+
+def _question(verdict: str) -> str:
+    """The Jev question a Jev verdict answers (§6.2): `revision` its own, every other the relation's."""
+    return jev_prompts.REVISION_KEY if verdict == REVISION else jev_prompts.RELATION_KEY
 
 
 class Checker:
@@ -541,20 +597,28 @@ class Checker:
     # --- asking ---------------------------------------------------------------------------------
 
     def _ask(self, relation_pairs: list[tuple[Side, Side]], revisions: list[Side]) -> None:
-        """Ask every question this checker has not asked yet. A failed question keeps its
-        JevUnavailable, so put does not retry it under the lock; `check --pending` retries it."""
-        pairs = list(dict.fromkeys((e, n) for e, n in relation_pairs
-                                   if _relation_key(e.fingerprint, n.fingerprint) not in self._answers))
-        sides = list(dict.fromkeys(n for n in revisions if _revision_key(n.fingerprint) not in self._answers))
+        """Ask every question this checker has no answer to yet, once per state: sides that Jev sees
+        alike share an answer (§6.5). A failed question keeps its JevUnavailable, so put does not retry
+        it under the lock; `check --pending` retries it."""
+        pairs: dict[tuple, tuple[Side, Side]] = {}
+        for e, n in relation_pairs:
+            key = _relation_key(e.state_hash, n.state_hash)
+            if key not in self._answers:
+                pairs.setdefault(key, (e, n))
+        sides: dict[tuple, Side] = {}
+        for n in revisions:
+            key = _revision_key(n.state_hash)
+            if key not in self._answers:
+                sides.setdefault(key, n)
         if not pairs and not sides:
             return
         client = self.client()
         if pairs:
-            for (e, n), got in zip(pairs, client.ask_relations(pairs, workers=self.settings.workers)):
-                self._answers[_relation_key(e.fingerprint, n.fingerprint)] = got
+            for key, got in zip(pairs, client.ask_relations(list(pairs.values()), workers=self.settings.workers)):
+                self._answers[key] = got
         if sides:
-            for n, got in zip(sides, client.ask_revisions(sides, workers=self.settings.workers)):
-                self._answers[_revision_key(n.fingerprint)] = got
+            for key, got in zip(sides, client.ask_revisions(list(sides.values()), workers=self.settings.workers)):
+                self._answers[key] = got
 
     def _questions(self, finding: Finding, selection: Selection) -> tuple[list[tuple[Side, Side]], list[Side]]:
         new = Side.of(finding)
@@ -620,19 +684,45 @@ class Checker:
 
     # --- deciding -------------------------------------------------------------------------------
 
-    def _mismatch(self, served: set[str]) -> str | None:
-        policy = self.policy
-        problems = []
-        if policy.prompt_id != self.settings.prompt_id:
-            problems.append(f"prompt {self.settings.prompt_id} (thresholds: {policy.prompt_id})")
+    def _mismatch(self, served: set[str], asked: set[str]) -> tuple[set[str], str | None]:
+        """§6.4 Model or prompt mismatch, for a check that used answers to the questions `asked`
+        ("relation", "revision") from the models `served`: the questions whose verdicts are demoted to
+        review, and the warning naming what differs. A served model other than the thresholds' demotes
+        every Jev verdict of the check; a question whose wording has another id than the one recorded for
+        it demotes only that question's (§6.2). A combined prompt_id, recorded before M6.10, vouches for
+        both questions while it is the current prompt's id, and for neither once it is not."""
+        policy, settings = self.policy, self.settings
+        if not asked:
+            return set(), None
+        problems, demoted = [], set()
+        if policy.prompt_id is not None:
+            if policy.prompt_id != settings.prompt_id:
+                problems.append(f"prompt {settings.prompt_id} (thresholds: {policy.prompt_id})")
+                demoted |= asked
+        else:
+            for question, current, recorded in (
+                    (jev_prompts.RELATION_KEY, settings.relation_prompt_id, policy.relation_prompt_id),
+                    (jev_prompts.REVISION_KEY, settings.revision_prompt_id, policy.revision_prompt_id)):
+                if question in asked and current != recorded:
+                    problems.append(f"{question} prompt {current} (thresholds: {recorded})")
+                    demoted.add(question)
         other = sorted(s for s in served if s != policy.served_model)
         if other:
             problems.append(f"served model {', '.join(other)} (thresholds: {policy.served_model})")
+            demoted |= asked
         if not problems:
-            return None
-        return (f"the [jev.thresholds] in {CONFIG_NAME} were calibrated on {policy.served_model}, prompt "
-                f"{policy.prompt_id}, but this check used {' and '.join(problems)}. Nothing is rejected: "
-                f"every verdict that fires is a review item. Re-calibrate (SPEC §10) and update [jev.thresholds]")
+            return set(), None
+        if demoted == asked:
+            effect = "No Jev verdict of this check rejects: every one that fires is a review item"
+        elif jev_prompts.RELATION_KEY in demoted:
+            effect = (f"No verdict of the relation question ({', '.join(RELATION_VERDICTS)}) rejects: every one "
+                      f"that fires is a review item. The revision question's thresholds still apply")
+        else:
+            effect = ("No revision verdict rejects: one that fires is a review item. The relation question's "
+                      "thresholds still apply")
+        return demoted, (f"the [jev.thresholds] in {CONFIG_NAME} were calibrated on {policy.served_model}, but "
+                         f"this check used {' and '.join(problems)}. {effect}. Re-calibrate (SPEC §10) and "
+                         f"update [jev.thresholds]")
 
     def _relation_verdicts(self, existing: Side, new: Side, answer) -> list[Verdict]:
         winner, confidence = answer.winner, answer.confidence
@@ -641,7 +731,8 @@ class Checker:
         if threshold and p >= threshold.p and confidence >= threshold.confidence:
             return [Verdict(winner, threshold.mode, new.finding_id, new.fingerprint, existing.finding_id,
                             existing.fingerprint, _message(winner, existing.finding_id, p=p),
-                            winner=winner, p=p, confidence=confidence)]
+                            winner=winner, p=p, confidence=confidence,
+                            new_state=new.state_hash, existing_state=existing.state_hash)]
         return []
 
     def _low_confidence(self, existing: Side, new: Side, answer) -> list[Verdict]:
@@ -653,54 +744,76 @@ class Checker:
                         existing.fingerprint,
                         _message(LOW_CONFIDENCE, existing.finding_id, winner=answer.winner,
                                  confidence=answer.confidence),
-                        winner=answer.winner, p=p, confidence=answer.confidence)]
+                        winner=answer.winner, p=p, confidence=answer.confidence,
+                        new_state=new.state_hash, existing_state=existing.state_hash)]
+
+    def _resolved(self, verdict: Verdict, resolved: dict) -> bool:
+        """§6.4 Resolutions: a verdict on a pair is suppressed by a `distinct` resolution on the unordered
+        pair of (ID, state hash) sides, a revision verdict by a `not_revision` one on its side; or by a
+        resolution recorded before M6.10, a row of pairs.sqlite on (ID, fingerprint) sides, kept until
+        `kblam upgrade` moves it. No resolution covers a quantity_conflict (§6.3). `resolved` is the
+        committed log, by resolutions.key."""
+        if verdict.verdict == QUANTITY_CONFLICT:
+            return False
+        new = (verdict.new_id, verdict.new_state)
+        if verdict.existing_id is None:
+            committed = resolutions.key(resolutions.NOT_REVISION, [new])
+            other = None
+        else:
+            committed = resolutions.key(resolutions.DISTINCT, [new, (verdict.existing_id, verdict.existing_state)])
+            other = (verdict.existing_id, verdict.existing_fp)
+        if committed in resolved:
+            return True
+        return self.cache.distinct_reason((verdict.new_id, verdict.new_fp), other) is not None
 
     def _decide(self, result: CheckResult, new: Side, pairs: list[tuple[Finding, list[QuantityConflict]]],
-                ask_revision: bool) -> None:
-        """Fill result.verdicts / suppressed / unavailable / mismatch from the answers held."""
+                ask_revision: bool, resolved: dict) -> None:
+        """Fill result.verdicts / suppressed / unavailable / mismatch from the answers held. `resolved` is
+        the committed resolutions, by resolutions.key."""
         served: set[str] = set()
+        asked: set[str] = set()    # the questions whose answers this check used
         jev_fired: list[Verdict] = []
         fired: list[Verdict] = []
         for existing_finding, conflicts in pairs:
             existing = Side.of(existing_finding)
             on_pair = [Verdict(QUANTITY_CONFLICT, "reject", new.finding_id, new.fingerprint, existing.finding_id,
-                               existing.fingerprint, _message(QUANTITY_CONFLICT, existing.finding_id, quantity=q))
+                               existing.fingerprint, _message(QUANTITY_CONFLICT, existing.finding_id, quantity=q),
+                               new_state=new.state_hash, existing_state=existing.state_hash)
                        for q in conflicts]
-            answer = self._answers.get(_relation_key(existing.fingerprint, new.fingerprint))
+            answer = self._answers.get(_relation_key(existing.state_hash, new.state_hash))
             if isinstance(answer, JevUnavailable):
                 result.unavailable.append(f"relation {new.finding_id} vs {existing.finding_id}: {answer}")
             elif answer is not None:
                 served.add(answer.call.served_model)
+                asked.add(jev_prompts.RELATION_KEY)
                 relation = self._relation_verdicts(existing, new, answer)
                 if not relation and not on_pair:
                     relation = self._low_confidence(existing, new, answer)
                 jev_fired += relation
             fired += on_pair
         if ask_revision:
-            answer = self._answers.get(_revision_key(new.fingerprint))
+            answer = self._answers.get(_revision_key(new.state_hash))
             if isinstance(answer, JevUnavailable):
                 result.unavailable.append(f"revision {new.finding_id}: {answer}")
             elif answer is not None:
                 served.add(answer.call.served_model)
+                asked.add(jev_prompts.REVISION_KEY)
                 threshold = self.policy.verdicts[REVISION]
                 if answer.noul >= threshold.noul:
                     jev_fired.append(Verdict(REVISION, threshold.mode, new.finding_id, new.fingerprint, None, None,
-                                             _message(REVISION, None), noul=answer.noul))
+                                             _message(REVISION, None), noul=answer.noul,
+                                             new_state=new.state_hash))
 
-        result.mismatch = self._mismatch(served) if served else None
-        if result.mismatch:
-            jev_fired = [replace(v, mode="review") for v in jev_fired]
+        demoted, result.mismatch = self._mismatch(served, asked)
+        jev_fired = [replace(v, mode="review") if _question(v.verdict) in demoted else v for v in jev_fired]
         for verdict in fired + jev_fired:
-            other = (verdict.existing_id, verdict.existing_fp) if verdict.existing_id else None
-            if self.cache.distinct_reason((verdict.new_id, verdict.new_fp), other) is not None:
-                result.suppressed.append(verdict)
-            else:
-                result.verdicts.append(verdict)
+            (result.suppressed if self._resolved(verdict, resolved) else result.verdicts).append(verdict)
 
     def check(self, view: KBView, finding: Finding, command: str) -> CheckResult:
         """Candidates, quantity comparison, Jev questions and the §6.4 decision for `finding` against
         the other findings in `view`. Reject verdicts are returned as such; callers that cannot
         refuse a write (check, audit) record them as review items."""
+        resolved = resolutions.by_key(resolutions.load(self.cfg))  # a damaged log stops the check before Jev
         selection = self.select(view, finding)
         new = Side.of(finding)
         result = CheckResult(finding.file_id, new.fingerprint, command,
@@ -717,26 +830,27 @@ class Checker:
         scope = _scope(finding)
         for other in view.findings:  # §6.3 is code: every finding whose scope overlaps, candidate or not
             if (not other.ok or not other.file_id or other.file_id == finding.file_id or other.file_id in asked
-                    or not scopes_overlap(scope, _scope(other))):
+                    or not scopes_overlap(scope, _scope(other), view.cfg.scope_separator,
+                                          view.cfg.scope_wildcard)):
                 continue
             conflicts = quantity_conflicts(other, finding, tolerance)
             if conflicts:
                 result.candidates.append(other.file_id)
                 pairs.append((other, conflicts))
-        self._decide(result, new, pairs, self.policy.asks_revision)
+        self._decide(result, new, pairs, self.policy.asks_revision, resolved)
         self._log(result, selection)
         return result
 
     def audit(self, view: KBView) -> list[CheckResult]:
         """`kblam audit`: ask every candidate pair and revision question that has no cache entry for the
-        current fingerprints, model and prompt, and decide on those. A pair counts as asked when
-        either direction is cached; a new pair is asked with the higher ID as `new`."""
+        current state hashes, model and question's prompt id (§6.5), and decide on those. A pair counts
+        as asked when either direction is cached; a new pair is asked with the higher ID as `new`."""
+        resolved = resolutions.by_key(resolutions.load(self.cfg))  # a damaged log stops the audit before Jev
         findings = [f for f in view.findings if f.ok and f.file_id]
         expected = self.settings.expected_served_model
 
-        def cached(kind: str, existing_fp: str, new_fp: str) -> bool:
-            key = (expected, self.settings.prompt_id, kind, existing_fp, new_fp)
-            return self.cache.contains(key, expected)
+        def cached(kind: str, existing_state: str, new_state: str) -> bool:
+            return self.cache.contains(cache_key(self.settings, kind, existing_state, new_state), expected)
 
         by_new: dict[str, list[Finding]] = {}
         seen: set[frozenset[str]] = set()
@@ -748,13 +862,13 @@ class Checker:
                     if pair in seen:
                         continue
                     seen.add(pair)
-                    fp_new, fp_c = fingerprint(finding), c.fingerprint
-                    if cached("relation", fp_c, fp_new) or cached("relation", fp_new, fp_c):
+                    state_new, state_c = Side.of(finding).state_hash, Side.of(c.finding).state_hash
+                    if cached("relation", state_c, state_new) or cached("relation", state_new, state_c):
                         continue
                     existing, new = sorted([finding, c.finding], key=lambda f: id_number(f.file_id))
                     by_new.setdefault(new.file_id, []).append(existing)
         if self.policy.asks_revision:
-            revisions = [f for f in findings if not cached("revision", "", fingerprint(f))]
+            revisions = [f for f in findings if not cached("revision", "", Side.of(f).state_hash)]
 
         by_id = {f.file_id: f for f in findings}
         targets = sorted(set(by_new) | {f.file_id for f in revisions}, key=id_number)
@@ -769,7 +883,8 @@ class Checker:
             result = CheckResult(finding_id, new.fingerprint, "audit",
                                  similarity=self.similarity_label(),
                                  candidates=[e.file_id for e in by_new.get(finding_id, [])])
-            self._decide(result, new, [(e, []) for e in by_new.get(finding_id, [])], finding_id in revision_ids)
+            self._decide(result, new, [(e, []) for e in by_new.get(finding_id, [])], finding_id in revision_ids,
+                         resolved)
             self._log(result, None)
             results.append(result)
         return results

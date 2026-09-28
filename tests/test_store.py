@@ -130,13 +130,15 @@ def test_put_rejects_near_duplicate_and_names_existing_finding(kb):
     assert kb.snapshot() == before
 
 
-def test_put_fails_when_existing_kb_is_invalid(kb):
+def test_put_warns_about_errors_already_in_the_kb(kb):
+    """SPEC §7 put: an error that was there before the put is a warning, not a refusal."""
     kb.add("F-0001", "sensor", CLAIM_A)
     kb.write("findings/summary.md", "# stray\n")
     staged = new_finding(kb.cfg, "motor", "Motor warm-up")
     fill(staged, CLAIM_B)
     result = put(kb.cfg, staged)
-    assert [i.code for i in result.issues] == ["K8"]
+    assert result.ok and result.issues == []
+    assert [(i.code, i.path) for i in result.warnings] == [("K8", "findings/summary.md")]
 
 
 def test_put_regenerates_hand_edited_index(kb):
