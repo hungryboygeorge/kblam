@@ -11,7 +11,8 @@ you stop. Each refusal names the finding and the rule that fired, and what to do
 
 `.kblam/` holds kblam's own state (the review items, the verdict cache, the lock), and only kblam
 writes it: a Write, Edit, shell write or removal there is denied. The one exception is
-`.kblam/staging/`, where your staged findings are yours to edit.
+`.kblam/staging/`, where your staged findings are yours to edit. `kblam.resolutions.jsonl` is
+kblam's too: only `kblam resolve` writes it.
 
 `kblam.toml` sets the rules and where kblam sends its API key, so only a person changes it: writing
 or removing it is denied too, and a commit that changes it is refused until a person approves it with
@@ -25,7 +26,9 @@ scope, ask the user to add it. Never try to approve a change yourself.
 2. Edit the staged file.
 3. `kblam put <staged file>`. It validates the knowledge base as it would be after the move, runs
    the Jev check, moves the file in and regenerates `{{kb_root}}/INDEX.md`. On any refusal
-   `{{kb_root}}/` is unchanged and the staged file stays: fix it and put it again.
+   `{{kb_root}}/` is unchanged and the staged file stays: fix it and put it again. Errors in your
+   finding, or ones the move causes in others, refuse the put; errors that were already in other
+   findings are printed as warnings and do not.
 
 A wrong finding is corrected by `kblam edit`ing it so it states only what is true now. Never write
 a second finding that corrects it, and never leave "previously", "was wrong" or similar notes:
@@ -61,7 +64,11 @@ Supporting detail after it.
 
 - The file is at most 300 lines by default (`kblam.toml` sets both limits).
 - A verbatim tag goes on the line directly before a fenced block or blockquote; `:@0x1F0` cites a
-  byte offset. The excerpt must occur exactly in that range: copy it, never retype it.
+  byte offset. The excerpt must occur exactly in that range: copy it, never retype it. To quote a
+  binary file, end the tag with ` hex` (`<!-- verbatim: path:@0x1F0 hex -->`) and give the bytes as
+  hex pairs in a fenced block, copied from a hex dump.
+- When `kblam.toml` sets `verbatim_blockquotes` (a new project does), every blockquote needs a
+  verbatim tag. A quotation you cannot tag is paraphrase, and belongs in prose.
 - Two findings that give the same quantity name must give the same value and unit.
 
 ## Refusals
@@ -73,8 +80,8 @@ or is not approved (see "Checks").
 
 | Rule | Trigger | Fix |
 |---|---|---|
-| K1 | frontmatter schema, ID, topic, label or scope | the field it names |
-| K2 | evidence missing or not found; `depends_on` names no finding | cite paths that exist |
+| K1 | frontmatter schema, ID, topic, label or scope; an old-format `depends_on` stamp (8 digits) | the field it names; for an old stamp see "Old formats" |
+| K2 | evidence missing, not found or outside the evidence folders; `depends_on` names no finding | cite paths that exist, under an evidence folder |
 | K3 | a `depends_on` fingerprint is stale or missing | re-read the target; in a staged file set it to `null` |
 | K4 | revision-history language | state the current fact directly |
 | K5 | another finding's ID next to such language | `kblam edit` that finding instead |
@@ -84,6 +91,7 @@ or is not approved (see "Checks").
 | K9 | the claim nearly duplicates another finding's | `kblam edit` that finding instead |
 | K10 | a verbatim excerpt is not in its cited range | copy the text exactly, or fix the range |
 | K11 | a `reported` finding quotes no retired document; `history/` cited as evidence; a finding depends on a `reported` one | see "Reported findings" |
+| K12 | a blockquote without a verbatim tag | tag it and copy the text exactly, or make it prose |
 
 Jev and quantity rejects (exit 4) report every verdict that fired, review ones included:
 `same_fact` (the existing finding already states this), `cannot_both_be_true` (probable conflict),
@@ -103,7 +111,7 @@ for any other label, and no other finding may `depends_on` a reported one. To pr
 reproduce it in an `evidence/` package, then `kblam edit` it: new label, the package's output as
 its excerpt, the history excerpt removed.
 
-## A reject means: edit the existing finding
+## A verdict that names an existing finding: edit that finding
 
 `same_fact`, `restates_and_extends`, `cannot_both_be_true`, `quantity_conflict` and K9 name an
 existing finding. Run `kblam edit` on **that** finding so it states the current fact, including
@@ -118,12 +126,11 @@ their search hits first. That is the failure kblam exists to stop; the check can
 rewording, so passing it that way fixes nothing.
 
 A reject is not always right: Jev sometimes reads two findings that state distinct facts as one
-fact, so each rejecting verdict is also recorded as a rejected item (`R-…`) in
-`.kblam/review.jsonl` and printed with its ID — a rejected item is not in `{{kb_root}}/`, so it
-does not fail `kblam validate`: send the ID to the coordinator (or the librarian if one is
-deployed) and carry on. `kblam resolve R-… --distinct "<reason>"` closes it and clears the pair
-when the two findings do state distinct facts, so putting the unchanged staged file then goes
-through.
+fact, or a direct statement as a correction, so each rejecting verdict is also recorded as a
+rejected item (`R-…`) in `.kblam/review.jsonl` and printed with its ID. A rejected item is not in
+`{{kb_root}}/`, so it does not fail `kblam validate`: send the ID to the coordinator (or the
+librarian if one is deployed) and carry on. When Jev did misread it, they close it with
+`kblam resolve R-… --distinct "<reason>"`, and putting the unchanged staged file then goes through.
 
 ## After a rewrite: suspect dependents
 
@@ -143,17 +150,29 @@ item is open:
 - Reject verdicts that `kblam check`, `kblam audit` or the Stop hook find on findings already in
   `{{kb_root}}/`.
 
-Changing either finding's claim, scope, quantities or evidence closes the item (the put re-checks
-the pair and raises a new item if a verdict still fires). The coordinator, or the librarian if one
-is deployed, decides each item, never the author whose write raised it. The one exception: the
-librarian may close a `low_confidence` item its own write raised, with a written reason. An author
-sends the item IDs to the librarian and carries on.
+Changing either finding's claim, label, scope, quantities or evidence closes the item (the put
+re-checks the pair and raises a new item if a verdict still fires). `kblam items` lists the open
+items. The coordinator, or the librarian if one is deployed, decides each item, never the author
+whose write raised it. The one exception: the librarian may close a `low_confidence` item its own
+write raised, with a written reason. An author sends the item IDs to the librarian and carries on.
 
 - A real restatement (`same_fact`, `restates_and_extends`) is merged: `kblam edit` the existing
-  finding so it carries the new detail, and the new finding stops stating that fact.
-- `kblam resolve R-XXXXXXXX --distinct "<reason>"` only when Jev misread two findings that state
-  distinct facts. The reason names what differs (component, operation, condition, model or
-  quantity) for a later reader.
+  finding so it carries the new detail, and the new finding stops stating that fact. A finding the
+  merge leaves with nothing of its own to state is removed with
+  `kblam rm F-NNNN --merged-into F-MMMM` (the finding that now states it); deleting a finding file
+  any other way is denied.
+- `kblam resolve R-XXXXXXXX --distinct "<reason>"` only when Jev misread the item: two findings
+  that state distinct facts, or, for a `revision` item, a finding that states a fact directly
+  rather than correcting an earlier claim. The reason names what differs (component, operation,
+  condition, model or quantity), or why it is not a correction, for a later reader. A
+  `quantity_conflict` is never resolved: rename the quantity if the two measure different things,
+  otherwise fix a value.
+- `kblam items --reworded` lists each rejected item whose finding later went in changed while the
+  other finding stayed as it was: the correction the reject asked for, or rewording to get past it.
+  Read which.
+
+`kblam resolve` and `kblam rm` are the adjudicator's commands: when `kblam.toml` sets
+`[kb] adjudicators`, they are denied to every agent type not listed there.
 
 ## Unchecked items
 
@@ -188,3 +207,13 @@ A block, or a refusal from any kblam command, that says git tracks files under `
 yours to fix: `.kblam/` is each machine's own state, and a commit that holds it replaces every
 clone's. Tell the user what it names; untracking the files and, when they came with a pull,
 resetting `.kblam/` are their decision.
+
+## Old formats
+
+A refusal, or a Stop hook note, that says `.kblam/` holds state from before fingerprint v2, and a
+K1 error about an old-format (8-digit) `depends_on` stamp, mean the knowledge base or this machine
+predates kblam's current formats. Run `kblam upgrade`: it asks Jev nothing, and prints what it did.
+It re-stamps each old stamp whose target is unchanged; one it leaves means the target changed
+since: re-read the target, then `kblam ack`. Tell the user what it printed: the re-stamped findings
+are committed once, each other machine runs `kblam upgrade` for its own state, and any prompt ids
+it prints are theirs to record in `kblam.toml`.

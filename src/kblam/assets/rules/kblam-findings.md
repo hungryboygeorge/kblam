@@ -17,8 +17,9 @@ paths:
 - `scope` limits where a claim applies: a finding scoped to one model says nothing about another
   (an MX-100 finding says nothing about the MX-200).
 - `kblam deps F-NNNN` lists a finding's dependencies. A **suspect** one means the finding it depends
-  on was rewritten after this one was checked against it: re-read that finding before relying on
-  this one.
+  on was rewritten (its claim, label, scope, quantities or evidence) after this one was checked
+  against it: re-read that finding before relying on this one. An **old** one was recorded before
+  kblam's current fingerprint format, and `kblam upgrade` settles it.
 - Cite findings by ID (`F-0137`). Do not cite files in `.kblam/staging/` or desk answer files.
 - A finding's `check:` command runs only through `kblam recheck`, which runs one only once a person
   has approved it. Never run it directly: anyone who can push to the repository can write one.

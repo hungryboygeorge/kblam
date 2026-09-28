@@ -36,8 +36,8 @@ duplicate_similarity = 0.9     # K9
 history_id_window = 10         # K5, words
 verbatim_blockquotes = true    # K12: every blockquote is a verbatim excerpt, which K10 checks
 adjudicators = []              # agent types that may run kblam resolve and kblam rm; [] = main session only
-lock_wait_seconds = 30         # how long new/edit/put/ack/index wait for .kblam/lock
-lock_stale_seconds = 300       # a lock older than this (or whose holder is dead) is broken
+lock_wait_seconds = 30         # how long kblam's writers wait for .kblam/lock (SPEC §7)
+lock_stale_seconds = 300       # a lock not refreshed for this long (or whose holder is dead) is broken
 recheck_timeout_seconds = 600  # kblam recheck: a check: command running longer is killed and fails
 
 # The [jev] section and its thresholds belong to the model, not the project: keep them as written.
@@ -55,7 +55,7 @@ embedding_document_prefix = "title: none | text: {text}"
 quantity_rel_tolerance = 0.0
 workers = 6                    # parallel pair requests
 # The Jev questions themselves are in the [jev.prompt.*] tables at the end of this file; the
-# thresholds below record the id of the wording they were calibrated on (kblam prompt-id prints it).
+# thresholds below record the ids of the wording they were calibrated on (kblam prompt-id prints them).
 
 [jev.thresholds]      # calibrated on this default prompt (SPEC §10.6); a verdict with no entry is disabled
 served_model = "typesafe/jev-1.13-20260917"
@@ -68,8 +68,8 @@ revision             = { noul = 0.75, mode = "reject" }
 low_confidence_review = 0.3
 
 # The Jev questions (SPEC §6.2). The wording lives here, so a project can adapt it; the option
-# keys, the question types and the state shapes stay in code. Any edit to the text below changes
-# this prompt's id (`kblam prompt-id` prints it), which is what [jev.thresholds] records.
+# keys, the question types and the state shapes stay in code. Any edit to a question's text below
+# changes that question's id (`kblam prompt-id` prints the ids), which is what [jev.thresholds] records.
 [jev.prompt.relation]
 instructions = "`existing` and `new` each hold one finding: a `claim` and the `scope` (products, versions or components) the claim applies to. Which option describes the claim in `new` relative to the claim in `existing`?"
 

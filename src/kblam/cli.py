@@ -683,12 +683,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pending", action="store_true", help="retry the findings with open unchecked items")
     p.set_defaults(func=_cmd_check)
     p = sub.add_parser("audit", help="ask every candidate pair and revision question with no cached answer "
-                                     "for the current fingerprints, model and prompt")
+                                     "for the current state hashes, model and prompt ids")
     p.set_defaults(func=_cmd_audit)
-    p = sub.add_parser("resolve", help="close a review or rejected item whose two findings state distinct facts")
+    p = sub.add_parser("resolve", help="close a review or rejected item that Jev misread, recording why in "
+                                       "kblam.resolutions.jsonl (an adjudicator's command)")
     p.add_argument("id", metavar="R-XXXXXXXX")
     p.add_argument("--distinct", required=True, metavar="REASON",
-                   help="why they are distinct; stored so the pair at these fingerprints is not raised again")
+                   help="why Jev misread the item, for a later reader; its sides are not raised again until a "
+                        "claim or scope changes")
     p.set_defaults(func=_cmd_resolve)
     p = sub.add_parser("rm", help="remove a finding after a merge moved everything it stated into another one "
                                   "(an adjudicator's command); the reason goes in the commit message")
@@ -720,8 +722,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--list", action="store_true",
                    help="print each check: command and whether it is approved on this machine; run nothing")
     p.set_defaults(func=_cmd_recheck)
-    p = sub.add_parser("prompt-id", help="print the id of this project's Jev prompt (its [jev.prompt] tables): "
-                                         "the value [jev.thresholds] records and calibration is tied to")
+    p = sub.add_parser("prompt-id", help="print the ids of this project's Jev prompt (its [jev.prompt] tables): "
+                                         "the combined id, then each question's own, which [jev.thresholds] "
+                                         "records and calibration is tied to")
     p.set_defaults(func=_cmd_prompt_id)
     p = sub.add_parser("jev-smoke", help="live check: ask Jev one synthetic relation pair and one revision "
                                          "question (two requests, or none when both are cached)")
