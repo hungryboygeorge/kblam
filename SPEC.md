@@ -271,7 +271,7 @@ Runs without the network. Exit status is non-zero on any error. Rule codes:
 
 | Code | Rule |
 |---|---|
-| K1 | Frontmatter parses and matches the schema (§4); `id` is unique and matches the filename; `topic` is a folder name (lowercase letters, digits, `-`, `_`) that matches the folder and, when `[kb] topics` is non-empty, is in it; `label` and `scope` are in the configured vocabularies; `verified` is a date; `depends_on` maps finding IDs to string fingerprints or null, and a value of 8 hex digits is an old-format stamp, from before fingerprint v2, reported with a pointer to `kblam upgrade` (§5.1); `anchors` are strings; each quantity is well formed (§4); `check` is a non-empty string. |
+| K1 | Frontmatter parses and matches the schema (§4); `id` is unique and matches the filename; `topic` is a folder name (lowercase letters, digits, `-`, `_`) that matches the folder and, when `[kb] topics` is non-empty, is in it; `label` and `scope` are in the configured vocabularies; `verified` is a date; `depends_on` maps finding IDs to string fingerprints or null, and a value of 8 hex digits is an old-format stamp, from before fingerprint v2, reported with a pointer to `kblam upgrade`, which re-stamps it while its target is unchanged, and to the re-reading and `ack` it needs otherwise (§5.1); `anchors` are strings; each quantity is well formed (§4); `check` is a non-empty string. |
 | K2 | `evidence` has at least one entry, and every path is relative, resolves inside the repository root and exists. Every path also lies under an `[kb] evidence_roots` folder, or, for a reported finding, under a `history_dirs` folder. Every `depends_on` ID exists, and a finding does not depend on itself. |
 | K3 | **Suspect dependency:** a `depends_on` fingerprint differs from the target's current fingerprint (§5.1), because the target was rewritten, or is null (an old-format stamp is K1's, not K3's). Resolved only by re-reading the target and running `kblam ack F-x F-y` (which records the new fingerprint, §7), or by editing the dependent. A null in a staged file is stamped by `put`; a null in the KB root is an error (unstamped). A cycle between two or more findings is allowed: `depends_on` is outside the fingerprint, so an `ack` on one edge never makes another edge suspect. |
 | K4 | **Revision-history language** in a finding's title or body (`history_terms`, §9: phrases that an evaluation on the pilot corpus found used only in unwanted senses, e.g. `was wrong`, `supersed`, `withdrawn`, `refuted`, `is falsified`, `previously believed`, `no longer true`). Matching is case-insensitive and anchored at a word start, so the stems `supersed` and `retract` match their inflections. Verbatim excerpts that pass K10 are exempt, because they quote sources (a quoted datasheet line such as "this document supersedes revision C" must not trip it); an excerpt of a binary source is not checked by K10 and so not exempt. One issue per term per line. Heuristic; Jev's revision question (§6.2) catches paraphrases. |
@@ -313,10 +313,14 @@ makes that finding's dependents suspect.
 
 **Fingerprint v1**, before M6.10, was the first 8 hex digits of the same hash over
 `{id, claim, scope, quantities, evidence}`, each list in the order the file gave it. The length
-tells the two formats apart. K1 reports an 8-digit `depends_on` value as an old-format stamp and
-names `kblam upgrade`, which re-stamps each value that is current under v1 with its target's v2
-fingerprint and leaves a stale one as it is, for someone to re-read the target and `ack` (§7). Until
-a machine has run `kblam upgrade`, the commands that would misread its older state refuse (§7).
+tells the two formats apart. K1 reports an 8-digit `depends_on` value as an old-format stamp.
+`kblam upgrade` re-stamps each one that is current under v1 with its target's v2 fingerprint, and
+leaves a stale one as it is, for the re-reading and `ack` a suspect stamp needs (§7). `kblam deps`
+shows both kinds as old and says which each is. K1's message is the same for both: `put` tells the
+errors a move introduces from those already there by their message (§7), so a put that changes a
+target keeps its dependents' old stamps errors already there and, as with K3, reports those
+dependents as made suspect. Until a machine has run `kblam upgrade`, the commands that would
+misread its older state refuse (§7).
 `tests/test_fingerprint_v2.py` pins one finding's fingerprint in both formats.
 
 ## 6. Jev contradiction and duplicate check (`kblam check`)
@@ -703,7 +707,7 @@ Every command but `init` takes `--root <dir>` to name the repository root (§4).
 | `kblam deps <id>` | list the finding's dependents and dependencies, with suspect ones marked |
 | `kblam resolve <item-id> --distinct "<reason>"` | close a review or rejected item that Jev misread, and record the resolution (§6.4) |
 | `kblam rm <id> --merged-into <target>` | remove a finding after a merge moved everything it stated into `<target>` (§8.1). Refused while another finding depends on it (edit each dependent to depend on `<target>` first), while `<target>` is not in the KB, or while one of its quantities is missing from `<target>` with the same value and unit. Under the lock it removes the file and a topic folder left empty, regenerates `INDEX.md`, applies the tree.hash rule and closes the finding's open items; the reason for the removal goes in the commit message. An adjudicator's command (§8 item 2). |
-| `kblam renumber <path>` | give a new ID to one of two findings that share an ID, which K1 reports after the work of two clones is merged: rewrite that file's `id` and filename, re-key each `depends_on` entry whose recorded fingerprint (in either format, §5.1) shows it means that finding, and list the other mentions of the old ID for a person to check |
+| `kblam renumber <path>` | give a new ID to one of two findings that share an ID, which K1 reports after the work of two clones is merged: rewrite that file's `id` and filename, re-key each `depends_on` entry whose recorded fingerprint (in either format, §5.1) shows it means that finding, append a copy under the new ID of each resolution whose state hash shows it means that finding (§6.4), so the verdicts it settled are not raised again, and list the other mentions of the old ID for a person to check |
 | `kblam items [--reworded] [--stats]` | list the open review, rejected and unchecked items. `--reworded` lists each rejected item whose finding later went in at a different fingerprint while the other side of the pair stayed as it was: a correction or rewording to pass, for the adjudicator to tell apart (§6.4); `put` records the fingerprint that went in when it closes a rejected item. `--stats` counts, per verdict, the items closed as distinct and those closed otherwise (§10.7) |
 | `kblam recheck [F-…]` | run the `check:` commands (§4) of the named findings, in the order given, or of every finding, in ID order. At an interactive terminal it first shows a person each command that is new, changed, or whose named files changed since its approval, and asks; without one it runs only the approved commands and reports the others as not approved ("`kblam recheck`" below) |
 | `kblam recheck --list` | print each `check:` command with its approval state on this machine; run nothing |
@@ -1319,7 +1323,8 @@ a skill would miss the moments it is for; writing guidance loaded into every rea
     own CLAUDE.md, since `init --update` rewrites the rule.
   - A suspect dependency (`kblam deps F-x`) means the finding it depends on was rewritten since
     this one was checked against it: re-read the target before relying on the dependent. An old
-    one (an old-format stamp, §5.1) is settled by `kblam upgrade`.
+    one (an old-format stamp, §5.1) is settled by `kblam upgrade`, or, when its target changed
+    since, by the same re-reading.
   - Cite findings by ID; don't cite `.kblam/staging/` files or desk answer files.
   - A finding's `check:` command runs only through `kblam recheck`, which runs one only once a
     person has approved it; never run it directly, since anyone who can push can write one (§7).

@@ -309,6 +309,10 @@ def _cmd_renumber(cfg, args) -> int:
     for dependent, path in result.rekeyed:
         print(f"kblam renumber: {dependent} depends_on {result.old_id} is now {result.new_id}: "
               f"{result.fingerprint} ({path}), since its fingerprint showed it meant {result.old_path}")
+    if result.resolutions:
+        print(f"kblam renumber: copied {result.resolutions} resolution(s) of {result.old_id} to {result.new_id} in "
+              f"{cfg.resolutions_path.name}, since their state hash showed they meant {result.old_path}; commit "
+              f"it with the renumbered finding")
     print(f"kblam renumber: regenerated {result.index_path}" + (" and .kblam/tree.hash" if result.recorded else ""))
     if result.mentions:
         print(f"kblam renumber: {len(result.mentions)} other mention(s) of {result.old_id} may mean either "
@@ -423,9 +427,12 @@ def _dependency_line(d: Dependency, other: str, titles: dict[str, str]) -> str:
                   f"kblam ack {d.dependent} {d.target}")
     elif d.state == "unstamped":
         detail = f"unstamped  re-read {d.target}, then kblam ack {d.dependent} {d.target}"
+    elif d.state == "old" and d.upgradable:
+        detail = (f"old        recorded {d.recorded} before fingerprint v2, and {d.target} is unchanged since; "
+                  f"kblam upgrade re-stamps it")
     elif d.state == "old":
-        detail = (f"old        recorded {d.recorded} before fingerprint v2; kblam upgrade re-stamps it if "
-                  f"{d.target} is unchanged")
+        detail = (f"old        recorded {d.recorded} before fingerprint v2, and {d.target} changed since; re-read "
+                  f"{d.target}, then kblam ack {d.dependent} {d.target}")
     elif d.state == "missing":
         detail = f"missing    {d.target} is not a finding in the KB"
     else:

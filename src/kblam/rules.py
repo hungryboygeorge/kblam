@@ -22,6 +22,7 @@ from kblam.finding import (
     ID_RE,
     Finding,
     fingerprint,
+    fingerprint_v1,
     id_number,
     is_v1_fingerprint,
     normalise_newlines,
@@ -227,11 +228,7 @@ def _k1_fields(view: KBView, f: Finding) -> list[Issue]:
                     add(line, f"depends_on fingerprint for {key} parsed as {type(fp).__name__}; quote it: "
                               f"{key}: \"{fp}\"")
                 elif is_v1_fingerprint(fp):
-                    add(line, f"depends_on {key}: {fp} is an old-format fingerprint (8 digits, from before "
-                              f"fingerprint v2, SPEC §5.1); run kblam upgrade, which re-stamps each one that is "
-                              f"still current. One that stays old means {key} changed since it was recorded: "
-                              f"re-read {key}, then kblam ack {f.file_id} {key} (in a staged file, set it to "
-                              f"null and put it)")
+                    add(line, _old_stamp_problem(f.file_id, key, fp))
 
     if "anchors" in meta:
         value = meta["anchors"]
@@ -344,6 +341,28 @@ class Dependency:
     recorded: object        # the value as written: a fingerprint, None, or a K1 error
     current: str | None     # the target's fingerprint; None when it cannot be computed
     state: str              # current | suspect | unstamped | old | missing | invalid
+    upgradable: bool = False  # an old stamp still equal to the target's v1 fingerprint, which upgrade re-stamps
+
+
+def _v1_fingerprints(view: KBView) -> dict[str, str]:
+    """The v1 fingerprint of each finding whose ID no other file shares, by ID, once per view: what tells an
+    old-format stamp that kblam upgrade re-stamps from one whose target changed since (SPEC §5.1)."""
+    if "v1" not in view.memo:
+        counts = Counter(f.file_id for f in view.findings)
+        view.memo["v1"] = {f.file_id: fingerprint_v1(f) for f in view.findings
+                           if f.ok and counts[f.file_id] == 1}
+    return view.memo["v1"]
+
+
+def _old_stamp_problem(dependent: str, target: str, recorded: str) -> str:
+    """K1's message for an old-format depends_on value (SPEC §5.1). It does not say whether the target changed
+    since: put tells the errors a move introduces from those already there by their message, and a put that
+    changes the target must not turn this one into a new error; like K3, the put reports the dependent as one
+    it made suspect. kblam deps says which case it is."""
+    return (f"depends_on {target}: {recorded} is an old-format fingerprint (8 digits, from before fingerprint v2, "
+            f"SPEC §5.1). kblam upgrade re-stamps it while {target} is unchanged since it was recorded, and kblam "
+            f"deps {target} says whether it is; if not, re-read {target}, then kblam ack {dependent} {target} (in "
+            f"a staged file, set it to null and put it)")
 
 
 def dependencies(view: KBView) -> list[Dependency]:
@@ -371,11 +390,12 @@ def dependencies(view: KBView) -> list[Dependency]:
             elif recorded is None:
                 state = "unstamped"
             elif is_v1_fingerprint(recorded):
-                state = "old"  # K1 reports it; kblam upgrade re-stamps it (SPEC §5.1)
+                state = "old"  # K1 reports it (SPEC §5.1)
             else:
                 state = "current" if recorded == current else "suspect"
             line = _mapping_key_line(f, depends, key, "depends_on") or 0
-            links.append(Dependency(f.file_id, f.path, line, key, recorded, current, state))
+            upgradable = state == "old" and _v1_fingerprints(view).get(key) == recorded
+            links.append(Dependency(f.file_id, f.path, line, key, recorded, current, state, upgradable))
     return links
 
 

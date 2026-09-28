@@ -78,13 +78,43 @@ def two_findings(kb):
 # --- the knowledge base: depends_on stamps ------------------------------------------------------------
 
 
-def test_k1_reports_an_old_stamp_naming_upgrade_and_k3_does_not_repeat_it(kb):
+def test_k1_reports_an_old_stamp_and_deps_says_which_kind_it_is(kb, capsys):
+    """A stamp still equal to its target's v1 fingerprint is upgrade's to re-stamp; one recorded before the
+    target changed needs the re-reading a suspect stamp needs, since upgrade leaves it (SPEC §5.1). K1 says
+    the same of both, so that a put changing the target keeps it an error already there; deps tells them
+    apart. K3 does not repeat either."""
+    kb.add("F-0001", "sensor", CLAIM_A)
+    current, stale = v1_of(kb, "F-0001"), v1_of_text("F-0001", EARLIER)
+    kb.add("F-0002", "motor", CLAIM_B, topic="motor", extra=f"depends_on:\n  F-0001: {current}\n")
+    kb.add("F-0003", "tray", CLAIM_C, topic="tray", extra=f"depends_on:\n  F-0001: {stale}\n")
+    issues = kb.issues()
+    assert [(i.code, i.path.rsplit("/", 1)[-1]) for i in issues] == [("K1", "F-0002-motor.md"),
+                                                                      ("K1", "F-0003-tray.md")]
+    for issue, dependent, value in ((issues[0], "F-0002", current), (issues[1], "F-0003", stale)):
+        assert issue.message == (f"depends_on F-0001: {value} is an old-format fingerprint (8 digits, from before "
+                                 f"fingerprint v2, SPEC §5.1). kblam upgrade re-stamps it while F-0001 is unchanged "
+                                 f"since it was recorded, and kblam deps F-0001 says whether it is; if not, re-read "
+                                 f"F-0001, then kblam ack {dependent} F-0001 (in a staged file, set it to null and "
+                                 f"put it)")
+    capsys.readouterr()
+    assert run(kb, "deps", "F-0001") == 0
+    out = capsys.readouterr().out
+    assert (f"  F-0002  old        recorded {current} before fingerprint v2, and F-0001 is unchanged since; kblam "
+            f"upgrade re-stamps it") in out
+    assert (f"  F-0003  old        recorded {stale} before fingerprint v2, and F-0001 changed since; re-read F-0001, "
+            f"then kblam ack F-0003 F-0001") in out
+
+
+def test_a_put_that_changes_the_target_of_an_old_stamp_reports_the_dependent_and_goes_in(kb):
+    """The old stamp was an error before the put and is one after it, as K3 would be: a warning, and the
+    dependent is listed as made suspect (SPEC §7 put)."""
     kb.add("F-0001", "sensor", CLAIM_A)
     kb.add("F-0002", "motor", CLAIM_B, topic="motor", extra=f"depends_on:\n  F-0001: {v1_of(kb, 'F-0001')}\n")
-    issues = kb.issues()
-    assert [(i.code, i.path.rsplit("/", 1)[-1]) for i in issues] == [("K1", "F-0002-motor.md")]
-    assert "old-format fingerprint (8 digits" in issues[0].message and "run kblam upgrade" in issues[0].message
-    assert "kblam ack F-0002 F-0001" in issues[0].message
+    staged = edit_finding(kb.cfg, "F-0001")
+    staged.write_text(staged.read_text(encoding="utf-8").replace("0.1%", "0.2%"), encoding="utf-8", newline="\n")
+    result = put(kb.cfg, staged)
+    assert result.ok, [i.format(result.view) for i in result.issues]
+    assert result.suspect == ["F-0002"] and [i.code for i in result.warnings] == ["K1"]
 
 
 def test_upgrade_restamps_current_stamps_byte_for_byte_and_leaves_stale_ones(kb, capsys):

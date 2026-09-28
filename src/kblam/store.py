@@ -14,10 +14,10 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path, PurePosixPath
 
-from kblam import review
+from kblam import resolutions, review
 from kblam.check import Checker, CheckResult, _differ, _format_value, _quantities
 from kblam.config import Config
-from kblam.jev import jev_settings
+from kblam.jev import Side, jev_settings
 from kblam.lock import kb_lock
 from kblam.finding import (
     FILENAME_RE,
@@ -122,6 +122,7 @@ class RenumberResult:
     mentions: list[str] = field(default_factory=list)  # other mentions of the old ID, for a person to check
     index_path: str = ""
     recorded: bool = False                      # tree.hash advanced (the tree.hash rule, SPEC §8)
+    resolutions: int = 0                        # resolutions copied under the new ID (SPEC §6.4)
 
 
 def atomic_write(path: Path, data: bytes) -> None:
@@ -811,7 +812,9 @@ def renumber(cfg: Config, path: Path) -> RenumberResult:
     shows it means this file (it equals this file's fingerprint before the change, and no file keeping the
     old ID has that fingerprint) is re-keyed to the new ID with this file's new fingerprint, verified by
     re-parsing as `stamp_dependency` is. The other mentions of the old ID (titles, bodies, depends_on entries
-    whose fingerprint does not settle which file they mean) are listed for a person to check. It regenerates
+    whose fingerprint does not settle which file they mean) are listed for a person to check. A resolution
+    (§6.4) whose side is the old ID at this file's state hash meant this file, so a copy under the new ID is
+    appended to kblam.resolutions.jsonl, and the verdicts it settled are not raised again. It regenerates
     INDEX.md and applies the tree.hash rule (§8).
     """
     source = Path(path)
@@ -841,6 +844,7 @@ def _renumber(cfg: Config, source: Path) -> RenumberResult:
     new_path = f"{PurePosixPath(finding.path).parent.as_posix()}/{new_id}-{finding.slug}.md"
     data = _set_id(finding, new_id, finding.path)
     new_fp = fingerprint(parse_finding(new_path, data), cfg.scope_separator)
+    carried = _carried_resolutions(cfg, finding, old_id, new_id)  # read first: a damaged file refuses
 
     rewrites: list[tuple[Finding, bytes]] = []
     mentions: list[tuple[str, int, str]] = []
@@ -876,6 +880,8 @@ def _renumber(cfg: Config, source: Path) -> RenumberResult:
     for dependent, rewritten in rewrites:
         atomic_write(cfg.repo_root / dependent.path, rewritten)
     _write_index(cfg, load_view(cfg))
+    for line in carried:
+        resolutions.append(cfg, line)
     return RenumberResult(
         old_id, new_id, finding.path, new_path, new_fp,
         kept=[f.path for f in kept],
@@ -883,4 +889,25 @@ def _renumber(cfg: Config, source: Path) -> RenumberResult:
         mentions=[f"{p}:{line}: {what}" for p, line, what in sorted(mentions)],
         index_path=view.index_path,
         recorded=record_after_write(cfg, clean, "renumber"),
+        resolutions=len(carried),
     )
+
+
+def _carried_resolutions(cfg: Config, finding: Finding, old_id: str, new_id: str) -> list[resolutions.Resolution]:
+    """The resolutions to append for a renumbered finding (SPEC §7 renumber): a copy under `new_id`, with its
+    reason and date, of each resolution with the side (`old_id`, this finding's state hash), unless the file
+    has it already. The state hash tells the two files that shared the ID apart, as a fingerprint does for
+    depends_on; should both state the same claim and scope, the resolution holds for both."""
+    state = Side.of(finding, cfg.scope_separator).state_hash
+    recorded = resolutions.load(cfg)
+    have = resolutions.by_key(recorded)
+    carried = []
+    for line in recorded:
+        if (old_id, state) not in line.sides:
+            continue
+        sides = tuple(sorted((new_id, s) if (i, s) == (old_id, state) else (i, s) for i, s in line.sides))
+        key = resolutions.key(line.kind, sides)
+        if key not in have:
+            have[key] = resolutions.Resolution(sides, line.kind, line.reason, line.date)
+            carried.append(have[key])
+    return carried

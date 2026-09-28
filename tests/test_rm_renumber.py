@@ -9,8 +9,10 @@ import subprocess
 
 import pytest
 
+from kblam import resolutions
 from kblam.cli import main
 from kblam.finding import fingerprint, parse_finding
+from kblam.jev import Side
 from kblam.lock import kb_lock
 from kblam.review import ReviewItem, load_items, save_items
 from kblam.store import StoreError, _yaml_scalar, allocate_id, edit_finding, new_finding
@@ -345,6 +347,40 @@ def test_renumber_gives_a_new_id_and_rekeys_the_dependents_that_mean_that_file(k
     assert theirs.read_bytes() == before[theirs] and means_theirs.read_bytes() == before[means_theirs]
     assert [(i.code, i.path) for i in kb.issues()] == [("K3", "findings/pump/F-0008-stale.md")]
     assert read_tree_hash(kb.cfg) == current_digest(kb.cfg)
+
+
+def test_renumber_copies_the_resolutions_that_mean_the_renumbered_file(kb, capsys):
+    """A resolution keyed by the shared ID and one file's state hash meant that file (SPEC §7 renumber), so it
+    is copied under the new ID, and the verdicts it settled are not raised again; the other file's stays."""
+    mine, theirs = two_clones(kb)
+    lamp = kb.add("F-0003", "lamp", "The lamp flickers at 50 Hz.", topic="pump", title="Lamp")
+
+    def state(path) -> str:
+        return Side.of(parse_finding(path.name, path.read_bytes()), "/").state_hash
+
+    for kind, sides, reason in [
+            (resolutions.DISTINCT, [("F-0003", state(lamp)), ("F-0005", state(mine))], "the lamp is not the sensor"),
+            (resolutions.DISTINCT, [("F-0003", state(lamp)), ("F-0005", state(theirs))], "the lamp is not the motor"),
+            (resolutions.NOT_REVISION, [("F-0005", state(mine))], "states the ratio directly")]:
+        resolutions.append(kb.cfg, resolutions.resolution(kind, sides, reason))
+    before, mine_state = kb.cfg.resolutions_path.read_bytes(), state(mine)
+    capsys.readouterr()
+
+    assert run(kb, "renumber", str(mine)) == 0
+    out = capsys.readouterr().out
+    renamed = next((kb.findings / "calibration").glob("F-*-sensor.md"))
+    new_id = renamed.name[:6]
+    assert (f"kblam renumber: copied 2 resolution(s) of F-0005 to {new_id} in kblam.resolutions.jsonl, since their "
+            f"state hash showed they meant findings/calibration/F-0005-sensor.md; commit it with the renumbered "
+            f"finding") in out
+    assert kb.cfg.resolutions_path.read_bytes().startswith(before)  # appended, never rewritten
+    copies = resolutions.load(kb.cfg)[3:]
+    assert [(r.kind, r.sides, r.reason) for r in copies] == [
+        (resolutions.DISTINCT, (("F-0003", state(lamp)), (new_id, state(renamed))), "the lamp is not the sensor"),
+        (resolutions.NOT_REVISION, ((new_id, state(renamed)),), "states the ratio directly")]
+    assert state(renamed) == mine_state  # the ID is not part of the state Jev sees
+    assert run(kb, "renumber", str(theirs)) == 1  # the ID is no longer shared, so nothing more is copied
+    assert len(resolutions.load(kb.cfg)) == 5
 
 
 def test_renumber_leaves_an_entry_that_matches_both_files_for_a_person(kb, capsys):
