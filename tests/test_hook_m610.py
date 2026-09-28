@@ -292,7 +292,7 @@ def test_reading_the_resolutions_or_writing_another_file_passes(kb, monkeypatch,
 
 def checked(kb, finding_id: str) -> bool:
     finding = next(f for f in load_view(kb.cfg).findings if f.file_id == finding_id)
-    return PairCache(kb.cfg.state_dir / CACHE_NAME).was_checked(finding_id, fingerprint(finding))
+    return PairCache(kb.cfg.state_dir / CACHE_NAME).was_checked(finding_id, fingerprint(finding, "/"))
 
 
 @pytest.fixture

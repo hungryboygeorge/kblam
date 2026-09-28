@@ -128,23 +128,29 @@ and the finding is replaced in place. SPEC.md §4 and the installed skill descri
 | `kblam put <file>` | Validate, run the Jev check, and move a staged finding into `findings/`. |
 | `kblam validate` | Run every rule and list open review items; exit 1 on any failure. |
 | `kblam validate --record` | Accept a change made outside kblam (a `git pull`, say) once the tree is clean. |
-| `kblam validate --commit` | Also refuse a commit that changes `kblam.toml` without approval; the pre-commit hook runs this. |
+| `kblam validate --commit` | Also check the commit itself: it must hold `findings/` as it is on disk, may not change committed evidence, and may not change `kblam.toml` without approval. The pre-commit hook runs this. |
 | `kblam approve-config` | Show how `kblam.toml` changed and, at a terminal, approve it for commits on this machine. |
-| `kblam check [<id> ...]` | Jev-check findings already in the tree: those named, or every one not checked since its claim, scope, quantities or evidence last changed. |
+| `kblam check [<id> ...]` | Jev-check findings already in the tree: those named, or every one not checked since its claim, label, scope, quantities or evidence last changed. |
 | `kblam check --pending` | Retry the findings Jev could not answer for. |
 | `kblam audit` | Ask every candidate pair and question that has no cached answer. |
-| `kblam resolve <R-id> --distinct "<reason>"` | Close a review or rejected item whose two findings state distinct facts. |
+| `kblam resolve <R-id> --distinct "<reason>"` | Close a review or rejected item that Jev misread, and record why in the committed `kblam.resolutions.jsonl`. |
+| `kblam items [--reworded] [--stats]` | List the open items; `--reworded` lists rejected items whose finding later went in changed, and `--stats` counts how each verdict's items closed. |
+| `kblam rm <id> --merged-into <target>` | Remove a finding after a merge moved everything it stated into another. |
+| `kblam renumber <path>` | Give a new ID to one of two findings that share one after two clones' work is merged. |
 | `kblam ack <dependent> <target>` | After re-reading a rewritten finding, record that a finding depending on it still holds. |
 | `kblam deps <id>` | List a finding's dependencies and dependents, marking stale ones. |
+| `kblam recheck [<id> ...]` | Run findings' `check:` commands, each only once a person has approved it at a terminal on this machine; `--list` shows which are approved. |
+| `kblam upgrade` | Move a knowledge base and this machine's state from an older kblam to the current formats (see below). |
 | `kblam index` | Regenerate `findings/INDEX.md`. |
 | `kblam cost` | Summarise Jev requests, tokens and spend by day and by kind. |
-| `kblam prompt-id` | Print the id of this project's Jev question wording. |
+| `kblam prompt-id` | Print the ids of this project's Jev question wording, the whole and each question's own. |
 | `kblam jev-smoke` | Ask Jev one synthetic pair and one question, as a live check of the key and endpoint. |
 | `kblam init [--update]` | Set up the current git repository. |
 
 `kblam hook <event>` is the entry point for the Claude Code hooks and is not meant to be run by
 hand. The exit status is 0 on success; 1 when kblam refuses (validation errors, open items, a
-request it will not carry out, or Jev unavailable); 2 when there is no usable `kblam.toml` or the
+request it will not carry out, Jev unavailable, or `.kblam/` state that git tracks or that
+`kblam upgrade` has not migrated yet); 2 when there is no usable `kblam.toml` or the
 arguments are wrong; 3 when another kblam write held the lock for too long, so retry; and 4 when Jev
 or a quantity conflict rejected a `put`.
 
@@ -157,12 +163,14 @@ measured on, no Jev verdict rejects a write: every one that fires becomes a revi
 warns that recalibration is needed. Quantity conflicts still reject, because code decides them.
 
 An open review item, or an unchecked item left when Jev could not be reached, makes
-`kblam validate` fail, and the pre-commit hook with it, until the item is closed. A review item
-closes when either of its findings is rewritten (the `put` re-checks the pair and raises a new
-item if a verdict still fires), or when `kblam resolve ... --distinct` records that Jev misread
-two distinct facts. An unchecked item closes when `kblam check --pending` gets an answer. This
-means that without an OpenRouter key every `put` succeeds but leaves an unchecked item, and
-commits are refused. To run without Jev on purpose, delete the `[jev.thresholds]` table from
+`kblam validate` fail until the item is closed, and the pre-commit hook refuses commits that
+change `findings/` meanwhile; other commits go through. A review item closes when either of its
+findings is rewritten (the `put` re-checks the pair and raises a new item if a verdict still
+fires), or when `kblam resolve ... --distinct` records that Jev misread it. Resolutions are
+committed, in `kblam.resolutions.jsonl`, so every clone keeps them, and git merges that file line
+by line. An unchecked item closes when `kblam check --pending` gets an answer. This means that
+without an OpenRouter key every `put` succeeds but leaves an unchecked item, and commits to the
+knowledge base are refused. To run without Jev on purpose, delete the `[jev.thresholds]` table from
 `kblam.toml`. kblam then compares only numeric quantities and says so.
 
 ### Changes that arrive from outside kblam
@@ -171,14 +179,31 @@ kblam records a digest of `findings/` in `.kblam/tree.hash` after each of its ow
 that arrives any other way, such as a `git pull` or a branch checkout, leaves the digest stale, and
 the Stop hook then validates the tree every time an agent stops. Run `kblam validate --record` to
 accept the change: it Jev-checks the findings that changed, validates, and records the new digest
-if everything is clean.
+if everything is clean. On a new clone, where there is no digest yet, it asks Jev nothing: the
+findings are accepted as committed.
+
+### Upgrading from an older kblam
+
+Earlier versions of kblam recorded fingerprints in an older, 8-digit format, kept resolutions
+only on the machine that made them, and cached Jev's answers under other keys. The current kblam
+says so where it meets them: `kblam validate` names each old stamp, and the commands that would
+misread old state refuse. After installing it, run `kblam upgrade` once in the repository. It re-stamps each
+`depends_on` value whose target is unchanged, moves this machine's open items, checked marks,
+resolutions and cached answers to the new formats, asks Jev nothing, and prints what it did.
+Commit the re-stamped findings and `kblam.resolutions.jsonl`; every other machine then runs
+`kblam upgrade` once for its own `.kblam/`. Until a machine has, `validate`, `put`, `check`,
+`audit`, `resolve`, `items` and `rm` refuse there, since they would read its old state as changes.
+A stamp it leaves in the old format means its target changed since it was recorded: re-read the
+target, then `kblam ack` it. If `kblam.toml` records the old combined `prompt_id`, `upgrade` prints
+the two per-question ids to record in its place; it never edits `kblam.toml` itself.
 
 ### Configuration
 
-`kblam.toml` holds the project's vocabularies (`labels`, and the `scopes` a finding may apply to;
-topics are simply folders), the claim and file length limits, the revision-history phrases that
-K4 looks for, the lock timeouts, the Jev model and thresholds, the embedding settings, and the
-wording of the Jev questions. SPEC.md §9 documents every key. The file is committed, so it holds
+`kblam.toml` holds the project's vocabularies (`labels`, the `scopes` a finding may apply to, and
+optionally the allowed `topics`, which are folders), the folders evidence may lie in, the claim and
+file length limits, the revision-history phrases that K4 and K5 look for, the agent types allowed
+to resolve items and remove findings (`adjudicators`), the lock and recheck timeouts, the Jev model
+and thresholds, the embedding settings, and the wording of the Jev questions. SPEC.md §9 documents every key. The file is committed, so it holds
 nothing machine-specific, and the API key never goes in it; where the key is read from, and where
 requests go beyond OpenRouter and a local ollama, are set per machine as described under Installing.
 Agents are not allowed to edit `kblam.toml`, so change it by hand. Because the hooks cannot catch
@@ -228,7 +253,8 @@ check switched off, kblam still applies its deterministic rules and compares num
 
 kblam also assumes that someone other than a finding's author settles the review items the Jev
 check raises: a coordinating agent, a librarian agent or a person. While an item is open,
-`kblam validate` fails, and so the pre-commit hook refuses every commit in the repository.
+`kblam validate` fails, and the pre-commit hook refuses any commit that changes the knowledge
+base.
 
 kblam is at version 0.1.0 and was built for one research project. It is installed from its GitHub
 repository, needs Python 3.11 or newer, uv and git, and comes with no warranty and no support.
@@ -243,8 +269,8 @@ The OpenRouter key belongs to your user. Ask them to save it in `~/kblam/jev!.tx
 `OPENROUTER_API_KEY`, and never write it into the repository or into `kblam.toml`. A different key
 file or variable, another endpoint, or an ollama on another host goes in the user's own
 `~/kblam/config.toml`, never in `kblam.toml`. Without a key,
-every `put` is accepted but left unchecked, and commits are refused until `kblam check --pending`
-succeeds with the key in place.
+every `put` is accepted but left unchecked, and commits to the knowledge base are refused until
+`kblam check --pending` succeeds with the key in place.
 
 Run `kblam init` at the root of the git repository and read its report. It exits 0 when everything
 is in place, and on exit 1 the report says what went wrong. For example, an existing pre-commit

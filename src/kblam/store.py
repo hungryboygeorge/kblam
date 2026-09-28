@@ -14,10 +14,10 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path, PurePosixPath
 
-from kblam import review
+from kblam import resolutions, review
 from kblam.check import Checker, CheckResult, _differ, _format_value, _quantities
 from kblam.config import Config
-from kblam.jev import jev_settings
+from kblam.jev import Side, jev_settings
 from kblam.lock import kb_lock
 from kblam.finding import (
     FILENAME_RE,
@@ -25,6 +25,7 @@ from kblam.finding import (
     ID_RE,
     Finding,
     fingerprint,
+    fingerprint_as,
     format_id,
     id_number,
     parse_finding,
@@ -121,6 +122,7 @@ class RenumberResult:
     mentions: list[str] = field(default_factory=list)  # other mentions of the old ID, for a person to check
     index_path: str = ""
     recorded: bool = False                      # tree.hash advanced (the tree.hash rule, SPEC §8)
+    resolutions: int = 0                        # resolutions copied under the new ID (SPEC §6.4)
 
 
 def atomic_write(path: Path, data: bytes) -> None:
@@ -387,8 +389,10 @@ def rekey_dependency(finding: Finding, old_id: str, new_id: str, value: str, sho
     return data
 
 
-def _stamp_nulls(staged: Finding, others: list[Finding], shown: str) -> tuple[Finding, list[tuple[str, str]]]:
-    """Stamp each null depends_on value whose target is a readable finding among `others`."""
+def _stamp_nulls(staged: Finding, others: list[Finding], shown: str,
+                 separator: str) -> tuple[Finding, list[tuple[str, str]]]:
+    """Stamp each null depends_on value whose target is a readable finding among `others`, with the
+    target's fingerprint under the KB's scope `separator` (SPEC §5.1)."""
     by_id: dict[str, list[Finding]] = {}
     for f in others:
         by_id.setdefault(f.file_id, []).append(f)
@@ -399,7 +403,7 @@ def _stamp_nulls(staged: Finding, others: list[Finding], shown: str) -> tuple[Fi
         targets = by_id.get(key, [])
         if len(targets) != 1 or not targets[0].ok:
             continue  # K1/K2 report it
-        value = fingerprint(targets[0])
+        value = fingerprint(targets[0], separator)
         staged = parse_finding(staged.path, stamp_dependency(staged, key, value, shown))
         stamped.append((key, value))
     return staged, stamped
@@ -468,7 +472,8 @@ def _prepare(cfg: Config, source: Path) -> tuple[PutResult, KBView]:
     if replaced:
         _check_edit_base(cfg, finding_id, current, replaced, display_path(cfg, source))
     others = [f for f in current.findings if f.file_id != finding_id]
-    staged, stamped = _stamp_nulls(parse_finding(target, raw), others, display_path(cfg, source))
+    staged, stamped = _stamp_nulls(parse_finding(target, raw), others, display_path(cfg, source),
+                                   cfg.scope_separator)
     files = {p: b for p, b in current.files.items() if p not in replaced}
     files[target] = staged.raw
     view = KBView(cfg=cfg, files=files, display={target: display_path(cfg, source)})
@@ -516,9 +521,11 @@ def _put(cfg: Config, source: Path, checker: Checker) -> PutResult:
         return result
 
     previous = next((f for f in current.findings if f.file_id == finding_id and f.ok), None)
-    if previous is None or fingerprint(previous) != fingerprint(written):
+    separator = cfg.scope_separator
+    if previous is None or fingerprint(previous, separator) != fingerprint(written, separator):
+        # an old-format stamp (SPEC §5.1) needs the same re-reading as a suspect one
         result.suspect = [d.dependent for d in dependencies(view)
-                          if d.target == finding_id and d.state == "suspect"]
+                          if d.target == finding_id and d.state in ("suspect", "old")]
 
     clean = as_kblam_left_it(cfg, tree_digest(current))
     root = cfg.repo_root
@@ -536,7 +543,7 @@ def _put(cfg: Config, source: Path, checker: Checker) -> PutResult:
     if source.is_relative_to(cfg.staging_dir.resolve()):
         source.unlink()
     recorded, = review.record(cfg, view, [result.check], reject_as_review=False)
-    review.close_rejected(cfg, finding_id, fingerprint(written))
+    review.close_rejected(cfg, finding_id, fingerprint(written, separator))
     result.review, result.unchecked = recorded.opened, recorded.unchecked
     return result
 
@@ -629,7 +636,8 @@ def recorded_version(cfg: Config, target: Finding, recorded: str) -> tuple[str, 
         if raw is None:
             continue  # the path was removed in that commit
         then = parse_finding(path.decode("utf-8", "replace"), raw)
-        if then.ok and then.file_id == target.file_id and fingerprint(then) == recorded:
+        if (then.ok and then.file_id == target.file_id
+                and fingerprint_as(recorded, then, cfg.scope_separator) == recorded):
             return short, then.claim
     return None
 
@@ -804,7 +812,9 @@ def renumber(cfg: Config, path: Path) -> RenumberResult:
     shows it means this file (it equals this file's fingerprint before the change, and no file keeping the
     old ID has that fingerprint) is re-keyed to the new ID with this file's new fingerprint, verified by
     re-parsing as `stamp_dependency` is. The other mentions of the old ID (titles, bodies, depends_on entries
-    whose fingerprint does not settle which file they mean) are listed for a person to check. It regenerates
+    whose fingerprint does not settle which file they mean) are listed for a person to check. A resolution
+    (§6.4) whose side is the old ID at this file's state hash meant this file, so a copy under the new ID is
+    appended to kblam.resolutions.jsonl, and the verdicts it settled are not raised again. It regenerates
     INDEX.md and applies the tree.hash rule (§8).
     """
     source = Path(path)
@@ -830,12 +840,11 @@ def _renumber(cfg: Config, source: Path) -> RenumberResult:
         raise StoreError(f"{finding.path} cannot be read as a finding (" + (f"line {line}: " if line else "")
                          + f"{message}), so kblam cannot rewrite its id; renumber {kept[0].path} instead, or ask a "
                          f"person to fix this file")
-    old_fp = fingerprint(finding)
-    kept_fps = {fingerprint(f) for f in kept}
     new_id = allocate_id(cfg)
     new_path = f"{PurePosixPath(finding.path).parent.as_posix()}/{new_id}-{finding.slug}.md"
     data = _set_id(finding, new_id, finding.path)
-    new_fp = fingerprint(parse_finding(new_path, data))
+    new_fp = fingerprint(parse_finding(new_path, data), cfg.scope_separator)
+    carried = _carried_resolutions(cfg, finding, old_id, new_id)  # read first: a damaged file refuses
 
     rewrites: list[tuple[Finding, bytes]] = []
     mentions: list[tuple[str, int, str]] = []
@@ -846,10 +855,14 @@ def _renumber(cfg: Config, source: Path) -> RenumberResult:
         if isinstance(depends, dict) and old_id in depends:
             recorded = depends[old_id]
             line = depends.lc.key(old_id)[0] + 2
-            if recorded == old_fp and old_fp not in kept_fps and f is not finding:
+            # A stamp from before fingerprint v2 is compared in its own format (fingerprint_as).
+            stamp = isinstance(recorded, str)
+            means_this = stamp and recorded == fingerprint_as(recorded, finding, cfg.scope_separator)
+            means_kept = stamp and recorded in {fingerprint_as(recorded, k, cfg.scope_separator) for k in kept}
+            if means_this and not means_kept and f is not finding:
                 rewrites.append((f, rekey_dependency(f, old_id, new_id, new_fp, f.path)))
-            elif not (isinstance(recorded, str) and recorded in kept_fps and recorded != old_fp):
-                why = ("matches neither file" if recorded != old_fp
+            elif not (means_kept and not means_this):
+                why = ("matches neither file" if not means_this
                        else "is this finding's own fingerprint" if f is finding
                        else "is the fingerprint of both files")
                 shown_value = "null" if recorded is None else recorded
@@ -867,6 +880,8 @@ def _renumber(cfg: Config, source: Path) -> RenumberResult:
     for dependent, rewritten in rewrites:
         atomic_write(cfg.repo_root / dependent.path, rewritten)
     _write_index(cfg, load_view(cfg))
+    for line in carried:
+        resolutions.append(cfg, line)
     return RenumberResult(
         old_id, new_id, finding.path, new_path, new_fp,
         kept=[f.path for f in kept],
@@ -874,4 +889,25 @@ def _renumber(cfg: Config, source: Path) -> RenumberResult:
         mentions=[f"{p}:{line}: {what}" for p, line, what in sorted(mentions)],
         index_path=view.index_path,
         recorded=record_after_write(cfg, clean, "renumber"),
+        resolutions=len(carried),
     )
+
+
+def _carried_resolutions(cfg: Config, finding: Finding, old_id: str, new_id: str) -> list[resolutions.Resolution]:
+    """The resolutions to append for a renumbered finding (SPEC §7 renumber): a copy under `new_id`, with its
+    reason and date, of each resolution with the side (`old_id`, this finding's state hash), unless the file
+    has it already. The state hash tells the two files that shared the ID apart, as a fingerprint does for
+    depends_on; should both state the same claim and scope, the resolution holds for both."""
+    state = Side.of(finding, cfg.scope_separator).state_hash
+    recorded = resolutions.load(cfg)
+    have = resolutions.by_key(recorded)
+    carried = []
+    for line in recorded:
+        if (old_id, state) not in line.sides:
+            continue
+        sides = tuple(sorted((new_id, s) if (i, s) == (old_id, state) else (i, s) for i, s in line.sides))
+        key = resolutions.key(line.kind, sides)
+        if key not in have:
+            have[key] = resolutions.Resolution(sides, line.kind, line.reason, line.date)
+            carried.append(have[key])
+    return carried

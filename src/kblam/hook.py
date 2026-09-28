@@ -520,6 +520,12 @@ def _stop(cfg: Config, event: str, data: dict) -> int:
     # SPEC §8.3: while git tracks files under .kblam/, a pull may have written another machine's tree.hash and
     # review items there, so none of it is trusted: the tree is checked as a new clone's, and the stop blocked.
     tracked = tracked_state(cfg)
+    if not tracked:
+        from kblam.upgrade import old_state, old_state_problem
+
+        stale = old_state(cfg)
+        if stale:  # SPEC §7 upgrade: read now, every open item would close and every finding be re-checked
+            return _note(event, f"{old_state_problem(stale)}. The Stop hook checks nothing until then")
     recorded = None if tracked else read_tree_hash(cfg)
     if recorded is None and not cfg.findings_path.exists() and not tracked:
         return 0  # no knowledge base yet

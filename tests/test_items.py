@@ -19,11 +19,11 @@ CLAIM_B = "The motor warm-up drift settles within 90 seconds of power-on at 4000
 
 
 def current_fp(kb, finding_id: str) -> str:
-    return fingerprint(next(f for f in load_view(kb.cfg).findings if f.file_id == finding_id))
+    return fingerprint(next(f for f in load_view(kb.cfg).findings if f.file_id == finding_id), "/")
 
 
-def item(n: int, kind: str, verdict: str | None, *, new_id: str = "F-0101", new_fp: str = "0000000a",
-         existing_id: str | None = "F-0100", existing_fp: str | None = "0000000b", status: str = "closed",
+def item(n: int, kind: str, verdict: str | None, *, new_id: str = "F-0101", new_fp: str = "00000000000a",
+         existing_id: str | None = "F-0100", existing_fp: str | None = "00000000000b", status: str = "closed",
          close_reason: str | None = None, closed_fp: str | None = None) -> ReviewItem:
     closed = status == "closed"
     return ReviewItem(f"R-{n:08x}", kind, status, new_id, new_fp, existing_id, existing_fp, verdict,
@@ -42,13 +42,13 @@ def test_items_lists_every_open_item_reconciled_against_the_tree(kb, capsys):
     listed = [
         item(1, "review", "restates_and_extends", new_id="F-0002", new_fp=fp2, existing_id="F-0001",
              existing_fp=fp1, status="open"),
-        item(2, "rejected", "same_fact", new_id="F-0003", new_fp="0000000c", existing_id="F-0001",
+        item(2, "rejected", "same_fact", new_id="F-0003", new_fp="00000000000c", existing_id="F-0001",
              existing_fp=fp1, status="open"),  # its finding is staged: never in the tree, still open
         ReviewItem("U-00000003", "unchecked", "open", "F-0001", fp1, message="Jev could not answer 1 question(s)",
                    created="t"),
     ]
     stale = item(4, "review", "same_fact", new_id="F-0002", new_fp=fp2, existing_id="F-0001",
-                 existing_fp="0000000d", status="open")  # F-0001 changed since: reconciled away
+                 existing_fp="00000000000d", status="open")  # F-0001 changed since: reconciled away
     save_items(kb.cfg, [*listed, stale, item(5, "review", "same_fact")])
     raw = (kb.cfg.state_dir / "review.jsonl").read_bytes()
     capsys.readouterr()
@@ -104,16 +104,16 @@ def test_put_records_the_fingerprint_that_went_in_and_items_reworded_lists_it(jk
 def test_items_reworded_takes_only_rejected_items_a_put_closed_at_another_fingerprint(kb):
     kb.add("F-0100", "base", CLAIM_A)
     base = current_fp(kb, "F-0100")
-    listed = [item(1, "rejected", "same_fact", existing_fp=base, closed_fp="0000000e"),
-              item(2, "rejected", "revision", existing_id=None, existing_fp=None, closed_fp="0000000e")]
+    listed = [item(1, "rejected", "same_fact", existing_fp=base, closed_fp="00000000000e"),
+              item(2, "rejected", "revision", existing_id=None, existing_fp=None, closed_fp="00000000000e")]
     save_items(kb.cfg, [
         *listed,
-        item(3, "rejected", "same_fact", existing_fp=base, closed_fp="0000000a"),  # went in unchanged
+        item(3, "rejected", "same_fact", existing_fp=base, closed_fp="00000000000a"),  # went in unchanged
         item(4, "rejected", "same_fact", existing_fp=base, close_reason="distinct: other phase"),  # no closed_fp
-        item(5, "rejected", "same_fact", existing_fp="0000000f", closed_fp="0000000e"),  # F-0100 changed
-        item(6, "rejected", "same_fact", existing_id="F-0200", existing_fp=base, closed_fp="0000000e"),  # gone
+        item(5, "rejected", "same_fact", existing_fp="00000000000f", closed_fp="00000000000e"),  # F-0100 changed
+        item(6, "rejected", "same_fact", existing_id="F-0200", existing_fp=base, closed_fp="00000000000e"),  # gone
         item(7, "rejected", "same_fact", existing_fp=base, status="open"),
-        item(8, "review", "same_fact", existing_fp=base, closed_fp="0000000e"),
+        item(8, "review", "same_fact", existing_fp=base, closed_fp="00000000000e"),
     ])
     assert [i.id for i in items.reworded(kb.cfg)] == [i.id for i in listed]
 
@@ -137,7 +137,7 @@ def test_items_stats_counts_each_verdict_and_applies_the_recalibration_rule(jkb,
         *closed_items(200, 20, 2, "rejected", "cannot_both_be_true"),  # 10% is not above 10%
         *closed_items(300, 19, 19, "rejected", "revision"),        # 19 closed: too few to judge
         *closed_items(400, 19, 11, "review", "restates_and_extends"),
-        item(499, "review", "restates_and_extends", new_id="F-0001", new_fp="0000000c", existing_id=None,
+        item(499, "review", "restates_and_extends", new_id="F-0001", new_fp="00000000000c", existing_id=None,
              existing_fp=None, status="open"),                     # F-0001 changed: reconciled, closed otherwise
         *closed_items(500, 30, 15, "review", "low_confidence"),    # 50% is not above 50%
         *closed_items(600, 25, 25, "review", "quantity_conflict"),  # code, not Jev: not counted

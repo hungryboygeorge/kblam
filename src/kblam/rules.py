@@ -22,7 +22,9 @@ from kblam.finding import (
     ID_RE,
     Finding,
     fingerprint,
+    fingerprint_v1,
     id_number,
+    is_v1_fingerprint,
     normalise_newlines,
 )
 from kblam.index import generate_index
@@ -216,7 +218,7 @@ def _k1_fields(view: KBView, f: Finding) -> list[Issue]:
         value = meta["depends_on"]
         if not isinstance(value, dict):
             add(f.key_line("depends_on"), "depends_on must be a mapping of finding ID to fingerprint, "
-                                          "e.g. {F-0102: 3fa9c1d2}")
+                                          "e.g. {F-0102: 3fa9c1d2e4b7}")
         else:
             for key, fp in value.items():
                 line = _mapping_key_line(f, value, key, "depends_on")
@@ -225,6 +227,8 @@ def _k1_fields(view: KBView, f: Finding) -> list[Issue]:
                 if fp is not None and not isinstance(fp, str):
                     add(line, f"depends_on fingerprint for {key} parsed as {type(fp).__name__}; quote it: "
                               f"{key}: \"{fp}\"")
+                elif is_v1_fingerprint(fp):
+                    add(line, _old_stamp_problem(f.file_id, key, fp))
 
     if "anchors" in meta:
         value = meta["anchors"]
@@ -336,7 +340,29 @@ class Dependency:
     target: str
     recorded: object        # the value as written: a fingerprint, None, or a K1 error
     current: str | None     # the target's fingerprint; None when it cannot be computed
-    state: str              # current | suspect | unstamped | missing | invalid
+    state: str              # current | suspect | unstamped | old | missing | invalid
+    upgradable: bool = False  # an old stamp still equal to the target's v1 fingerprint, which upgrade re-stamps
+
+
+def _v1_fingerprints(view: KBView) -> dict[str, str]:
+    """The v1 fingerprint of each finding whose ID no other file shares, by ID, once per view: what tells an
+    old-format stamp that kblam upgrade re-stamps from one whose target changed since (SPEC §5.1)."""
+    if "v1" not in view.memo:
+        counts = Counter(f.file_id for f in view.findings)
+        view.memo["v1"] = {f.file_id: fingerprint_v1(f) for f in view.findings
+                           if f.ok and counts[f.file_id] == 1}
+    return view.memo["v1"]
+
+
+def _old_stamp_problem(dependent: str, target: str, recorded: str) -> str:
+    """K1's message for an old-format depends_on value (SPEC §5.1). It does not say whether the target changed
+    since: put tells the errors a move introduces from those already there by their message, and a put that
+    changes the target must not turn this one into a new error; like K3, the put reports the dependent as one
+    it made suspect. kblam deps says which case it is."""
+    return (f"depends_on {target}: {recorded} is an old-format fingerprint (8 digits, from before fingerprint v2, "
+            f"SPEC §5.1). kblam upgrade re-stamps it while {target} is unchanged since it was recorded, and kblam "
+            f"deps {target} says whether it is; if not, re-read {target}, then kblam ack {dependent} {target} (in "
+            f"a staged file, set it to null and put it)")
 
 
 def dependencies(view: KBView) -> list[Dependency]:
@@ -353,7 +379,8 @@ def dependencies(view: KBView) -> list[Dependency]:
             if not isinstance(key, str) or not ID_RE.match(key):
                 continue
             targets = by_id.get(key, [])
-            current = fingerprint(targets[0]) if len(targets) == 1 and targets[0].ok else None
+            current = (fingerprint(targets[0], view.cfg.scope_separator)
+                       if len(targets) == 1 and targets[0].ok else None)
             if isinstance(recorded, str):
                 recorded = str(recorded)
             if not targets:
@@ -362,10 +389,13 @@ def dependencies(view: KBView) -> list[Dependency]:
                 state = "invalid"
             elif recorded is None:
                 state = "unstamped"
+            elif is_v1_fingerprint(recorded):
+                state = "old"  # K1 reports it (SPEC §5.1)
             else:
                 state = "current" if recorded == current else "suspect"
             line = _mapping_key_line(f, depends, key, "depends_on") or 0
-            links.append(Dependency(f.file_id, f.path, line, key, recorded, current, state))
+            upgradable = state == "old" and _v1_fingerprints(view).get(key) == recorded
+            links.append(Dependency(f.file_id, f.path, line, key, recorded, current, state, upgradable))
     return links
 
 

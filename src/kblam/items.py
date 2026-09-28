@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from kblam import review
 from kblam.check import CONFLICT, LOW_CONFIDENCE, RESTATES, REVISION, SAME_FACT, parse_policy
 from kblam.config import Config
+from kblam.finding import fingerprint_as, is_v1_fingerprint
 from kblam.jev import jev_settings
 from kblam.review import ReviewItem
 from kblam.view import KBView, load_view
@@ -44,11 +45,23 @@ def open_items(cfg: Config, view: KBView | None = None) -> list[ReviewItem]:
 
 def reworded(cfg: Config, view: KBView | None = None) -> list[ReviewItem]:
     """Rejected items that a put closed at another fingerprint than the one rejected, whose other side, if
-    any, is in the KB now at the fingerprint the item recorded (§6.4, §7)."""
-    fps = review.current_fingerprints(view if view is not None else load_view(cfg))
+    any, is in the KB now at the fingerprint the item recorded (§6.4, §7). An item whose two fingerprints
+    were recorded in different formats, one before fingerprint v2 and one after, cannot be compared and is
+    left out; the other side is compared in the format the item recorded it in (§5.1)."""
+    view = view if view is not None else load_view(cfg)
+    counts: dict[str, int] = {}
+    for f in view.findings:
+        counts[f.file_id] = counts.get(f.file_id, 0) + 1
+    readable = {f.file_id: f for f in view.findings if f.ok and counts[f.file_id] == 1}
+
+    def unchanged(finding_id: str, recorded: str | None) -> bool:
+        finding = readable.get(finding_id)
+        return finding is not None and fingerprint_as(recorded, finding, cfg.scope_separator) == recorded
+
     return [item for item in review.load_items(cfg)
             if item.kind == "rejected" and not item.open and item.closed_fp and item.closed_fp != item.new_fp
-            and (item.existing_id is None or fps.get(item.existing_id) == item.existing_fp)]
+            and is_v1_fingerprint(item.closed_fp) == is_v1_fingerprint(item.new_fp)
+            and (item.existing_id is None or unchanged(item.existing_id, item.existing_fp))]
 
 
 @dataclass(frozen=True)

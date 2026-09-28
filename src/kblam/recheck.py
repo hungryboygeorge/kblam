@@ -130,7 +130,7 @@ def collect(cfg: Config, ids: list[str]) -> tuple[list[Check], list[str]]:
 
 
 def _check(cfg: Config, finding: Finding, command: str) -> Check:
-    check = Check(finding.file_id, fingerprint(finding), command)
+    check = Check(finding.file_id, fingerprint(finding, cfg.scope_separator), command)
     try:
         check.argv = shlex.split(command)
     except ValueError as exc:

@@ -297,13 +297,15 @@ class Side:
     fingerprint: str
 
     @classmethod
-    def of(cls, finding: Finding) -> Side:
+    def of(cls, finding: Finding, separator: str) -> Side:
+        """`finding` as Jev sees it; `separator` is the KB's [kb] scope_separator, which its fingerprint
+        splits scope values at (SPEC §5.1). The state sent keeps the scope as written."""
         meta = finding.meta if isinstance(finding.meta, dict) else {}
         scope = plain_data(meta.get("scope"))
         if isinstance(scope, str):
             scope = [scope]
         return cls(finding.file_id or finding.path, " ".join(finding.claim.split()),
-                   tuple(str(s) for s in scope or ()), fingerprint(finding))
+                   tuple(str(s) for s in scope or ()), fingerprint(finding, separator))
 
     def state(self) -> dict:
         return jev_prompts.side_state(self.claim, list(self.scope))
@@ -381,10 +383,10 @@ class PairCache:
     match no key now and stay until `kblam upgrade` re-keys them.
 
     Two more tables hold review-workflow state (M5): `distinct_pairs`, the resolutions recorded before
-    M6.10 (the reasons given to `kblam resolve --distinct` for a pair at given fingerprints, unordered;
-    a revision item's second side is empty), which still suppress until `kblam upgrade` moves them into
+    M6.10 (the reasons given to `kblam resolve --distinct` for a pair at given v1 fingerprints, unordered;
+    a revision item's second side is empty), which only `kblam upgrade` reads, to move them into
     kblam.resolutions.jsonl, and `checked`, each (finding, fingerprint) whose Jev check got an answer to
-    every question: a finding counts as checked at its fingerprint, not its state hash."""
+    every question: a finding counts as checked at its fingerprint, not its state hash (SPEC §6.5)."""
 
     SCHEMA = """
         CREATE TABLE IF NOT EXISTS answers (
@@ -460,20 +462,6 @@ class PairCache:
     def _pair(a: tuple[str, str], b: tuple[str, str] | None) -> tuple[str, str, str, str]:
         first, second = sorted([a, b or ("", "")])
         return (*first, *second)
-
-    def mark_distinct(self, a: tuple[str, str], b: tuple[str, str] | None, reason: str) -> None:
-        """A resolution as kblam recorded it before M6.10, for (id, fingerprint) sides a and b (None for a
-        revision item). `kblam resolve` now appends to kblam.resolutions.jsonl instead."""
-        with self._lock, self._connect() as conn, conn:
-            conn.execute("INSERT OR REPLACE INTO distinct_pairs VALUES (?, ?, ?, ?, ?, ?)",
-                         (*self._pair(a, b), reason, _now()))
-
-    def distinct_reason(self, a: tuple[str, str], b: tuple[str, str] | None) -> str | None:
-        """The reason of a pre-M6.10 resolution of (id, fingerprint) sides a and b, if there is one."""
-        with self._lock, self._connect() as conn:
-            row = conn.execute("SELECT reason FROM distinct_pairs WHERE a_id = ? AND a_fp = ? AND b_id = ? "
-                               "AND b_fp = ?", self._pair(a, b)).fetchone()
-        return row[0] if row else None
 
     def mark_checked(self, finding_id: str, fp: str) -> None:
         with self._lock, self._connect() as conn, conn:
@@ -558,7 +546,7 @@ class JevClient:
 
     def ask_relation(self, existing: Side | Finding, new: Side | Finding) -> RelationResult:
         """Which §6.2 relation option describes `new` relative to `existing` (directional)."""
-        existing, new = _side(existing), _side(new)
+        existing, new = _side(existing, self.cfg.scope_separator), _side(new, self.cfg.scope_separator)
         key = cache_key(self.settings, "relation", existing.state_hash, new.state_hash)
         ids = {"existing_id": existing.finding_id, "existing_fp": existing.fingerprint,
                "new_id": new.finding_id, "new_fp": new.fingerprint}
@@ -583,7 +571,7 @@ class JevClient:
 
     def ask_revision(self, new: Side | Finding) -> RevisionResult:
         """Noul: does `new` read as a correction of an earlier claim (asked once per finding)."""
-        new = _side(new)
+        new = _side(new, self.cfg.scope_separator)
         key = cache_key(self.settings, "revision", "", new.state_hash)
         ids = {"existing_id": None, "existing_fp": None, "new_id": new.finding_id, "new_fp": new.fingerprint}
         hit = self._cached("revision", key, ids)
@@ -721,8 +709,8 @@ class JevClient:
         return answer, info
 
 
-def _side(value: Side | Finding) -> Side:
-    return value if isinstance(value, Side) else Side.of(value)
+def _side(value: Side | Finding, separator: str) -> Side:
+    return value if isinstance(value, Side) else Side.of(value, separator)
 
 
 # --- kblam cost ----------------------------------------------------------------------------
@@ -805,6 +793,6 @@ def smoke_sides() -> tuple[Side, Side, Side]:
     revision candidate expected to get a high noul."""
     def synthetic(finding_id: str, claim: str) -> Side:
         return Side.of(Finding(path=f"smoke/{finding_id}.md", raw=b"", file_id=finding_id,
-                               meta={"scope": ["any"]}, claim=claim))
+                               meta={"scope": ["any"]}, claim=claim), "/")  # one scope value: nothing to split
 
     return synthetic("F-9001", SMOKE_EXISTING), synthetic("F-9002", SMOKE_NEW), synthetic("F-9003", SMOKE_REVISION)

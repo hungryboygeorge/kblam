@@ -40,7 +40,7 @@ def test_index_after_shell_write_leaves_tree_hash_stale(kb, capsys):
 
 def test_ack_after_shell_write_leaves_tree_hash_stale(kb, capsys):
     target = kb.add("F-0001", "sensor", CLAIM_A)
-    kb.add("F-0002", "motor", CLAIM_B, topic="motor", extra="depends_on:\n  F-0001: deadbeef\n")
+    kb.add("F-0002", "motor", CLAIM_B, topic="motor", extra="depends_on:\n  F-0001: deadbeef0000\n")
     before = read_tree_hash(kb.cfg)
     shell_append(target, "\nDetail added by a shell write.\n")
     capsys.readouterr()
@@ -74,7 +74,7 @@ def test_clean_put_advances_tree_hash(kb, capsys):
 def checked(kb, finding_id: str) -> bool:
     """Whether the pair cache marks the finding as checked at its current fingerprint (SPEC §6.5)."""
     finding = next(f for f in load_view(kb.cfg).findings if f.file_id == finding_id)
-    return PairCache(kb.cfg.state_dir / CACHE_NAME).was_checked(finding_id, fingerprint(finding))
+    return PairCache(kb.cfg.state_dir / CACHE_NAME).was_checked(finding_id, fingerprint(finding, "/"))
 
 
 def test_bootstrap_without_findings_records_the_tree(kb, capsys):

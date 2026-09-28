@@ -22,7 +22,7 @@ listed in REFERENCES.md; check them before changing how requests are built or an
 
 ```sh
 uv sync
-uv run pytest                                  # about 30 s
+uv run pytest                                  # about a minute
 uv run kblam --root <path to a scratch KB> validate
 ```
 
@@ -47,20 +47,21 @@ outside this one.
 | `entry.py` | The `kblam` console script. It dispatches `kblam hook` without importing the CLI. |
 | `cli.py` | Commands, argument parsing and exit codes (`EXIT_HELP`). |
 | `config.py` | Loading `[kb]` from `kblam.toml` and finding the repository root, a resolved path. |
-| `finding.py` | Parsing one finding (frontmatter, claim paragraph) and its fingerprint. |
+| `finding.py` | Parsing one finding (frontmatter, claim paragraph) and its fingerprint: v2, and v1 for recognising old stamps. |
 | `view.py` | `KBView`, an in-memory snapshot of `findings/` as it is or as it would be after a put. |
 | `rules.py` | The validator rules K1 to K12 and `validate()`. |
 | `index.py`, `treehash.py` | `INDEX.md` generation, and the tree digest with the tree.hash rule. |
 | `store.py` | `new`, `edit`, `put`, `ack`, `index`, `rm` and `renumber`, the edit-base guard, and `atomic_write`. |
 | `items.py` | `kblam items`, with `--reworded` and `--stats`. |
-| `lock.py` | `.kblam/lock`, including breaking a stale lock. |
+| `lock.py` | `.kblam/lock`, with the holder's heartbeat and the breaking of a stale lock. |
 | `check.py` | Candidate selection, BM25, the quantity comparison, the decision policy and `checks.jsonl`. |
 | `embed.py` | The ollama calls, the vector cache and the cosine scores. |
 | `jev.py` | The Jev client (retries, throttling, key loading), `pairs.sqlite`, `calls.jsonl`, and `kblam cost`. |
-| `jev_prompts.py` | The Jev question shapes, validation of `[jev.prompt]`, and `prompt_id`. |
+| `jev_prompts.py` | The Jev question shapes, validation of `[jev.prompt]`, the prompt ids and the state hash. |
 | `review.py` | `review.jsonl` items, and `check`, `check --pending`, `audit` and `resolve`. |
 | `resolutions.py` | The committed `kblam.resolutions.jsonl`: reading, checking and appending resolutions. |
 | `recheck.py` | `kblam recheck`: running the approved `check:` commands. |
+| `upgrade.py` | `kblam upgrade`: migrating what was recorded before fingerprint v2, and the refusal until then. |
 | `hook.py` | The Claude Code hooks: the PreToolUse deny, and the Stop and SubagentStop validation. |
 | `init.py` | `kblam init [--update]`. |
 | `approval.py` | A person's approval of `kblam.toml` before a commit changes it (`validate --commit`, `approve-config`). |
@@ -76,15 +77,15 @@ least one failing case for every rule except K3, whose cases are in `tests/test_
 
 ## Invariants to keep
 
-**Only kblam writes the knowledge base.** `put`, `ack` and `index` are the only writers of
-`findings/`, and they replace files there with `store.atomic_write`. They, `new`, `edit`,
-`resolve`, `validate --record` and the recording step of `check` and `audit` hold `.kblam/lock` for
-their read-validate-write span. `put` asks Jev before it takes the lock and, under the lock,
+**Only kblam writes the knowledge base.** `put`, `ack`, `index`, `rm`, `renumber` and `upgrade` are
+the only writers of `findings/`, and they replace files there with `store.atomic_write`. They,
+`new`, `edit`, `resolve`, `approve-config`, `validate --record` and the recording step of `check`
+and `audit` hold `.kblam/lock` for their read-validate-write span (SPEC.md §7 lists them all). `put` asks Jev before it takes the lock and, under the lock,
 recomputes the candidates against the current tree and asks only about pairs the tree gained
 meanwhile. Keep network calls outside the lock.
 
-**The tree.hash rule.** `put`, `ack` and `index` advance `.kblam/tree.hash` only when the tree
-matched it before their write (`treehash.record_after_write`), and only `validate --record` accepts
+**The tree.hash rule.** The writers of `findings/` advance `.kblam/tree.hash` only when the tree
+matched it before their write (`treehash.as_kblam_left_it`, then `treehash.record_after_write`), and only `validate --record` accepts
 a change made outside kblam. Without this rule, a shell write followed by `kblam index` would
 silence the Stop hook.
 
@@ -113,13 +114,20 @@ Jev endpoint is OpenRouter's over https, and `ollama_url` names this machine
 side of that line. A commit that changes `kblam.toml` needs a person's approval (`approval.py`);
 keep that approval impossible to give from a non-interactive shell.
 
+**Fingerprints and state hashes are stored formats.** Every `depends_on` stamp in every knowledge
+base holds a fingerprint, and review items and checked marks record them; resolutions in each
+project's committed `kblam.resolutions.jsonl` and the cached answers are keyed by state hashes. So a
+change to what `finding.fingerprint` or `jev_prompts.state_hash` computes, for any finding, is a
+format change: `tests/test_fingerprint_v2.py` pins a fingerprint, and a new format needs its own
+length and a `kblam upgrade` step (SPEC.md §5.1, §7).
+
 **Nothing secret or textual goes into the logs.** The API key is held in `jev._Secret` and scrubbed
 from error messages. `calls.jsonl` and `checks.jsonl` record IDs, fingerprints and verdicts, never
 finding text.
 
 **The question wording belongs to the project.** The Jev questions live in each consuming project's
 `kblam.toml`. The code in `jev_prompts.py` owns only the option keys, the question types, the state
-shapes and `SHAPE_VERSION`. Changing any of those changes every project's `prompt_id`, which turns
+shapes and `SHAPE_VERSION`. Changing any of those changes every project's prompt ids, which turns
 all of that project's reject verdicts into review items until it recalibrates, so treat such a change
 as a breaking one.
 
@@ -149,5 +157,6 @@ projects pick up asset changes with `kblam init --update`.
 
 ## Not implemented yet
 
-Fingerprint v2 and `kblam upgrade` (SPEC.md §5.1, §7), `kblam calibrate` and `kblam migrate` (§7),
-and the MCP server (§12, M7) do not exist yet.
+`kblam calibrate` (SPEC.md §7) waits on the pilot's exact threshold search (§10.3, §13), which it
+must reproduce. `kblam migrate` (§7) is planned but not specified, and the MCP server (§12, M7) is
+deferred.

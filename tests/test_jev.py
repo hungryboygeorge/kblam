@@ -77,7 +77,7 @@ DEFAULT_REVISION_QUESTION = {
 
 def side(finding_id: str, claim: str, scope=("MX-200",)) -> Side:
     return Side.of(Finding(path=f"x/{finding_id}.md", raw=b"", file_id=finding_id,
-                           meta={"scope": list(scope)}, claim=claim))
+                           meta={"scope": list(scope)}, claim=claim), "/")
 
 
 E = side("F-0001", "The motor reaches steady output after 90 seconds.")

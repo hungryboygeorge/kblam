@@ -21,7 +21,7 @@ from pathlib import PurePosixPath
 from kblam import jev_prompts, resolutions
 from kblam.config import CONFIG_NAME, Config, ConfigError
 from kblam.embed import EmbedUnavailable, Embedder, probe, title_and_claim
-from kblam.finding import Finding, fingerprint, id_number, plain_data
+from kblam.finding import Finding, fingerprint, id_number, plain_data, split_scope
 from kblam.jev import (
     CACHE_NAME,
     CallLog,
@@ -179,11 +179,7 @@ def _meta(finding: Finding) -> dict:
 def scope_parts(values, separator: str = "/") -> frozenset[str]:
     """A scope value containing `separator` stands for each of its parts, and with "" no value splits
     ([kb] scope_separator, SPEC §4, §9)."""
-    parts = set()
-    for value in values or ():
-        pieces = str(value).split(separator) if separator else [str(value)]
-        parts.update(p.strip() for p in pieces if p.strip())
-    return frozenset(parts)
+    return frozenset(split_scope(values, separator))
 
 
 def scopes_overlap(a, b, separator: str = "/", wildcard: str = "any") -> bool:
@@ -383,7 +379,7 @@ def select_candidates(view: KBView, finding: Finding, max_candidates: int, topic
         candidate = Candidate(
             finding=other,
             finding_id=other.file_id,
-            fingerprint=fingerprint(other),
+            fingerprint=fingerprint(other, view.cfg.scope_separator),
             depends=other.file_id in depends or finding.file_id in _depends(other),
             anchors=shared_anchors,
             evidence=shared_evidence,
@@ -581,6 +577,10 @@ class Checker:
     def __enter__(self) -> Checker:
         return self
 
+    def _side(self, finding: Finding) -> Side:
+        """`finding` as Jev sees it, with its fingerprint under this KB's scope separator (SPEC §5.1)."""
+        return Side.of(finding, self.cfg.scope_separator)
+
     def __exit__(self, *exc) -> None:
         self.close()
 
@@ -621,8 +621,9 @@ class Checker:
                 self._answers[key] = got
 
     def _questions(self, finding: Finding, selection: Selection) -> tuple[list[tuple[Side, Side]], list[Side]]:
-        new = Side.of(finding)
-        pairs = [(Side.of(c.finding), new) for c in selection.candidates] if self.policy.asks_relation else []
+        new = self._side(finding)
+        pairs = ([(self._side(c.finding), new) for c in selection.candidates] if self.policy.asks_relation
+                 else [])
         return pairs, [new] if self.policy.asks_revision else []
 
     def similarity_label(self) -> str:
@@ -747,24 +748,19 @@ class Checker:
                         winner=answer.winner, p=p, confidence=answer.confidence,
                         new_state=new.state_hash, existing_state=existing.state_hash)]
 
-    def _resolved(self, verdict: Verdict, resolved: dict) -> bool:
+    @staticmethod
+    def _resolved(verdict: Verdict, resolved: dict) -> bool:
         """§6.4 Resolutions: a verdict on a pair is suppressed by a `distinct` resolution on the unordered
-        pair of (ID, state hash) sides, a revision verdict by a `not_revision` one on its side; or by a
-        resolution recorded before M6.10, a row of pairs.sqlite on (ID, fingerprint) sides, kept until
-        `kblam upgrade` moves it. No resolution covers a quantity_conflict (§6.3). `resolved` is the
-        committed log, by resolutions.key."""
+        pair of (ID, state hash) sides, a revision verdict by a `not_revision` one on its side. No
+        resolution covers a quantity_conflict (§6.3). `resolved` is the committed log, by resolutions.key.
+        Resolutions recorded before M6.10 in pairs.sqlite count once kblam upgrade has moved them there."""
         if verdict.verdict == QUANTITY_CONFLICT:
             return False
         new = (verdict.new_id, verdict.new_state)
         if verdict.existing_id is None:
-            committed = resolutions.key(resolutions.NOT_REVISION, [new])
-            other = None
-        else:
-            committed = resolutions.key(resolutions.DISTINCT, [new, (verdict.existing_id, verdict.existing_state)])
-            other = (verdict.existing_id, verdict.existing_fp)
-        if committed in resolved:
-            return True
-        return self.cache.distinct_reason((verdict.new_id, verdict.new_fp), other) is not None
+            return resolutions.key(resolutions.NOT_REVISION, [new]) in resolved
+        existing = (verdict.existing_id, verdict.existing_state)
+        return resolutions.key(resolutions.DISTINCT, [new, existing]) in resolved
 
     def _decide(self, result: CheckResult, new: Side, pairs: list[tuple[Finding, list[QuantityConflict]]],
                 ask_revision: bool, resolved: dict) -> None:
@@ -775,7 +771,7 @@ class Checker:
         jev_fired: list[Verdict] = []
         fired: list[Verdict] = []
         for existing_finding, conflicts in pairs:
-            existing = Side.of(existing_finding)
+            existing = self._side(existing_finding)
             on_pair = [Verdict(QUANTITY_CONFLICT, "reject", new.finding_id, new.fingerprint, existing.finding_id,
                                existing.fingerprint, _message(QUANTITY_CONFLICT, existing.finding_id, quantity=q),
                                new_state=new.state_hash, existing_state=existing.state_hash)
@@ -815,7 +811,7 @@ class Checker:
         refuse a write (check, audit) record them as review items."""
         resolved = resolutions.by_key(resolutions.load(self.cfg))  # a damaged log stops the check before Jev
         selection = self.select(view, finding)
-        new = Side.of(finding)
+        new = self._side(finding)
         result = CheckResult(finding.file_id, new.fingerprint, command,
                              similarity=self.similarity_label(),
                              candidates=[c.finding_id for c in selection.candidates],
@@ -862,24 +858,24 @@ class Checker:
                     if pair in seen:
                         continue
                     seen.add(pair)
-                    state_new, state_c = Side.of(finding).state_hash, Side.of(c.finding).state_hash
+                    state_new, state_c = self._side(finding).state_hash, self._side(c.finding).state_hash
                     if cached("relation", state_c, state_new) or cached("relation", state_new, state_c):
                         continue
                     existing, new = sorted([finding, c.finding], key=lambda f: id_number(f.file_id))
                     by_new.setdefault(new.file_id, []).append(existing)
         if self.policy.asks_revision:
-            revisions = [f for f in findings if not cached("revision", "", Side.of(f).state_hash)]
+            revisions = [f for f in findings if not cached("revision", "", self._side(f).state_hash)]
 
         by_id = {f.file_id: f for f in findings}
         targets = sorted(set(by_new) | {f.file_id for f in revisions}, key=id_number)
-        relation_pairs = [(Side.of(e), Side.of(by_id[n])) for n in targets for e in by_new.get(n, [])]
-        self._ask(relation_pairs, [Side.of(f) for f in revisions])
+        relation_pairs = [(self._side(e), self._side(by_id[n])) for n in targets for e in by_new.get(n, [])]
+        self._ask(relation_pairs, [self._side(f) for f in revisions])
 
         results = []
         revision_ids = {f.file_id for f in revisions}
         for finding_id in targets:
             finding = by_id[finding_id]
-            new = Side.of(finding)
+            new = self._side(finding)
             result = CheckResult(finding_id, new.fingerprint, "audit",
                                  similarity=self.similarity_label(),
                                  candidates=[e.file_id for e in by_new.get(finding_id, [])])

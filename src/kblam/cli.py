@@ -30,6 +30,10 @@ EXIT_USAGE = 2
 EXIT_LOCKED = 3
 EXIT_REJECTED = 4
 
+# The commands that read review items, checked marks or resolutions, and would read state recorded before
+# fingerprint v2 as changes: they refuse until kblam upgrade has migrated it (SPEC §7).
+UPGRADE_FIRST = ("validate", "put", "check", "audit", "resolve", "items", "rm")
+
 EXIT_HELP = """\
 exit status:
   0  success
@@ -305,6 +309,10 @@ def _cmd_renumber(cfg, args) -> int:
     for dependent, path in result.rekeyed:
         print(f"kblam renumber: {dependent} depends_on {result.old_id} is now {result.new_id}: "
               f"{result.fingerprint} ({path}), since its fingerprint showed it meant {result.old_path}")
+    if result.resolutions:
+        print(f"kblam renumber: copied {result.resolutions} resolution(s) of {result.old_id} to {result.new_id} in "
+              f"{cfg.resolutions_path.name}, since their state hash showed they meant {result.old_path}; commit "
+              f"it with the renumbered finding")
     print(f"kblam renumber: regenerated {result.index_path}" + (" and .kblam/tree.hash" if result.recorded else ""))
     if result.mentions:
         print(f"kblam renumber: {len(result.mentions)} other mention(s) of {result.old_id} may mean either "
@@ -313,6 +321,71 @@ def _cmd_renumber(cfg, args) -> int:
             print(f"  {mention}")
     else:
         print(f"kblam renumber: no other mention of {result.old_id} in {cfg.findings_dir}/")
+    return EXIT_OK
+
+
+def _cmd_upgrade(cfg, args) -> int:
+    """`kblam upgrade` (SPEC §7): what it migrated, step by step, and what a person does next."""
+    from kblam.upgrade import upgrade
+
+    result = upgrade(cfg)
+    out = []
+    if result.restamped:
+        out.append(f"kblam upgrade: re-stamped {len(result.restamped)} depends_on value(s) in {cfg.findings_dir}/ "
+                   f"with v2 fingerprints:")
+        out += [f"  {r.path}: {r.target} {r.old} -> {r.new}" for r in result.restamped]
+        out.append("kblam upgrade: " + ("recorded .kblam/tree.hash for the tree" if result.recorded else
+                   f"left .kblam/tree.hash as it was: {cfg.findings_dir}/ had changed outside kblam, and kblam "
+                   f"validate --record accepts that once the tree is clean"))
+    if result.stale:
+        out.append(f"kblam upgrade: {len(result.stale)} depends_on value(s) stay in the old format, because "
+                   f"their target changed since it was recorded; re-read each target, then kblam ack "
+                   f"<dependent> <target>:")
+        out += [f"  {r.path}: {r.target} {r.old}" for r in result.stale]
+    if result.staged:
+        out.append(f"kblam upgrade: re-stamped {len(result.staged)} depends_on value(s) in staged findings:")
+        out += [f"  {r.path}: {r.target} {r.old} -> {r.new}" for r in result.staged]
+    if result.edit_records:
+        out.append(f"kblam upgrade: updated the edit record of {', '.join(result.edit_records)}, whose staged "
+                   f"copy still puts over the re-stamped file")
+    if result.items_rekeyed:
+        moves = ", ".join(f"{old} is now {new}" for old, new in result.items_rekeyed)
+        out.append(f"kblam upgrade: moved {len(result.items_rekeyed)} open item(s) to v2 fingerprints, under the "
+                   f"IDs a check now gives them: {moves}")
+    if result.items_closed:
+        out.append(f"kblam upgrade: closed {len(result.items_closed)} item(s) whose finding changed since it was "
+                   f"raised: {', '.join(result.items_closed)}")
+    if result.marks_moved or result.marks_dropped:
+        out.append(f"kblam upgrade: carried {result.marks_moved} checked mark(s) over to v2 fingerprints"
+                   + (f"; dropped {result.marks_dropped} for versions no longer in the KB" if result.marks_dropped
+                      else ""))
+    if result.resolutions_moved or result.resolutions_present or result.resolutions_lapsed:
+        out.append(f"kblam upgrade: moved {result.resolutions_moved} resolution(s) from .kblam/pairs.sqlite into "
+                   f"{cfg.resolutions_path.name}"
+                   + (f"; {result.resolutions_present} were there already" if result.resolutions_present else "")
+                   + (f"; dropped {result.resolutions_lapsed} whose finding changed since, so it no longer applied"
+                      if result.resolutions_lapsed else ""))
+    if result.answers_moved or result.answers_dropped:
+        out.append(f"kblam upgrade: re-keyed {result.answers_moved} cached Jev answer(s) by state hash"
+                   + (f"; dropped {result.answers_dropped} about another wording or versions no longer in the KB"
+                      if result.answers_dropped else ""))
+    if result.prompt_ids:
+        relation, revision = result.prompt_ids
+        out.append(f"kblam upgrade: [jev.thresholds] in {CONFIG_NAME} records prompt_id, the id of the whole "
+                   f"prompt. Record each question's own id instead and delete prompt_id: relation_prompt_id = "
+                   f"\"{relation}\" and revision_prompt_id = \"{revision}\" (kblam prompt-id prints them). "
+                   f"{CONFIG_NAME} is a person's to edit; after editing it, run kblam approve-config before "
+                   f"committing")
+    if result.restamped or result.resolutions_moved:
+        committed = (["the re-stamped findings"] if result.restamped else []) + (
+            [cfg.resolutions_path.name] if result.resolutions_moved else [])
+        out.append(f"kblam upgrade: commit {' and '.join(committed)}, so every clone has them; each other machine "
+                   f"runs kblam upgrade once for its own .kblam/")
+    if not result.changed and not result.prompt_ids and not result.stale:
+        out.append("kblam upgrade: nothing to upgrade; the knowledge base and this machine's state are already in "
+                   "the M6.10 formats")
+    for line in out:
+        print(line)
     return EXIT_OK
 
 
@@ -354,6 +427,12 @@ def _dependency_line(d: Dependency, other: str, titles: dict[str, str]) -> str:
                   f"kblam ack {d.dependent} {d.target}")
     elif d.state == "unstamped":
         detail = f"unstamped  re-read {d.target}, then kblam ack {d.dependent} {d.target}"
+    elif d.state == "old" and d.upgradable:
+        detail = (f"old        recorded {d.recorded} before fingerprint v2, and {d.target} is unchanged since; "
+                  f"kblam upgrade re-stamps it")
+    elif d.state == "old":
+        detail = (f"old        recorded {d.recorded} before fingerprint v2, and {d.target} changed since; re-read "
+                  f"{d.target}, then kblam ack {d.dependent} {d.target}")
     elif d.state == "missing":
         detail = f"missing    {d.target} is not a finding in the KB"
     else:
@@ -611,12 +690,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pending", action="store_true", help="retry the findings with open unchecked items")
     p.set_defaults(func=_cmd_check)
     p = sub.add_parser("audit", help="ask every candidate pair and revision question with no cached answer "
-                                     "for the current fingerprints, model and prompt")
+                                     "for the current state hashes, model and prompt ids")
     p.set_defaults(func=_cmd_audit)
-    p = sub.add_parser("resolve", help="close a review or rejected item whose two findings state distinct facts")
+    p = sub.add_parser("resolve", help="close a review or rejected item that Jev misread, recording why in "
+                                       "kblam.resolutions.jsonl (an adjudicator's command)")
     p.add_argument("id", metavar="R-XXXXXXXX")
     p.add_argument("--distinct", required=True, metavar="REASON",
-                   help="why they are distinct; stored so the pair at these fingerprints is not raised again")
+                   help="why Jev misread the item, for a later reader; its sides are not raised again until a "
+                        "claim or scope changes")
     p.set_defaults(func=_cmd_resolve)
     p = sub.add_parser("rm", help="remove a finding after a merge moved everything it stated into another one "
                                   "(an adjudicator's command); the reason goes in the commit message")
@@ -636,6 +717,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="instead, count each verdict's closed items as closed distinct or otherwise, and say "
                         "whether its recalibration is due (SPEC §10.7)")
     p.set_defaults(func=_cmd_items)
+    p = sub.add_parser("upgrade", help="move the knowledge base and this machine's .kblam/ state to the formats "
+                                       "M6.10 introduces (fingerprint v2, state hashes, committed resolutions)")
+    p.set_defaults(func=_cmd_upgrade)
     p = sub.add_parser("cost", help="summarise .kblam/calls.jsonl: Jev requests, tokens and cost, per day and kind")
     p.set_defaults(func=_cmd_cost)
     p = sub.add_parser("recheck", help="run the check: commands of the given findings, or of every finding; a "
@@ -645,8 +729,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--list", action="store_true",
                    help="print each check: command and whether it is approved on this machine; run nothing")
     p.set_defaults(func=_cmd_recheck)
-    p = sub.add_parser("prompt-id", help="print the id of this project's Jev prompt (its [jev.prompt] tables): "
-                                         "the value [jev.thresholds] records and calibration is tied to")
+    p = sub.add_parser("prompt-id", help="print the ids of this project's Jev prompt (its [jev.prompt] tables): "
+                                         "the combined id, then each question's own, which [jev.thresholds] "
+                                         "records and calibration is tied to")
     p.set_defaults(func=_cmd_prompt_id)
     p = sub.add_parser("jev-smoke", help="live check: ask Jev one synthetic relation pair and one revision "
                                          "question (two requests, or none when both are cached)")
@@ -683,6 +768,16 @@ def main(argv: list[str] | None = None) -> int:
         if tracked:  # SPEC §8.3: a pull may have written someone else's state there
             print(f"kblam {args.command}: {tracked_state_problem(tracked)}. {SKILL_POINTER}", file=sys.stderr)
             return EXIT_INVALID
+        if args.command in UPGRADE_FIRST:
+            from kblam.upgrade import old_state, old_state_problem
+
+            try:
+                stale = old_state(cfg)
+            except ReviewError:
+                stale = []  # a damaged review.jsonl: the command reports it in its own terms
+            if stale:
+                print(f"kblam {args.command}: {old_state_problem(stale)}. {SKILL_POINTER}", file=sys.stderr)
+                return EXIT_INVALID
         return args.func(cfg, args)
     except (ConfigError, StoreError, LockError, JevUnavailable, ReviewError, ApprovalError, RecheckError) as exc:
         pointer = f" {SKILL_POINTER}" if args.command == "put" and not isinstance(exc, ConfigError) else ""

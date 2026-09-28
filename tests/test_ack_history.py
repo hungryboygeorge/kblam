@@ -128,3 +128,25 @@ def test_ack_of_a_current_dependency_shows_no_versions(kb, capsys):
     assert run(kb, "ack", "F-0002", "F-0001") == 0
     assert capsys.readouterr().out == (f"kblam ack: F-0002 depends_on F-0001 is already current "
                                        f"({fp_of(kb.findings / 'calibration' / 'F-0001-sensor.md')})\n")
+
+
+@needs_git
+def test_ack_finds_the_version_an_old_format_stamp_recorded(kb, capsys):
+    """A stamp from before fingerprint v2 (SPEC §5.1) still names the version it was checked against."""
+    from kblam.finding import fingerprint_v1
+    from kblam.view import load_view
+
+    git(kb, "init", "-q")
+    kb.add("F-0001", "sensor", OLD)
+    old = fingerprint_v1(next(f for f in load_view(kb.cfg).findings if f.file_id == "F-0001"))
+    kb.add("F-0002", "motor", CLAIM_B, topic="motor", extra=f"depends_on:\n  F-0001: '{old}'\n")
+    recorded = commit_all(kb, "F-0001 and a dependent stamped by the kblam before M6.10")
+    rewrite(kb, "about 0.1%", "within 0.2%")
+    commit_all(kb, "rewrite F-0001")
+    capsys.readouterr()
+
+    assert run(kb, "ack", "F-0002", "F-0001") == 0
+    out = capsys.readouterr().out.splitlines()
+    short = git(kb, "rev-parse", "--short", recorded)
+    assert out[:2] == [f"F-0001 as recorded (commit {short}): {OLD}", f"F-0001 now: {NEW}"]
+    assert kb.issues() == []  # the old stamp is gone: ack wrote a v2 one
