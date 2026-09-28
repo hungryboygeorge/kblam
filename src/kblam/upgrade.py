@@ -32,7 +32,7 @@ from pathlib import Path
 from kblam import resolutions, review
 from kblam.config import Config
 from kblam.finding import FILENAME_RE, Finding, fingerprint, fingerprint_v1, is_v1_fingerprint, parse_finding
-from kblam.jev import CACHE_NAME, JevSettings, Side, jev_settings, question_prompt_id
+from kblam.jev import CACHE_NAME, JevSettings, PairCache, Side, jev_settings, question_prompt_id
 from kblam.jev_prompts import RELATION_KEY, REVISION_KEY
 from kblam.lock import kb_lock
 from kblam.store import atomic_write, display_path, edit_base_path, stamp_dependency
@@ -132,6 +132,13 @@ def upgrade(cfg: Config) -> UpgradeResult:
 
 
 def _upgrade(cfg: Config, settings: JevSettings) -> UpgradeResult:
+    # What can refuse is read before anything is written, so a refused upgrade leaves everything as it was: a
+    # damaged review.jsonl or kblam.resolutions.jsonl, or a cache keyed by the integer prompt_version of old.
+    items = review.load_items(cfg)
+    have = resolutions.by_key(resolutions.load(cfg))
+    cache = cfg.state_dir / CACHE_NAME
+    if cache.is_file():
+        PairCache(cache)  # CacheSchemaError for that cache (SPEC §9 "Upgrading")
     result = UpgradeResult()
     view = load_view(cfg)
     separator = cfg.scope_separator
@@ -172,17 +179,16 @@ def _upgrade(cfg: Config, settings: JevSettings) -> UpgradeResult:
             staged[finding.file_id] = finding
 
     # 3. review items
-    _upgrade_items(cfg, view, readable, staged, result)
+    _upgrade_items(cfg, view, readable, staged, items, result)
 
     # 4-6. pairs.sqlite: checked marks, resolutions, cached answers
-    cache = cfg.state_dir / CACHE_NAME
     if cache.is_file():
         with closing(sqlite3.connect(cache, timeout=30)) as conn, conn:
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
             if "checked" in tables:
                 _upgrade_marks(conn, readable, separator, result)
             if "distinct_pairs" in tables:
-                _move_resolutions(cfg, conn, readable, separator, result)
+                _move_resolutions(cfg, conn, readable, separator, have, result)
             if "answers" in tables:
                 _rekey_answers(conn, settings, readable, separator, result)
 
@@ -233,12 +239,12 @@ def _follow_edit_record(cfg: Config, before: Finding, data: bytes) -> bool:
 
 
 def _upgrade_items(cfg: Config, view, readable: dict[str, Finding], staged: dict[str, Finding],
-                   result: UpgradeResult) -> None:
+                   items: list[review.ReviewItem], result: UpgradeResult) -> None:
     """An open item whose every v1 side is its finding's current v1 version (a rejected item's new side is its
     staged file) moves to v2 fingerprints and takes the ID a check would give it now. The other open review
     and unchecked items close as their finding changed since they were raised, as they would have under v1
-    (review.reconcile); a rejected one stays open until a put of its finding closes it (SPEC §6.4)."""
-    items = review.load_items(cfg)
+    (review.reconcile); a rejected one stays open until a put of its finding closes it (SPEC §6.4).
+    `items` is every item in review.jsonl."""
     separator = cfg.scope_separator
     touched = False
     for item in items:
@@ -284,13 +290,12 @@ def _upgrade_marks(conn, readable: dict[str, Finding], separator: str, result: U
     conn.execute("DELETE FROM checked WHERE length(fp) = 8")
 
 
-def _move_resolutions(cfg: Config, conn, readable: dict[str, Finding], separator: str,
+def _move_resolutions(cfg: Config, conn, readable: dict[str, Finding], separator: str, have: dict,
                       result: UpgradeResult) -> None:
     """Each row of `distinct_pairs` whose sides are their findings' current v1 versions becomes a line of
     kblam.resolutions.jsonl (SPEC §6.4): `distinct` for a pair, `not_revision` for a row with one side, keyed
     by state hash, with its reason and date. A row whose side changed since had already lapsed. Every row is
-    then deleted, so none moves twice."""
-    have = resolutions.by_key(resolutions.load(cfg))
+    then deleted, so none moves twice. `have` is the file's resolutions, by resolutions.key."""
     for a_id, a_fp, b_id, b_fp, reason, created in conn.execute(
             "SELECT a_id, a_fp, b_id, b_fp, reason, created FROM distinct_pairs").fetchall():
         sides = [(i, fp) for i, fp in ((a_id, a_fp), (b_id, b_fp)) if i]  # a revision row's other side is empty

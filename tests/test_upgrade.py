@@ -11,6 +11,8 @@ import shutil
 import sqlite3
 from contextlib import closing
 
+import pytest
+
 from kblam import review
 from kblam.finding import fingerprint, fingerprint_v1, parse_finding
 from kblam.jev import CACHE_NAME, PairCache, Side, jev_settings
@@ -250,6 +252,29 @@ def test_upgrade_waits_for_the_lock_and_times_out_with_exit_3(kb, capsys):
     kb.write("kblam.toml", KBLAM_TOML + "lock_wait_seconds = 0\n" + NO_EMBEDDINGS + PROMPT_TOML)
     with kb_lock(kb.cfg, "test holder"):
         assert run(kb, "upgrade") == 3
+
+
+@pytest.mark.parametrize("damage, code, message", [
+    ("review", 1, "review.jsonl"),
+    ("resolutions", 2, "kblam.resolutions.jsonl"),
+    ("cache", 1, "was written by an older kblam"),  # answers keyed by the integer prompt_version (§9)
+])
+def test_an_upgrade_that_refuses_has_written_nothing(kb, capsys, damage, code, message):
+    kb.add("F-0001", "sensor", CLAIM_A)
+    two = kb.add("F-0002", "motor", CLAIM_B, topic="motor", extra=f"depends_on:\n  F-0001: {v1_of(kb, 'F-0001')}\n")
+    if damage == "review":
+        kb.write(".kblam/review.jsonl", "not an item\n")
+    elif damage == "resolutions":
+        kb.write("kblam.resolutions.jsonl", "not a resolution\n")
+    else:
+        with closing(sqlite3.connect(cache_path(kb))) as conn, conn:
+            conn.execute("CREATE TABLE answers (expected_model TEXT, prompt_version INTEGER, kind TEXT, "
+                         "existing_fp TEXT, new_fp TEXT, answer TEXT)")
+    before, recorded = two.read_bytes(), read_tree_hash(kb.cfg)
+    capsys.readouterr()
+    assert run(kb, "upgrade") == code
+    assert message in capsys.readouterr().err
+    assert two.read_bytes() == before and read_tree_hash(kb.cfg) == recorded  # the stamp is still v1
 
 
 def test_another_machine_upgrades_its_own_state_after_pulling_an_upgraded_kb(kb, tmp_path, capsys):
