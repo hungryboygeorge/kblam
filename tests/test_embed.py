@@ -20,7 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import httpx2
 import pytest
 
-from kblam import cli, store
+from kblam import cli, writes
 from kblam.check import Checker, select_candidates
 from kblam.config import ConfigError
 from kblam.embed import EmbedUnavailable, cosine
@@ -437,7 +437,7 @@ def test_put_embeds_before_the_lock_and_only_new_documents_under_it(ekb, ollama,
     lock_file = ekb.root / ".kblam" / "lock"
     seen: list[tuple[list[str], bool]] = []
     ollama.on_request = lambda inputs: seen.append((inputs, lock_file.exists()))
-    real_lock = store.kb_lock
+    real_lock = writes.kb_lock
 
     @contextmanager
     def lock_after_another_writer(cfg, command):
@@ -447,7 +447,7 @@ def test_put_embeds_before_the_lock_and_only_new_documents_under_it(ekb, ollama,
         with real_lock(cfg, command):
             yield
 
-    monkeypatch.setattr(store, "kb_lock", lock_after_another_writer)
+    monkeypatch.setattr(writes, "kb_lock", lock_after_another_writer)
     ekb.fake.relations[(E1, N)] = ("same_fact", 0.93, 0.91)
     result = do_put(ekb, stage(ekb, "F-0003", "drift", N, title="Motor drift"))
 
@@ -465,7 +465,7 @@ def test_a_failed_under_lock_embed_makes_the_whole_check_bm25(ekb, ollama, monke
     under-lock ranking is then BM25 over every candidate, never a mix of cosines and BM25."""
     ekb.write("evidence/new-run/log.txt", "x\n")
     ekb.add("F-0001", "motor", E1, title="Motor warm-up")
-    real_lock = store.kb_lock
+    real_lock = writes.kb_lock
 
     @contextmanager
     def lock_after_another_writer(cfg, command):
@@ -476,7 +476,7 @@ def test_a_failed_under_lock_embed_makes_the_whole_check_bm25(ekb, ollama, monke
         with real_lock(cfg, command):
             yield
 
-    monkeypatch.setattr(store, "kb_lock", lock_after_another_writer)
+    monkeypatch.setattr(writes, "kb_lock", lock_after_another_writer)
     ekb.fake.relations[(E1, N)] = ("same_fact", 0.93, 0.91)
     capsys.readouterr()
     result = do_put(ekb, stage(ekb, "F-0003", "drift", N, title="Motor drift", evidence=NEW_EVIDENCE))

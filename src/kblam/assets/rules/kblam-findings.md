@@ -19,5 +19,10 @@ paths:
 - `kblam deps F-NNNN` lists a finding's dependencies. A **suspect** one means the finding it depends
   on was rewritten after this one was checked against it: re-read that finding before relying on
   this one.
+- `{{review_root}}/` holds the source challenges, claim tasks and reviewed uses that bear on these
+  findings. A confirmed challenge means a quoted passage of a source was found contradicted,
+  unsupported or from the wrong model: run `kblam challenge uses SC-NNNN` before relying on an excerpt
+  it covers. A pending task means a claim still awaits replication or confirmation: it is neither
+  refuted nor confirmed, so do not promote it.
 - Cite findings by ID (`F-0137`). Do not cite files in `.kblam/staging/` or desk answer files.
 - To add, change or correct a finding, load the `kblam-write` skill.

@@ -21,9 +21,10 @@ from kblam.finding import (
     Finding,
     fingerprint,
     id_number,
-    normalise_newlines,
 )
 from kblam.index import generate_index
+from kblam.matching import finding_matches
+from kblam.sources import SourceReader
 from kblam.view import KBView
 
 REQUIRED_KEYS = ("id", "title", "topic", "label", "scope", "verified")  # evidence: checked by K2
@@ -48,14 +49,26 @@ class Issue:
     line: int          # 0 when no line applies
     code: str
     message: str
+    level: str = "error"   # "error" or "warning": a warning never fails, refuses or blocks (SPEC §5)
+    owner: str = ""        # the finding or record ID the issue concerns; blocking uses it (SPEC §5.1.4)
+
+    @property
+    def is_error(self) -> bool:
+        return self.level == "error"
 
     def format(self, view: KBView) -> str:
         where = view.show(self.path) + (f":{self.line}" if self.line else "")
-        return f"{self.code} {where}: {self.message}"
+        level = " warning" if self.level == "warning" else ""
+        return f"{self.code}{level} {where}: {self.message}"
+
+
+def errors(issues) -> list[Issue]:
+    """The issues that count: warnings are printed but never fail, refuse or block (SPEC §5)."""
+    return [i for i in issues if i.level == "error"]
 
 
 def _issue(code: str, finding: Finding, line: int | None, message: str) -> Issue:
-    return Issue(finding.path, line or 0, code, message)
+    return Issue(finding.path, line or 0, code, message, owner=finding.file_id or "")
 
 
 def _parsed(view: KBView) -> list[Finding]:
@@ -330,7 +343,7 @@ def k3_suspect(view: KBView, focus: frozenset[str] = frozenset()) -> list[Issue]
                        f"(recorded {d.recorded}, current {d.current}); re-read {d.target}, then {fix}")
         else:
             continue
-        issues.append(Issue(d.path, d.line, "K3", message))
+        issues.append(Issue(d.path, d.line, "K3", message, owner=d.dependent))
     return issues
 
 
@@ -343,20 +356,22 @@ def _term_pattern(term: str) -> re.Pattern:
     return re.compile(r"(?<!\w)" + r"\s+".join(words), re.IGNORECASE)
 
 
-def _prose_segments(view: KBView, f: Finding) -> list[tuple[int, str]]:
+def _prose_segments(view: KBView, f: Finding,
+                    reader: SourceReader | None = None) -> list[tuple[int, str]]:
     """(first file line, text) for the prose K4/K5 read: the title and the body.
 
     Verbatim excerpts that pass K10 are blanked (line count kept): they quote sources, whose
     wording is not the finding's own.
     """
+    reader = reader if reader is not None else SourceReader(view.cfg, view)
     segments = []
     title = f.meta.get("title")
     if isinstance(title, str):
         segments.append((f.key_line("title") or 1, title))
     body = list(f.body_lines)
-    for excerpt in verbatim_excerpts(view, f):
-        if excerpt.verified:
-            body[excerpt.start:excerpt.end] = [""] * (excerpt.end - excerpt.start)
+    for match in finding_matches(view, reader, f):
+        if match.verified:
+            body[match.start:match.end] = [""] * (match.end - match.start)
     segments.append((f.body_start_line, "\n".join(body)))
     return segments
 
@@ -370,10 +385,11 @@ def _history_hits(view: KBView, text: str) -> list[tuple[int, str]]:
     return sorted(hits)
 
 
-def k4_history_language(view: KBView) -> list[Issue]:
+def k4_history_language(view: KBView, reader: SourceReader | None = None) -> list[Issue]:
+    reader = reader if reader is not None else SourceReader(view.cfg, view)
     issues: list[Issue] = []
     for f in _parsed(view):
-        for first_line, text in _prose_segments(view, f):
+        for first_line, text in _prose_segments(view, f, reader):
             seen = set()
             for offset, term in _history_hits(view, text):
                 line = first_line + text.count("\n", 0, offset)
@@ -389,11 +405,12 @@ def k4_history_language(view: KBView) -> list[Issue]:
     return issues
 
 
-def k5_id_near_history(view: KBView) -> list[Issue]:
+def k5_id_near_history(view: KBView, reader: SourceReader | None = None) -> list[Issue]:
     window = view.cfg.history_id_window
+    reader = reader if reader is not None else SourceReader(view.cfg, view)
     issues: list[Issue] = []
     for f in _parsed(view):
-        for first_line, text in _prose_segments(view, f):
+        for first_line, text in _prose_segments(view, f, reader):
             hits = _history_hits(view, text)
             if not hits:
                 continue
@@ -533,15 +550,6 @@ def k9_duplicates(view: KBView, focus: frozenset[str] = frozenset()) -> list[Iss
 # --- K10 ------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class Excerpt:
-    """One verbatim tag and its block, as body-line indices [start, end)."""
-    start: int
-    end: int
-    problem: str | None    # the K10 failure, or None
-    verified: bool         # the excerpt was found in a text source
-
-
 def _excerpt_after(body: list[str], i: int) -> tuple[str | None, int, str | None]:
     """The fenced block or blockquote starting at body[i]: (excerpt, end index, problem)."""
     follow = "a verbatim tag must be directly followed (next line) by a fenced code block or a blockquote"
@@ -575,58 +583,15 @@ def _source_bytes(view: KBView, full: Path) -> bytes | None:
     return full.read_bytes() if full.is_file() else None
 
 
-def verbatim_excerpts(view: KBView, f: Finding) -> list[Excerpt]:
-    excerpts: list[Excerpt] = []
-    body = f.body_lines
-    for i, line in enumerate(body):
-        if not VERBATIM_START_RE.match(line):
-            continue
-        tag = VERBATIM_RE.match(line)
-        if not tag:
-            excerpts.append(Excerpt(i, i + 1, "malformed verbatim tag; use <!-- verbatim: path:LINE -->, "
-                                              "<!-- verbatim: path:FIRST-LAST --> or "
-                                              "<!-- verbatim: path:@0xOFFSET -->", False))
-            continue
-        excerpt, end, problem = _excerpt_after(body, i + 1)
-        excerpts.append(_check_excerpt(view, tag, i, end, excerpt, problem))
-    return excerpts
-
-
-def _check_excerpt(view: KBView, tag: re.Match, start: int, end: int, excerpt: str | None,
-                   problem: str | None) -> Excerpt:
-    def failed(message: str) -> Excerpt:
-        return Excerpt(start, end, message, False)
-
-    if problem:
-        return failed(problem)
-    if not excerpt.strip():
-        return failed("the verbatim excerpt is empty")
-    source = tag.group("path").strip()
-    full, problem = _repo_path(view, source)
-    if problem:
-        return failed(f"verbatim source {source} {problem}")
-    data = _source_bytes(view, full)
-    if data is None:
-        return failed(f"verbatim source {source} does not exist; cite an existing file relative to the "
-                      f"repository root")
-    try:
-        text = None if b"\0" in data else normalise_newlines(data.decode("utf-8"))
-    except UnicodeDecodeError:
-        text = None
-    if text is None:
-        # Binary source: K10 does not check it (the finding's check: command does), and an
-        # unchecked excerpt is not exempt from K4/K5.
-        return Excerpt(start, end, None, False)
-    problem = _excerpt_problem(tag, source, excerpt, data, text)
-    return failed(problem) if problem else Excerpt(start, end, None, True)
-
-
-def k10_verbatim(view: KBView) -> list[Issue]:
+def k10_verbatim(view: KBView, reader: SourceReader | None = None) -> list[Issue]:
+    """K10's issues: the failure of each verbatim tag, from the shared match results
+    (matching.finding_matches). The messages are unchanged: matching asks rules for them."""
+    reader = reader if reader is not None else SourceReader(view.cfg, view)
     return [
-        _issue("K10", f, f.body_start_line + e.start, e.problem)
+        _issue("K10", f, f.body_start_line + m.start, m.problem)
         for f in _parsed(view)
-        for e in verbatim_excerpts(view, f)
-        if e.problem
+        for m in finding_matches(view, reader, f)
+        if m.problem
     ]
 
 
@@ -710,18 +675,30 @@ def k11_reported(view: KBView) -> list[Issue]:
 
 
 def validate(view: KBView, focus: frozenset[str] = frozenset()) -> list[Issue]:
-    """Run every rule. `focus` names findings being written, so K3 and K9 address them."""
+    """Run every rule. `focus` names findings being written, so K3 and K9 address them.
+
+    One SourceReader serves the whole validation, so each source is read once however many rules
+    consult it (SPEC §5.1.6).
+    """
+    from kblam.k12 import k12  # these import Issue from here
+    from kblam.k13 import k13
+    from kblam.k14 import k14
+
+    reader = SourceReader(view.cfg, view)
     issues = (
         k1_schema(view)
         + k2_references(view)
         + k3_suspect(view, focus)
-        + k4_history_language(view)
-        + k5_id_near_history(view)
+        + k4_history_language(view, reader)
+        + k5_id_near_history(view, reader)
         + k6_length(view)
         + k7_index(view)
         + k8_stray_files(view)
         + k9_duplicates(view, focus)
-        + k10_verbatim(view)
+        + k10_verbatim(view, reader)
         + k11_reported(view)
+        + k12(view, reader)
+        + k13(view, reader)
+        + k14(view, reader)
     )
     return sorted(set(issues), key=lambda i: (i.path, i.line, int(i.code[1:]), i.message))

@@ -5,19 +5,23 @@ silence, so the normal permission flow still applies. With no kblam.toml there i
 and the hook is silent. A hook never stops an agent's unrelated work: with an unreadable or invalid
 kblam.toml, malformed input or any unexpected error it allows the action and prints a note.
 
-- PreToolUse (Write, Edit, NotebookEdit): deny a target under findings/, or under .kblam/ outside
-  .kblam/staging/ (kblam's state).
-- PreToolUse (Bash, PowerShell): deny a command that visibly writes under findings/, or writes or
-  removes under .kblam/ outside .kblam/staging/ (best effort, §8 items 1-2).
-- Stop, SubagentStop: silent while findings/ is as kblam last wrote it (tree.hash); otherwise check
-  and validate, and block with the failures. SubagentStop is silent for Claude Code's internal
-  agents (empty agent_type), which cannot fix findings/.
+- PreToolUse (Write, Edit, NotebookEdit): deny a target under findings/, under the review root
+  (records are kblam's) or under .kblam/ outside .kblam/staging/ and .kblam/review-staging/ (kblam's
+  state).
+- PreToolUse (Bash, PowerShell): deny a command that visibly writes under findings/ or the review
+  root, or writes or removes under .kblam/ outside .kblam/staging/ and .kblam/review-staging/ (best
+  effort, §8 items 1-2). Under the review root only a record file, a kind folder or the root itself
+  is denied a removal: removing a stray file there is how a K12 stray-file error is fixed.
+- Stop, SubagentStop: silent while findings/ and the review root are as kblam last wrote them
+  (tree.hash); otherwise check and validate, and block with the failures. SubagentStop is silent for
+  Claude Code's internal agents (empty agent_type), which cannot fix findings/.
 
 Only the Stop path imports the validator and the Jev client, so a PreToolUse call stays fast.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import re
@@ -30,6 +34,22 @@ from kblam.config import Config, ConfigError, NoConfig, load_config
 SKILL_POINTER = "Load the kblam-write skill for how to fix this."
 STATE_USE = (".kblam/ holds kblam's own state and only kblam writes it; stage findings under .kblam/staging/ "
              "(kblam new, kblam edit).")
+REVIEW_USE = ("Review records are written only by kblam: stage one with kblam challenge new, kblam task new "
+              "or kblam use review (or kblam challenge/task edit), edit it under .kblam/review-staging/, "
+              "then kblam put it.")
+REVIEW_KIND_FOLDERS = ("challenges", "tasks", "uses")   # <review root>/<kind> (records.KINDS)
+REVIEW_RECORD_GLOBS = ("SC-*.yaml", "CT-*.yaml", "CU-*.yaml")
+REVIEW_RECORD_SAMPLES = ("SC-0001.yaml", "CT-0001.yaml", "CU-0001.yaml")  # a glob matching one names a record
+# fnmatch folds case on the platforms whose paths do (`fnmatch.fnmatch`, not `fnmatchcase`); these
+# two match that, so a glob is judged the same way on Windows and on a case-sensitive filesystem.
+_CASE = re.IGNORECASE if os.path.normcase("A") == "a" else 0
+# A record file's name is (SC|CT|CU)-<4+ digits>.yaml. A glob names a record when the literal text
+# before its first glob character could begin such a name and the literal text after its last could
+# end one: REVIEW_RECORD_HEAD_RE matches every prefix, REVIEW_RECORD_TAIL_RE every suffix.
+REVIEW_RECORD_HEAD_RE = re.compile(r"(?:S|SC|SC-|C|CT|CT-|CU|CU-|(?:SC|CT|CU)-[0-9]{4,}\.yaml"
+                                   r"|(?:SC|CT|CU)-[0-9]*\.(?:y|ya|yam)?|(?:SC|CT|CU)-[0-9]*)?", _CASE)
+REVIEW_RECORD_TAIL_RE = re.compile(r"(?:l|ml|aml|yaml|(?:-|C-|SC-|T-|CT-|U-|CU-)?[0-9]*\.yaml)?", _CASE)
+GLOB_CHARS = "*?["
 
 FILE_TOOLS = {"Write": "file_path", "Edit": "file_path", "NotebookEdit": "notebook_path"}  # no MultiEdit tool
 SHELL_TOOLS = ("Bash", "PowerShell")
@@ -87,6 +107,79 @@ def _absolute(raw: str, base: Path) -> str:
 def _under(raw: str, base: Path, directory: Path) -> bool:
     path, top = _absolute(raw, base), os.path.normcase(os.path.normpath(directory))
     return path == top or path.startswith(top.rstrip(os.sep) + os.sep)
+
+
+def _segments(raw: str, base: Path, root: Path) -> list[str] | None:
+    """`raw`'s path segments below `root`, or None when it is not under it. [] is `root` itself."""
+    if not _under(raw, base, root):
+        return None
+    path, top = _absolute(raw, base), os.path.normcase(os.path.normpath(root))
+    rest = path[len(top):].strip(os.sep) if path != top else ""
+    return [part for part in rest.split(os.sep) if part and part != "."]
+
+
+def _glob_tokens(name: str) -> list[tuple[int, int]]:
+    """The spans of `name`'s glob tokens, read as fnmatch reads them: `*` and `?` take one character
+    each, and `[...]` is one token from its `[` through its closing `]` (a `]` straight after `[` or
+    `[!` is a member of the set, not the end of it). An unclosed `[` is a literal character."""
+    spans: list[tuple[int, int]] = []
+    i, size = 0, len(name)
+    while i < size:
+        char = name[i]
+        if char in "*?":
+            spans.append((i, i + 1))
+        elif char == "[":
+            j = i + 1
+            j += 1 if j < size and name[j] == "!" else 0
+            j += 1 if j < size and name[j] == "]" else 0
+            end = name.find("]", j)
+            if end != -1:
+                spans.append((i, end + 1))
+                i = end
+        i += 1
+    return spans
+
+
+def _names_a_record(name: str) -> bool:
+    """`name` is a review record file's name, or a glob that could name one (SPEC §8: SC-*.yaml,
+    CT-*.yaml, CU-*.yaml)."""
+    if any(fnmatch.fnmatch(name, pattern) for pattern in REVIEW_RECORD_GLOBS):
+        return True
+    if any(fnmatch.fnmatch(sample, name) for sample in REVIEW_RECORD_SAMPLES):
+        return True
+    # A glob that does not begin with a literal `SC-`/`CT-`/`CU-` (`C?-0010.yaml`, `[S]C-0010.yaml`,
+    # `*0010*`): the samples above miss it, so deny when the literal text before its first glob token
+    # could begin a record name and the literal text after its last could end one (the registry
+    # backstop is SPEC 1155-1156). Deliberately over-broad: it ignores the text between the tokens,
+    # and so denies some globs that name no record.
+    spans = _glob_tokens(name)
+    if not spans:
+        return False
+    head, tail = name[:spans[0][0]], name[spans[-1][1]:]
+    return bool(REVIEW_RECORD_HEAD_RE.fullmatch(head) and REVIEW_RECORD_TAIL_RE.fullmatch(tail))
+
+
+def _review_removal(raw: str, base: Path, root: Path) -> bool:
+    """SPEC §8: removing the review root, a kind folder or a record file (or a glob that could name one
+    of them) is denied. Removing any other file under the root is allowed: that is how a K12
+    stray-file error is fixed."""
+    segments = _segments(raw, base, root)
+    if segments is None:
+        return False
+    if not segments:
+        return True                                    # the root itself
+    if len(segments) == 1 and segments[0] in REVIEW_KIND_FOLDERS:
+        return True                                    # a kind folder
+    last = segments[-1]
+    if _names_a_record(last):
+        return True                                    # a record file, or a glob that could name one
+    return len(segments) == 1 and any(char in last for char in GLOB_CHARS)
+
+
+def _verb_list(written: list[str], removed: list[str]) -> str:
+    """The `<what>` of a shell deny: "writing A, B", "removing C" or "writing A and removing C"."""
+    return " and ".join(f"{verb} {', '.join(paths)}" for verb, paths in
+                        (("writing", written), ("removing", removed)) if paths)
 
 
 # --- Bash ---------------------------------------------------------------------------------------
@@ -315,13 +408,14 @@ def _pre_tool_use(cfg: Config, data: dict) -> int:
         return 0
     if not isinstance(tool_input, dict):
         return _note("PreToolUse", f"no tool_input object for {tool}")
-    base, findings = _base_dir(data), cfg.findings_path
+    base, findings, review = _base_dir(data), cfg.findings_path, cfg.review_path
     use = (f"{cfg.findings_dir}/ is written only by kblam put: stage the finding with kblam new <topic> "
            f"\"<title>\" or kblam edit <id>, edit the staged copy under .kblam/staging/, then kblam put it.")
 
     def state(path: str) -> bool:
-        """Under .kblam/ (kblam's state) and not under .kblam/staging/ (SPEC §8)."""
-        return _under(path, base, cfg.state_dir) and not _under(path, base, cfg.staging_dir)
+        """Under .kblam/ (kblam's state), outside .kblam/staging/ and .kblam/review-staging/ (SPEC §8)."""
+        return (_under(path, base, cfg.state_dir) and not _under(path, base, cfg.staging_dir)
+                and not _under(path, base, cfg.review_staging_dir))
 
     if tool in FILE_TOOLS:
         path = tool_input.get(FILE_TOOLS[tool])
@@ -329,6 +423,8 @@ def _pre_tool_use(cfg: Config, data: dict) -> int:
             return _note("PreToolUse", f"{tool} has no {FILE_TOOLS[tool]} string")
         if _under(path, base, findings):
             return _deny(f"kblam: {tool} of {path} denied. {use}")
+        if _under(path, base, review):
+            return _deny(f"kblam: {tool} of {path} under {cfg.review_dir}/ denied. {REVIEW_USE}")
         if state(path):
             return _deny(f"kblam: {tool} of {path} under .kblam/ denied. {STATE_USE}")
         return 0
@@ -347,39 +443,47 @@ def _pre_tool_use(cfg: Config, data: dict) -> int:
     if hits:
         reasons.append(f"kblam: this command writes under {cfg.findings_dir}/ ({', '.join(hits)}), so it is "
                        f"denied. {use}")
+    # SPEC §8: a write under the review root is denied outright; a removal only for the root, a kind
+    # folder, a record file or a glob that could name one of those.
+    written = [t for t in targets if _under(t, base, review)]
+    removed = [t for t in removals if _review_removal(t, base, review)]
+    if written or removed:
+        reasons.append(f"kblam: {_verb_list(written, removed)} under {cfg.review_dir}/ denied. {REVIEW_USE}")
     written, removed = [t for t in targets if state(t)], [t for t in removals if state(t)]
     if written or removed:
-        what = " and ".join(f"{verb} {', '.join(paths)}" for verb, paths in
-                            (("writing", written), ("removing", removed)) if paths)
-        reasons.append(f"kblam: {what} under .kblam/ denied. {STATE_USE}")
+        reasons.append(f"kblam: {_verb_list(written, removed)} under .kblam/ denied. {STATE_USE}")
     return _deny(" ".join(reasons)) if reasons else 0
 
 
 def _stop(cfg: Config, event: str, data: dict) -> int:
     from kblam.review import check_findings, open_items
-    from kblam.rules import validate
-    from kblam.treehash import read_tree_hash, tree_digest
+    from kblam.rules import errors, validate
+    from kblam.treehash import read_recorded, tree_digest_v2
     from kblam.view import load_view
 
-    recorded = read_tree_hash(cfg)
+    # SPEC §8 item 3: the format-2 digest of findings/ and the review root. A format-1 or unparseable
+    # tree.hash is not (2, root, digest), so the tree counts as changed outside kblam and is validated.
+    recorded = read_recorded(cfg)
     if recorded is None and not cfg.findings_path.exists():
         return 0  # no knowledge base yet
-    digest = tree_digest(load_view(cfg))
-    if digest == recorded:
+    digest = tree_digest_v2(load_view(cfg))
+    if recorded == (2, cfg.review_dir, digest):
         return 0
     check_findings(cfg, None, command=f"hook {event}")
     view = load_view(cfg)
-    lines = [issue.format(view) for issue in validate(view)] + [item.describe() for item in open_items(cfg, view)]
+    # Warnings alone never block, so only the errors reach the block (SPEC §5, §5.1.4).
+    lines = ([issue.format(view) for issue in errors(validate(view))]
+             + [item.describe() for item in open_items(cfg, view)])
     marker = cfg.state_dir / STOP_BLOCK_NAME
     if not lines:
         return 0
     last = marker.read_text(encoding="ascii").strip() if marker.is_file() else None
-    if data.get("stop_hook_active") is True and last == tree_digest(view):
+    if data.get("stop_hook_active") is True and last == tree_digest_v2(view):
         return _note(event, f"{cfg.findings_dir}/ still fails kblam validate ({len(lines)} failure(s)) and is "
                             f"unchanged since the last block, so the stop is not blocked again")
     from kblam.store import atomic_write
 
-    atomic_write(marker, (tree_digest(view) + "\n").encode("ascii"))
+    atomic_write(marker, (tree_digest_v2(view) + "\n").encode("ascii"))
     shown = lines[:MAX_BLOCK_LINES]
     if len(lines) > len(shown):
         shown.append(f"... and {len(lines) - len(shown)} more; run kblam validate for all of them")

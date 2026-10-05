@@ -12,13 +12,13 @@ from contextlib import contextmanager
 import httpx2
 import pytest
 
-from kblam import cli, jev_prompts, store
+from kblam import cli, jev_prompts, writes
 from kblam.check import Similarity, parse_policy, scopes_overlap, select_candidates, tokens
 from kblam.config import ConfigError
 from kblam.jev import JevClient
 from kblam.review import load_items
 from kblam.store import edit_finding, put
-from kblam.treehash import read_tree_hash
+from kblam.treehash import read_recorded
 from kblam.view import load_view
 
 from conftest import DEFAULT_PROMPT_ID, KBLAM_TOML, NO_EMBEDDINGS, PROMPT_TOML, finding_text
@@ -168,7 +168,7 @@ def test_reject_reports_every_verdict_and_leaves_findings_unchanged(jkb, capsys)
     jkb.fake.relations[(E1, N)] = ("same_fact", 0.93, 0.91)
     jkb.fake.relations[(E2, N)] = ("restates_and_extends", 0.60, 0.70)
     jkb.fake.nouls[N] = 0.9
-    before, hash_before = jkb.snapshot(), read_tree_hash(jkb.cfg)
+    before, hash_before = jkb.snapshot(), read_recorded(jkb.cfg)
     staged = stage(jkb, "F-0003", "drift", N)
 
     assert run(jkb, "put", str(staged)) == cli.EXIT_REJECTED == 4
@@ -185,7 +185,7 @@ def test_reject_reports_every_verdict_and_leaves_findings_unchanged(jkb, capsys)
     assert f"rejected {revision.id} revision F-0003 (noul 0.90): this reads as a correction" in out
     assert "review restates_and_extends F-0003 vs F-0002 (p 0.60, confidence 0.70): this restates F-0002" in out
     assert "rejected F-0003 by the Jev check (2 reject verdict(s)); findings/ is unchanged" in out
-    assert jkb.snapshot() == before and read_tree_hash(jkb.cfg) == hash_before and staged.exists()
+    assert jkb.snapshot() == before and read_recorded(jkb.cfg) == hash_before and staged.exists()
     # relation once per candidate pair, revision once per finding
     pairs = jkb.fake.relation_pairs()
     assert len(pairs) == 2 and set(pairs) == {(E1, N), (E2, N)} and jkb.fake.revision_claims() == [N]
@@ -589,7 +589,7 @@ def test_topic_bonus_ranks_the_same_topic_first(jkb):
 
 def test_put_asks_before_the_lock_and_only_new_pairs_under_it(jkb, monkeypatch):
     jkb.add("F-0001", "motor", E1)
-    real_lock = store.kb_lock
+    real_lock = writes.kb_lock
     lock_file = jkb.root / ".kblam" / "lock"
     under_lock = []
     jkb.fake.on_request = lambda body: under_lock.append(
@@ -603,7 +603,7 @@ def test_put_asks_before_the_lock_and_only_new_pairs_under_it(jkb, monkeypatch):
         with real_lock(cfg, command):
             yield
 
-    monkeypatch.setattr(store, "kb_lock", lock_after_another_writer)
+    monkeypatch.setattr(writes, "kb_lock", lock_after_another_writer)
     jkb.fake.relations[(E2, N)] = ("same_fact", 0.93, 0.91)
     result = do_put(jkb, stage(jkb, "F-0003", "drift", N))
     assert kinds(result) == [("same_fact", "reject")]  # decided against the tree as it is under the lock
@@ -677,7 +677,7 @@ def test_validate_record_checks_changed_findings_first(jkb, capsys):
     assert run(jkb, "validate", "--record") == 1
     out = capsys.readouterr().out
     assert "same_fact F-0002 vs F-0001" in out and "tree.hash not recorded" in out
-    assert read_tree_hash(jkb.cfg) is None
+    assert read_recorded(jkb.cfg) is None
     item_id, = open_ids(jkb)
     assert run(jkb, "resolve", item_id, "--distinct", "one is the MX-100 figure") == 0
     assert run(jkb, "validate", "--record") == 0

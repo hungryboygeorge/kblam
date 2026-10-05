@@ -72,8 +72,11 @@ def settings(root: Path) -> dict:
     return json.loads((root / ".claude" / "settings.json").read_text(encoding="utf-8"))
 
 
-WRITTEN = ["kblam.toml", "findings/INDEX.md", ".gitattributes", ".gitignore", ".claude/rules/kblam-findings.md",
-           ".claude/skills/kblam-write/SKILL.md", ".claude/settings.json", "CLAUDE.md", ".git/hooks/pre-commit"]
+# Every file init writes, in its report order, except that the pre-commit hook is kept last: the tests
+# below read WRITTEN[:-1] as "everything but the pre-commit hook".
+WRITTEN = ["kblam.toml", "findings/INDEX.md", "research-review/INDEX.md", ".gitattributes", ".gitignore",
+           ".claude/rules/kblam-findings.md", ".claude/skills/kblam-write/SKILL.md", ".claude/settings.json",
+           "CLAUDE.md", ".kblam/tree.hash", ".git/hooks/pre-commit"]
 
 
 # --- a fresh repository ---------------------------------------------------------------------------
@@ -86,13 +89,15 @@ def test_init_in_a_fresh_repo_produces_a_kb_that_validates(repo, capsys):
     for rel in WRITTEN:
         assert b"\r" not in (repo / rel).read_bytes(), rel  # LF endings
     assert (repo / "kblam.toml").read_bytes() == (init.ASSETS / "kblam.toml").read_bytes()
-    assert (repo / ".gitattributes").read_text(encoding="utf-8") == "findings/** -text\n"
+    assert (repo / ".gitattributes").read_text(encoding="utf-8") == \
+        "findings/** -text\nresearch-review/** -text\n"
     assert (repo / ".gitignore").read_text(encoding="utf-8") == ".kblam/\n"
     assert (repo / "CLAUDE.md").read_text(encoding="utf-8") == init.GUIDANCE_LINE.format(root="findings") + "\n"
     assert settings(repo) == {"hooks": installed_hooks()}
     assert (repo / ".git/hooks/pre-commit").read_bytes() == (init.ASSETS / "pre-commit").read_bytes()
     for rel in ("rules/kblam-findings.md", "skills/kblam-write/SKILL.md"):
-        assert (repo / ".claude" / rel).read_bytes() == init._asset(rel, "findings")
+        # both root tokens are rendered: the review root's default is the one a fresh repo gets
+        assert (repo / ".claude" / rel).read_bytes() == init._asset(rel, "findings", "research-review")
         assert b"{{kb_root}}" not in (repo / ".claude" / rel).read_bytes()
     assert "{{kb_root}}" not in json.dumps(settings(repo)) and "; findings/ is unguarded" in json.dumps(settings(repo))
 
@@ -122,7 +127,8 @@ def test_init_appends_to_existing_files(repo, capsys, no_hook_check):
     (repo / "CLAUDE.md").write_bytes(b"# Project\n\nSome guidance.\n")
     assert kblam_init(capsys)[0] == 0
     assert (repo / ".gitignore").read_bytes() == b"build/\n.kblam/\n"
-    assert (repo / ".gitattributes").read_bytes() == b"* text=auto\nfindings/** -text\n"
+    assert (repo / ".gitattributes").read_bytes() == \
+        b"* text=auto\nfindings/** -text\nresearch-review/** -text\n"
     line = init.GUIDANCE_LINE.format(root="findings")
     assert (repo / "CLAUDE.md").read_text(encoding="utf-8") == f"# Project\n\nSome guidance.\n\n{line}\n"
 
@@ -140,7 +146,8 @@ def test_gitattributes_line_follows_the_configured_root(repo, capsys, no_hook_ch
     (repo / "kblam.toml").write_text(template.replace('root = "findings"', 'root = "kb/facts"'), encoding="utf-8")
     code, out, _ = kblam_init(capsys)
     assert code == 0 and actions(out)["kblam.toml"] == "kept"
-    assert (repo / ".gitattributes").read_text(encoding="utf-8") == "kb/facts/** -text\n"
+    assert (repo / ".gitattributes").read_text(encoding="utf-8") == \
+        "kb/facts/** -text\nresearch-review/** -text\n"
     assert (repo / "kb" / "facts" / "INDEX.md").is_file()
     assert "`kb/facts/`" in (repo / "CLAUDE.md").read_text(encoding="utf-8")
 
@@ -264,7 +271,7 @@ def test_update_rewrites_a_changed_skill_but_never_kblam_toml(repo, capsys, no_h
     assert actions(out)[".claude/skills/kblam-write/SKILL.md"] == "updated"
     assert actions(out)[".git/hooks/pre-commit"] == "updated"
     assert actions(out)["kblam.toml"] == "kept"
-    assert skill.read_bytes() == init._asset("skills/kblam-write/SKILL.md", "findings")
+    assert skill.read_bytes() == init._asset("skills/kblam-write/SKILL.md", "findings", "research-review")
     assert hook.read_bytes() == (init.ASSETS / "pre-commit").read_bytes()
     assert config.read_text(encoding="utf-8") == edited
 
@@ -292,6 +299,21 @@ def test_invalid_kblam_toml_stops_init_before_writing(repo, capsys, no_hook_chec
     code, _, err = kblam_init(capsys)
     assert code == 2 and "[kb] root must be str" in err
     assert snapshot(repo) == before
+
+
+def test_an_unreadable_registry_is_refused_without_a_traceback(repo, capsys, no_hook_check):
+    """The findings index step's writes.locked (mutating) runs inside init's try, so store's refusal (SPEC
+    §5.1.6) is reported, not raised, and it comes before that step writes the index."""
+    assert kblam_init(capsys)[0] == 0
+    (repo / "findings" / "INDEX.md").unlink()                     # so init writes the index again
+    (repo / ".kblam").mkdir(exist_ok=True)
+    (repo / ".kblam" / "review-ids").write_bytes(b"{bad\n")
+
+    code, _, err = kblam_init(capsys)
+
+    assert code == 1 and "Traceback" not in err
+    assert "kblam init: .kblam/review-ids cannot be read" in err
+    assert not (repo / "findings" / "INDEX.md").exists()          # nothing was written
 
 
 @pytest.mark.parametrize("root, ok", [
