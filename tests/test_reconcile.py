@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
-from kblam import cli, hook, receipts, registry, review_stage, rules, treehash
+from kblam import cli, decisions, hook, k13, receipts, registry, review_stage, rules, treehash
+from kblam.review_index import generate_review_index
+from kblam.sources import SourceReader, State, sha256_hex
 from kblam.finding import fingerprint, yaml_rt
 from kblam.view import load_view
 
-from conftest import record_text
+from conftest import dump_record, record_data, record_text
 from test_approval import git, gkb  # noqa: F401 (gkb is a fixture)
 
 CLAIM = "The media tray reports its type through two contact pins read at load time."
@@ -85,6 +88,8 @@ def test_stop_does_not_validate_a_forged_registry_while_git_tracks_state(gkb, ca
 def test_untrusted_state_validation_never_reads_registry_marker_or_receipts(kb, monkeypatch):
     kb.write("research-review/challenges/SC-0001.yaml", record_text("SC"))
     kb.write("research-review/tasks/CT-0001.yaml", record_text("CT"))
+    kb.write("research-review/uses/CU-0001.yaml", record_text("CU"))
+    physical_reads = _state_reads(kb.cfg, monkeypatch)
 
     def forbidden(*args, **kwargs):
         pytest.fail("validation read untrusted .kblam/ state")
@@ -96,6 +101,140 @@ def test_untrusted_state_validation_never_reads_registry_marker_or_receipts(kb, 
     issues = rules.validate(load_view(kb.cfg), trust_state=False)
 
     assert any(issue.code == "K13" for issue in issues)  # on-disk record checks still run
+    assert physical_reads == []
+
+
+def _state_reads(cfg, monkeypatch):
+    """Count actual file opens, including read_bytes/read_text, below the resolved state root."""
+    reads = []
+    original = Path.open
+
+    def counted(path, mode="r", *args, **kwargs):
+        if path.resolve().is_relative_to(cfg.state_dir.resolve()) and ("r" in mode or "+" in mode):
+            reads.append(path.resolve())
+        return original(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", counted)
+    return reads
+
+
+def _state_reference_scene(kb, location, *, confirmed=False):
+    """Valid references with real bytes; only the chosen reference points into machine state."""
+    data = b"quoted assertion\n"
+    state_path = ".kblam/foreign-evidence.txt"
+    ordinary_path = "evidence/assertion.txt"
+    kb.write(state_path, data)
+    kb.write(ordinary_path, data)
+    kb.add("F-0001", "tray", CLAIM)
+    ref = {"path": ordinary_path, "sha256": sha256_hex(data), "repo": None,
+           "commit": None, "blob": None, "snapshot": None}
+    challenge = record_data("SC")
+    challenge["source"] = {**ref, "assertion": {"lines": [1, 1], "text": "quoted assertion",
+                                               "sha256": sha256_hex(b"quoted assertion"),
+                                               "occurrence": 1}}
+    challenge["basis"] = [{**ref, "locator": "line 1", "role": "counterevidence",
+                           "provenance": "observed"}]
+    if location == "source":
+        challenge["source"]["path"] = state_path
+    elif location == "basis":
+        challenge["basis"][0]["path"] = state_path
+    elif location == "snapshot":
+        challenge["source"].update(path="evidence/missing-assertion.txt", snapshot=state_path)
+    elif location == "decision":
+        finding = load_view(kb.cfg).findings[0]
+        task = record_data("CT", status="inconclusive",
+                           claim_fingerprint=fingerprint(finding, kb.cfg.scope_separator),
+                           base_file_sha256=sha256_hex(finding.raw))
+        task["decisions"] = [{"date": "2026-09-28", "by": "reviewer-b", "status": "inconclusive",
+                              "reason": "The capture is inconclusive.",
+                              "bind": decisions.subject_digest("CT", task),
+                              "evidence": [{**ref, "path": state_path, "locator": "line 1",
+                                            "provenance": "observed"}]}]
+        kb.write("research-review/tasks/CT-0001.yaml", dump_record(task))
+    if confirmed:
+        challenge["status"] = "confirmed"
+        challenge["source"]["snapshot"] = state_path
+        challenge["decisions"] = [{"date": "2026-09-28", "by": "reviewer-b", "status": "confirmed",
+                                   "reason": "The assertion is contradicted by the capture.",
+                                   "bind": decisions.subject_digest("SC", challenge), "evidence": []}]
+    kb.write("research-review/challenges/SC-0001.yaml", dump_record(challenge))
+    view = load_view(kb.cfg)
+    kb.write("research-review/INDEX.md", generate_review_index(view))
+    return load_view(kb.cfg)
+
+
+@pytest.mark.parametrize("location", ["source", "basis", "decision", "snapshot"])
+def test_untrusted_validation_never_opens_state_references(kb, monkeypatch, location):
+    view = _state_reference_scene(kb, location)
+    # Trusted mode reads these paths normally, but machine state cannot count as primary support.
+    assert rules.validate(view) == []
+    challenge = next(rec for rec in view.records if rec.kind == "SC")
+    if location == "basis":
+        assert not k13._is_primary(view, challenge.data["basis"][0])
+    if location in ("source", "snapshot"):
+        trusted = k13.challenge_info(view, SourceReader(kb.cfg, view), challenge)
+        assert trusted.resolved.state is (State.CURRENT if location == "source" else State.PINNED)
+        assert trusted.resolved.error is None
+    reads = _state_reads(kb.cfg, monkeypatch)
+
+    issues = rules.validate(view, trust_state=False)
+
+    assert reads == []
+    availability = [issue for issue in issues
+                    if "unavailable:" in issue.message or "the pinned version is not present" in issue.message]
+    assert len(availability) == 1
+    issue = availability[0]
+    if location == "decision":
+        assert issue.code == "K15"
+        assert issue.message == (
+            "the evidence '.kblam/foreign-evidence.txt' of CT-0001's effective decision is "
+            "unavailable: the path cannot be read as a file; restore those bytes, then run "
+            "kblam review rebind CT-0001 --by NAME --reason TEXT --expect D "
+            "--evidence PROVENANCE:PATH:LOCATOR")
+    else:
+        assert issue.code == "K13"
+        expected = ("basis[0]: " if location == "basis" else "") + "the pinned version is not present"
+        assert issue.message == expected
+
+
+def test_untrusted_use_recovery_keeps_its_projected_reader_and_receipts_untrusted(kb, monkeypatch):
+    _state_reference_scene(kb, "source")
+    use = record_data("CU")  # broken bindings reach the proposed recovery's structural checks
+    use["decisions"] = [{"date": "2026-09-28", "by": "reviewer-b", "status": "open",
+                         "reason": "Review the use.", "bind": decisions.subject_digest("CU", use),
+                         "evidence": [{"path": ".kblam/foreign-evidence.txt",
+                                       "sha256": sha256_hex(b"quoted assertion\n"), "repo": None,
+                                       "commit": None, "blob": None, "snapshot": None,
+                                       "locator": "line 1", "provenance": "observed"}]}]
+    kb.write("research-review/uses/CU-0001.yaml", dump_record(use))
+    kb.write(".kblam/review-receipts/CU-0001.json", '{"creator": "foreign"}\n')
+    view = load_view(kb.cfg)
+    kb.write("research-review/INDEX.md", generate_review_index(view))
+    view = load_view(kb.cfg)
+    reads = _state_reads(kb.cfg, monkeypatch)
+
+    issues = rules.validate(view, trust_state=False)
+
+    assert reads == []
+    assert any(issue.owner == "CU-0001" and "restore SC-0001's source" in issue.message for issue in issues)
+    assert not any("allocated as" in issue.message for issue in issues)
+
+
+def test_tracked_state_stop_never_opens_a_challenge_source_in_state(gkb, capsys, monkeypatch):
+    view = _state_reference_scene(gkb, "source", confirmed=True)
+    assert rules.validate(view) == []
+    git(gkb, "add", "-f", ".kblam/foreign-evidence.txt")
+    cfg = gkb.cfg
+    gkb.write(".kblam/stop-block", "old digest\n")
+    reads = _state_reads(cfg, monkeypatch)
+    capsys.readouterr()
+
+    assert hook._stop(cfg, "Stop", {"stop_hook_active": False}) == 0
+
+    out = capsys.readouterr().out
+    assert "git tracks" in out
+    assert "the pinned version is not present" in out
+    assert reads == [cfg.state_dir.resolve() / "stop-block"]  # hook-owned marker remains allowed
 
 
 @pytest.mark.parametrize("candidate", [b"candidate source\n", None], ids=["overlay", "absent"])

@@ -8,6 +8,7 @@ once, a miss counts one read too, and a cache hit adds none.
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 
 import pytest
 
@@ -223,6 +224,72 @@ def test_non_string_fields_do_not_raise(kb, source_repo):
     assert junk.error is not None
     # A snapshot path that is not a path is no snapshot, so the reference stays provisional.
     assert reader.resolve(ref(raw, sha, snapshot=9)).state is State.CURRENT
+
+
+@pytest.mark.parametrize("alias", [False, True], ids=["direct", "symlink"])
+def test_untrusted_reader_never_opens_state_through_any_byte_reader(kb, monkeypatch, alias):
+    data = b"state evidence\n"
+    raw = ".kblam/foreign.txt"
+    target = kb.write(raw, data)
+    cfg = kb.cfg
+    if alias:
+        link = kb.root / "evidence/state-alias"
+        try:
+            link.symlink_to(cfg.state_dir, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"symlinks unavailable: {exc}")
+        raw = "evidence/state-alias/foreign.txt"
+    view = load_view(cfg)
+    trusted = SourceReader(cfg, view)
+    resolved = trusted.resolve(ref(raw, digest(data)))
+    assert (resolved.state, resolved.data, resolved.error) == (State.CURRENT, data, None)
+    assert trusted.snapshot(raw, digest(data)) == data
+    reads = []
+    original = Path.open
+
+    def counted(path, *args, **kwargs):
+        if path.resolve().is_relative_to(cfg.state_dir.resolve()):
+            reads.append(path.resolve())
+        return original(path, *args, **kwargs)
+
+    def forbidden_git(*args, **kwargs):
+        pytest.fail("untrusted state repository reached a Git read")
+
+    monkeypatch.setattr(Path, "open", counted)
+    monkeypatch.setattr(gitpin, "read_blob", forbidden_git)
+    reader = SourceReader(cfg, view, trust_state=False)
+    resolved = reader.resolve(ref(raw, digest(data)))
+    assert (resolved.state, resolved.data, resolved.error, resolved.message) == (
+        State.UNAVAILABLE, None, None, "the path cannot be read as a file")
+    assert reader.working(raw) is None
+    assert reader.verbatim(kb.root / raw) is None
+    assert reader.verbatim(kb.root / "evidence/../.kblam/foreign.txt") is None
+    assert reader.snapshot(raw, digest(data)) is None
+    assert reader.blob(target.parent, "a" * 40) is None
+    assert reader._working_bytes(key_of(kb, raw), target) is None
+    assert reader._snapshot_bytes(target, digest(data)) is None
+    assert reads == []
+    assert not reader.reads
+
+
+@pytest.mark.parametrize("inherited", [False, True], ids=["direct-pin", "inherited-pin"])
+def test_untrusted_reader_refuses_state_pin_repositories_before_git_verification(kb, monkeypatch, inherited):
+    raw = "evidence/pinned.txt"
+    data = b"pinned evidence\n"
+    kb.write(raw, data)
+    cfg = kb.cfg
+    reader = SourceReader(cfg, load_view(cfg), trust_state=False)
+    source = ref(raw, digest(data), repo=".kblam", commit="a" * 40, blob="b" * 40)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("untrusted state pin reached Git verification")
+
+    monkeypatch.setattr(gitpin, "verify_pin", forbidden)
+    resolved = (reader.resolve(ref(raw, digest(data)), pinned_source=source) if inherited
+                else reader.resolve(source))
+    assert (resolved.state, resolved.data, resolved.error, resolved.message) == (
+        State.UNAVAILABLE, None, None, "the path cannot be read as a file")
+    assert not reader.reads
 
 
 # --- one entry per identity ----------------------------------------------------------------------

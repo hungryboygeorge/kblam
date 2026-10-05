@@ -163,7 +163,7 @@ def test_upgrade_bridges_a_matching_format_1_marker_without_records(kb, capsys, 
     assert found(kb, "F-0002").meta["depends_on"]["F-0001"] == v2_of(kb, "F-0001")
 
 
-@pytest.mark.parametrize("reason", ["mismatch", "records", "registry"])
+@pytest.mark.parametrize("reason", ["mismatch", "records", "registry", "malformed-registry", "wrong-shape-registry"])
 def test_upgrade_keeps_format_1_marker_when_the_bridge_cannot_vouch_for_the_tree(kb, capsys, reason):
     kb.add("F-0001", "sensor", CLAIM_A)
     kb.add("F-0002", "motor", CLAIM_B, topic="motor",
@@ -174,6 +174,10 @@ def test_upgrade_keeps_format_1_marker_when_the_bridge_cannot_vouch_for_the_tree
         kb.write("research-review/challenges/SC-0001.yaml", record_text("SC"))
     elif reason == "registry":
         kb.write(".kblam/review-ids", '["SC-0001"]\n')
+    elif reason == "malformed-registry":
+        kb.write(".kblam/review-ids", "not JSON\n")
+    elif reason == "wrong-shape-registry":
+        kb.write(".kblam/review-ids", "{}\n")
     before = marker.read_bytes()
     capsys.readouterr()
 

@@ -333,6 +333,9 @@ def use_review(cfg: Config, challenge_id: str, finding_id: str, ordinal: int, by
             raise StoreError(f"{finding_id} has no excerpt {ordinal}; it has {len(matches)} verbatim "
                              f"tags (kblam use review {challenge_id} {finding_id} <ordinal> --by NAME "
                              f"--proponent NAME)")
+        if match.is_hex:
+            raise StoreError(f"excerpt {ordinal} of {finding_id} is a hex byte rendering, which never "
+                             f"qualifies as a use")
         if match.binary:
             raise StoreError(f"excerpt {ordinal} of {finding_id} is binary-exempt, and a binary-exempt "
                              f"excerpt never qualifies as a use")

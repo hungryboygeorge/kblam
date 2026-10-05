@@ -162,8 +162,15 @@ def _upgrade(cfg: Config, settings: JevSettings) -> UpgradeResult:
         # Only upgrade may bridge a matching format-1 marker to format 2, and only before records
         # exist: that old marker cannot vouch for the review root or its registered IDs.
         if (recorded is not None and recorded[0] == 1 and recorded[2] == tree_digest(view)
-                and not view.records and not registry.read_ids(cfg)):
-            clean = True
+                and not view.records):
+            try:
+                registered = registry.read_ids(cfg)
+            except ValueError:
+                # A damaged registry cannot authorize the bridge; leave the old marker and warn as
+                # for a nonempty registry, while the rest of the upgrade continues.
+                clean = False
+            else:
+                clean = not registered
         for finding, data in writes:
             atomic_write(cfg.repo_root / finding.path, data)
             if _follow_edit_record(cfg, finding, data):

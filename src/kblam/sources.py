@@ -107,6 +107,10 @@ class SourceReader:
         self._cache: dict = {}
         self._view_keys: dict[str, dict[str, str]] = {}   # "findings"/"review" -> canonical key -> path
 
+    def _untrusted_state(self, target: Path) -> bool:
+        return (not self.trust_state
+                and paths._under(target.resolve(strict=False), self.cfg.state_dir.resolve(strict=False)))
+
     def working(self, raw: str) -> bytes | None:
         """The working bytes of a repo-relative path; None if it is refused, missing or a directory."""
         try:
@@ -114,9 +118,34 @@ class SourceReader:
             target = paths.resolve(self.cfg, raw)
         except paths.PathRefused:
             return None
+        if self._untrusted_state(target):
+            return None
         return self._once(("working", key), lambda: self._working_bytes(key, target))
 
+    def verbatim(self, full: Path) -> bytes | None:
+        """K10's accepted path, using the same snapshot as record reads without narrowing its syntax."""
+        if self._untrusted_state(full):
+            return None
+        rel = full.relative_to(self.cfg.repo_root.resolve()).as_posix()
+        key = _canonical_key(self.cfg, rel)
+        if key is not None:
+            return self._once(("working", key), lambda: self._working_bytes(key, full))
+        # K10 accepts names (for example a colon) that record paths do not. They still use candidate
+        # bytes under either protected root, and each accepted resolved path is read only once.
+        def read():
+            if rel in self.view.files:
+                return self.view.files[rel]
+            if rel in self.view.review_files:
+                return self.view.review_files[rel]
+            if rel.startswith((self.cfg.findings_dir + "/", self.cfg.review_dir + "/")):
+                return None
+            return _read_file(full)
+
+        return self._once(("verbatim", str(full)), read)
+
     def blob(self, toplevel: Path, oid: str) -> bytes | None:
+        if self._untrusted_state(toplevel):
+            return None
         return self._once(("blob", str(toplevel), oid), lambda: gitpin.read_blob(toplevel, oid))
 
     def snapshot(self, raw: str, sha256: str) -> bytes | None:
@@ -125,6 +154,8 @@ class SourceReader:
             key = paths.canonical_key(self.cfg, raw)
             target = paths.resolve(self.cfg, raw)
         except paths.PathRefused:
+            return None
+        if self._untrusted_state(target):
             return None
         return self._once(("snapshot", key, sha256), lambda: self._snapshot_bytes(target, sha256))
 
@@ -146,6 +177,8 @@ class SourceReader:
             target = paths.resolve(self.cfg, raw)
         except paths.PathRefused as exc:
             return Resolved(State.UNAVAILABLE, None, MESSAGE_UNREADABLE, None, f"path {raw!r}: {exc}")
+        if self._untrusted_state(target):
+            return Resolved(State.UNAVAILABLE, None, MESSAGE_UNREADABLE, key)
         if target.is_dir():
             return Resolved(State.UNAVAILABLE, None, MESSAGE_UNREADABLE, key,
                             f"{raw!r} is a directory, not a file")
@@ -168,6 +201,14 @@ class SourceReader:
             # Nothing to compare bytes against: records.schema_issues reports the type.
             return Resolved(State.UNAVAILABLE, None, MESSAGE_NO_SHA256, key, error)
 
+        if not self.trust_state and pin is not None and isinstance(pin.repo, str):
+            try:
+                repository = paths.resolve(self.cfg, pin.repo)
+            except paths.PathRefused:
+                pass  # pin verification below reports the existing structural path error
+            else:
+                if self._untrusted_state(repository):
+                    return Resolved(State.UNAVAILABLE, None, MESSAGE_UNREADABLE, key)
         # The pin is verified even when the working file is current: a wrong pin is a structural error.
         working = self.working(raw)
         pinned_bytes = None
@@ -211,6 +252,8 @@ class SourceReader:
     def _working_bytes(self, key: str, target: Path) -> bytes | None:
         """The bytes of a repo-relative file: under the findings or review root the view's bytes, which is
         all a validation sees there, and otherwise the file on disk. None when neither holds a file."""
+        if self._untrusted_state(target):
+            return None
         where = paths.protected(self.cfg, target)
         if where in ("findings", "review"):
             return self._view_bytes(where, key)
@@ -235,6 +278,8 @@ class SourceReader:
     def _snapshot_bytes(self, target: Path, sha256: str) -> bytes | None:
         """The snapshot file's bytes when they hash to sha256, else None: a copy with other bytes serves a
         reference no better than no copy at all."""
+        if self._untrusted_state(target):
+            return None
         data = _read_file(target)
         return data if data is not None and sha256_hex(data) == sha256 else None
 

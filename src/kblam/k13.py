@@ -693,8 +693,8 @@ def _use_blocking_issues(view, reader, rec: Record, *, status: str | None = None
     issues += [issue for issue in _duplicate_issues(projected, _id_claims(projected))
                if issue.owner == rec.id]
     issues += decisions.decision_issues(candidate)
-    issues += _identity_issues(projected, candidate, [])
-    projected_reader = sources.SourceReader(view.cfg, projected)
+    issues += _identity_issues(projected, candidate, [], trust_state=reader.trust_state)
+    projected_reader = sources.SourceReader(view.cfg, projected, trust_state=reader.trust_state)
     issues += _decision_evidence_issues(projected, projected_reader, candidate, data["status"],
                                       availability=False)
     return issues
@@ -784,7 +784,7 @@ def _use_binding_recovery(view, reader, rec: Record) -> tuple[str, str | None]:
         return (f"retire this use ({RETIRE.format(rid=rid)}); if the finding still quotes the assertion, "
                 f"make sure kblam validate verifies that excerpt as a text match (fix the excerpt or "
                 f"its citation), then stage a new use ({new_use})"), "stale"
-    if rec.status == "approved" and (kept.binary or not kept.verified):
+    if rec.status == "approved" and (kept.binary or kept.is_hex or not kept.verified):
         return (f"restore the source text excerpt {kept.ordinal} quotes (or fix the excerpt so kblam "
                 f"validate verifies it), then run kblam validate again; or retire this use "
                 f"({RETIRE.format(rid=rid)})"), "stale"
@@ -869,7 +869,9 @@ def _citation_problems(view, reader, finding, data: dict) -> list[str]:
     if match.tag_sha256 != citation.get("tag_sha256"):
         problems.append(f"excerpt {ordinal} has tag_sha256 {match.tag_sha256}, not the cited "
                         f"{citation.get('tag_sha256')}")
-    if match.binary:
+    if match.is_hex:
+        problems.append(f"excerpt {ordinal} is a hex byte rendering, which never qualifies as a use")
+    elif match.binary:
         problems.append(f"excerpt {ordinal} is binary-exempt, which never qualifies as a use")
     elif not match.verified:
         problems.append(f"excerpt {ordinal} is not a verified text match ({match.problem})")

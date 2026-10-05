@@ -173,7 +173,7 @@ def _hits(view, reader, finding_id: str | None = None) -> list[_Hit]:
         if finding.meta is None or (finding_id is not None and finding.file_id != finding_id):
             continue
         for match in matching.finding_matches(view, reader, finding):
-            if not match.verified or match.key is None:
+            if not match.verified or match.binary or match.is_hex or not match.spans or match.key is None:
                 continue
             for info in by_key.get(match.key, []):
                 kind = _relation(info, match)

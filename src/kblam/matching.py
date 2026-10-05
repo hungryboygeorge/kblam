@@ -148,9 +148,10 @@ class ExcerptMatch:
     source_sha256: str | None     # sha256 of the raw source bytes matched against
     spans: tuple[tuple[int, int], ...]  # every half-open span in the source's LF text within the range
     problem: str | None           # the K10 failure message, byte-identical to K10's, or None
-    verified: bool                # a verified text match (problem is None and the source is text)
-    binary: bool                  # binary-exempt: problem is None, source binary, not verified
+    verified: bool                # K10 verification of a text excerpt or hex bytes
+    binary: bool                  # source classification: NUL bytes or not valid UTF-8
     tag_sha256: str               # tag_sha256(body_lines, start, end)
+    is_hex: bool = False          # hex rendering, excluded from K14 text relations and reviewed uses
 
 
 def finding_matches(view, reader, finding) -> list[ExcerptMatch]:
@@ -200,10 +201,11 @@ def _excerpt_match(view, reader, finding, ordinal: int, index: int) -> ExcerptMa
         excerpt, end, problem = rules._excerpt_after(body, index + 1, hex_excerpt=bool(tag.group("hex")))
     fields = dict(ordinal=ordinal, start=index, end=end, path=path, key=None, is_offset=is_offset,
                   range=cited, text=excerpt, source_sha256=None, spans=(), problem=problem,
-                  verified=False, binary=False, tag_sha256=tag_sha256(body, index, end))
+                  verified=False, binary=False, tag_sha256=tag_sha256(body, index, end),
+                  is_hex=tag is not None and bool(tag.group("hex")))
     if tag is None:
         return ExcerptMatch(**fields)
-    checked = rules._check_excerpt(view, tag, index, end, excerpt, problem)
+    checked = rules._check_excerpt(view, tag, index, end, excerpt, problem, reader=reader)
     fields.update(problem=checked.problem, verified=checked.verified)
     if problem is not None or not excerpt.strip():
         return ExcerptMatch(**fields)
@@ -239,8 +241,8 @@ def _read_source(view, reader, source: str, full: Path) -> tuple[bytes | None, s
     try:
         key = paths.canonical_key(reader.cfg, source)
     except paths.PathRefused:
-        return _rules()._source_bytes(view, full), None
-    return reader.working(source), key
+        key = None
+    return reader.verbatim(full), key
 
 
 def _source_text(data: bytes) -> str | None:

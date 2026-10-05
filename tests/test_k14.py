@@ -6,16 +6,19 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+from pathlib import Path
 
 import pytest
 
 from conftest import SOURCE_REPO, TRACE_PATH, TRACE_TEXT, dump_record, record_data
-from kblam import records, rules
+from kblam import cli, k13, records, review_stage, rules
 from kblam.decisions import subject_digest
 from kblam.finding import fingerprint
 from kblam.k14 import affected_triples, k14
 from kblam.matching import finding_matches
+from kblam.review_index import generate_review_index
 from kblam.sources import SourceReader, sha256_hex
+from kblam.store import StoreError
 from kblam.view import load_view
 
 REVIEW = "research-review"
@@ -112,6 +115,71 @@ def same_bytes_message(repo, blob: bool = True, ordinal: int = 1, lines: str = "
 
 
 NEW_TEXT = "# a heading added above\n" + TRACE_TEXT      # another version of the source: every line moves
+
+
+def test_findings_and_record_rules_share_the_actual_source_read(kb, source_repo, monkeypatch):
+    put(kb, "SC", sc(source_repo))
+    add_finding(kb, "3", LINE3)
+    view = load_view(kb.cfg)
+    read_bytes = Path.read_bytes
+    reads = 0
+
+    def counted(path):
+        nonlocal reads
+        if path == source_repo.root / TRACE_PATH:
+            reads += 1
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", counted)
+    issues = rules.validate(view)
+
+    assert any(issue.code == "K14" for issue in issues)
+    assert not any(issue.code == "K10" for issue in issues)
+    assert reads == 1
+
+
+@pytest.mark.parametrize("binary", [False, True], ids=["utf8", "binary"])
+@pytest.mark.parametrize("changed", [False, True], ids=["unchanged", "changed"])
+def test_verified_hex_bytes_are_never_text_relations_or_current_uses(kb, source_repo, binary, changed):
+    suffix = b"\x00" if binary else b""
+    original = b"61 62\n" + suffix
+    source_repo.commit(TRACE_PATH, original, "hex source")
+    put(kb, "SC", sc(source_repo, text="61 62", lines=(1, 1)))
+    current = b"ab\n" + suffix if changed else original
+    if changed:
+        source_repo.write(TRACE_PATH, current)
+    rendering = current[:2].hex(" ")
+    kb.add("F-0001", "ratio", CLAIM,
+           body=f"<!-- verbatim: {TRACE}:@0x0 hex -->\n```\n{rendering}\n```")
+    view, reader = scene(kb)
+    [match] = finding_matches(view, reader, view.findings[0])
+
+    assert match.is_hex and match.verified and match.spans == ()
+    assert match.binary is binary
+    assert rules.k10_verbatim(view, reader) == []
+    assert k14(view, reader) == []
+    assert affected_triples(view, reader, "F-0001") == set()
+    put(kb, "CU", use(kb))
+    view, reader = scene(kb)
+    rec = next(rec for rec in view.records if rec.kind == "CU")
+    assert not k13.use_current(view, reader, rec)
+
+
+def test_validate_cli_accepts_hex_of_changed_utf8_source_without_a_k14_text_relation(kb, source_repo, capsys):
+    source_repo.commit(TRACE_PATH, "61 62\n", "assertion")
+    put(kb, "SC", sc(source_repo, text="61 62", lines=(1, 1)))
+    source_repo.write(TRACE_PATH, "ab\n")
+    kb.add("F-0001", "ratio", CLAIM,
+           body=f"<!-- verbatim: {TRACE}:@0x0 hex -->\n```\n61 62\n```")
+    view = load_view(kb.cfg)
+    kb.write(view.review_index_path, generate_review_index(view))
+    capsys.readouterr()
+
+    assert cli.main(["--root", str(kb.root), "validate"]) == 0
+
+    assert capsys.readouterr().out == "kblam validate: OK (1 findings)\n"
+    with pytest.raises(StoreError, match="hex byte rendering, which never qualifies as a use"):
+        review_stage.use_review(kb.cfg, "SC-0001", "F-0001", 1, "reviewer-a", "author-a")
 
 
 # --- same bytes ---------------------------------------------------------------------------------

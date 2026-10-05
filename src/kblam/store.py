@@ -430,7 +430,7 @@ def put(cfg: Config, source: Path, *, client_factory=None) -> PutResult:
     left suspect, and validate fails until they are acked.
     Replacing an existing ID needs the record kblam edit wrote, matching the file as it is now.
     A refused write records a rejected item per rejecting verdict (§6.4).
-    K1-K11 refuse as before; K13 and K15 never do, and K14 refuses only for an excerpt the installed
+    K1-K12 refuse as before; K13 and K15 never do, and K14 refuses only for an excerpt the installed
     finding did not already have affected (§5.2.4).
     Jev is asked before the lock is taken; under the lock the candidates are recomputed against the
     current tree and only pairs it gained meanwhile are asked (SPEC §12 M5). `client_factory`
@@ -534,7 +534,7 @@ def _blocking(after: list[Issue], before: KBView, target: str,
     return blocking, warnings
 
 
-REVIEW_CODES = ("K13", "K14", "K15")  # the rules that refuse through their own scope, not the K1-K11 sweep
+REVIEW_CODES = ("K13", "K14", "K15")  # the rules that refuse through their own scope, not the K1-K12 sweep
 RETIRED_STATUSES = ("stale", "withdrawn")  # a put lists the tasks and uses it makes stale, not those already retired
 
 NEW_EXCERPT_MESSAGE = (

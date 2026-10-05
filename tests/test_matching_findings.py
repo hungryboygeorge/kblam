@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+from collections import Counter
+from pathlib import Path
 
 import pytest
 
@@ -219,6 +221,56 @@ def test_a_new_revision_of_the_finding_is_matched_again(kb):
     assert (second[0].range, second[0].spans) == ((3, 3), ((20, 25),))
 
 
+@pytest.mark.parametrize("explicit_reader", [False, True], ids=["view-owned", "explicit"])
+def test_repeated_excerpts_derive_a_source_once_across_equivalent_paths(kb, monkeypatch, explicit_reader):
+    body = quoted(f"{NOTES}:1", "alpha one") + "\n" + quoted("evidence/../evidence/notes.txt:2", "alpha two")
+    notes_finding(kb, NOTES, "alpha one", body=body)
+    view, reader, finding = view_reader_finding(kb)
+    calls = []
+    normalise = rules.normalise_newlines
+
+    def counted(text):
+        calls.append(text)
+        return normalise(text)
+
+    monkeypatch.setattr(rules, "normalise_newlines", counted)
+    if explicit_reader:
+        assert all(match.verified for match in finding_matches(view, reader, finding))
+    else:
+        assert all(excerpt.verified for excerpt in rules.verbatim_excerpts(view, finding))
+    assert calls == [NOTES_TEXT]
+    actual_reader = reader if explicit_reader else view.memo["source_reader"]
+    first = rules._source(view, kb.root / NOTES, actual_reader)
+    assert rules._source(view, kb.root / "evidence/../evidence/notes.txt", actual_reader) is first
+    assert calls == [NOTES_TEXT]
+
+
+def test_derived_sources_and_negatives_are_scoped_to_each_reader_snapshot(kb, monkeypatch):
+    kb.write(NOTES, NOTES_TEXT)
+    view = load_view(kb.cfg)
+    first = SourceReader(kb.cfg, view)
+    calls = []
+    original = first.verbatim
+
+    def counted(full):
+        calls.append(full)
+        return original(full)
+
+    monkeypatch.setattr(first, "verbatim", counted)
+    found = rules._source(view, kb.root / NOTES, first)
+    assert rules._source(view, kb.root / "evidence/../evidence/notes.txt", first) is found
+    assert rules._source(view, kb.root / MISSING, first) is None
+    kb.write(MISSING, "newly present\n")
+    assert rules._source(view, kb.root / MISSING, first) is None
+    assert len(calls) == 2  # a negative derived-source lookup is cached too
+    kb.write(NOTES, "new source bytes\r\n")
+    second = SourceReader(kb.cfg, view)
+    assert rules._source(view, kb.root / NOTES, second).text == "new source bytes\n"
+    assert rules._source(view, kb.root / MISSING, second).text == "newly present\n"
+    assert rules._source(view, kb.root / NOTES, first) is found
+    assert found.data == NOTES_TEXT.encode()
+
+
 # --- one read per source per validation ---------------------------------------------------------
 
 
@@ -234,8 +286,45 @@ def test_validate_reads_each_source_once(kb, monkeypatch):
     notes_finding(kb, f"{NOTES}:1-2", "alpha")
     kb.add("F-0002", "motor", "The motor warm-up drift settles within 90 seconds of power-on.",
            topic="motor", body=quoted(f"{NOTES}:3", "alpha"))
-    rules.validate(load_view(kb.cfg))
+    view = load_view(kb.cfg)
+    actual_reads = Counter()
+    read_bytes = Path.read_bytes
+
+    def counted(path):
+        actual_reads[path] += 1
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", counted)
+    rules.validate(view)
     assert len(made) == 1
+    assert actual_reads[kb.root / NOTES] == 1
+    assert all(count == 1 for count in actual_reads.values())
     reads = made[0].reads
     assert reads[("working", NOTES)] == 1
     assert all(count == 1 for count in reads.values())
+
+
+@pytest.mark.parametrize("tag", [f"{NOTES}:2", "evidence/../evidence/notes.txt:2"])
+def test_a_source_changing_between_reads_keeps_one_snapshot_for_k10_and_spans(kb, monkeypatch, tag):
+    first = b"header\nquoted assertion\n"
+    kb.write(NOTES, first)
+    kb.add("F-0001", "sensor", CLAIM, body=quoted(tag, "quoted assertion"))
+    view = load_view(kb.cfg)
+    read_bytes = Path.read_bytes
+    reads = 0
+
+    def changing(path):
+        nonlocal reads
+        if path == kb.root / NOTES:
+            reads += 1
+            return first if reads == 1 else b"header\n"
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", changing)
+    reader = SourceReader(kb.cfg, view)
+    [match] = finding_matches(view, reader, view.findings[0])
+
+    assert (match.problem, match.verified, match.spans) == (None, True, ((7, 23),))
+    assert match.source_sha256 == hashlib.sha256(first).hexdigest()
+    assert rules.k10_verbatim(view, reader) == []
+    assert reads == 1

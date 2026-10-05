@@ -735,15 +735,12 @@ def _excerpt_after(body: list[str], i: int, *,
     return None, i, follow
 
 
-def _source_bytes(view: KBView, full: Path) -> bytes | None:
-    rel = full.relative_to(view.cfg.repo_root.resolve()).as_posix()
-    if rel in view.files:
-        return view.files[rel]
-    if rel in view.review_files:
-        return view.review_files[rel]
-    if rel.startswith((view.cfg.findings_dir + "/", view.cfg.review_dir + "/")):
-        return None  # a protected-root path absent from the view does not exist in this tree
-    return full.read_bytes() if full.is_file() else None
+def _source_bytes(view: KBView, full: Path, reader: SourceReader | None = None) -> bytes | None:
+    if reader is None:
+        reader = view.memo.get("source_reader")
+        if reader is None:
+            reader = view.memo["source_reader"] = SourceReader(view.cfg, view)
+    return reader.verbatim(full)
 
 
 @dataclass(frozen=True)
@@ -755,20 +752,27 @@ class _Source:
     lines: list[str] | None
 
 
-def _source(view: KBView, full: Path) -> _Source | None:
-    """The source at `full`, or None if it does not exist. Read and decoded once per view, since
-    many excerpts quote one evidence file."""
+def _source(view: KBView, full: Path, reader: SourceReader | None = None) -> _Source | None:
+    """Derive text once per reader's canonical source snapshot, including missing sources."""
+    if reader is None:
+        reader = view.memo.get("source_reader")
+        if reader is None:
+            reader = view.memo["source_reader"] = SourceReader(view.cfg, view)
     memo = view.memo.setdefault("sources", {})
-    if full not in memo:
-        data = _source_bytes(view, full)
-        text = None
-        if data is not None and b"\0" not in data:
-            try:
-                text = normalise_newlines(data.decode("utf-8"))
-            except UnicodeDecodeError:
-                pass
-        memo[full] = None if data is None else _Source(data, text, None if text is None else text.split("\n"))
-    return memo[full]
+    key = (reader, full.resolve())
+    if key not in memo:
+        data = _source_bytes(view, full, reader)
+        found = None
+        if data is not None:
+            text = None
+            if b"\0" not in data:
+                try:
+                    text = normalise_newlines(data.decode("utf-8"))
+                except UnicodeDecodeError:
+                    pass
+            found = _Source(data, text, None if text is None else text.split("\n"))
+        memo[key] = found
+    return memo[key]
 
 
 def verbatim_excerpts(view: KBView, f: Finding) -> list[Excerpt]:
@@ -799,7 +803,7 @@ def _verbatim_excerpts(view: KBView, f: Finding) -> list[Excerpt]:
 
 
 def _check_excerpt(view: KBView, tag: re.Match, start: int, end: int, excerpt: str | None,
-                   problem: str | None) -> Excerpt:
+                   problem: str | None, *, reader: SourceReader | None = None) -> Excerpt:
     def failed(message: str) -> Excerpt:
         return Excerpt(start, end, message, False)
 
@@ -816,7 +820,7 @@ def _check_excerpt(view: KBView, tag: re.Match, start: int, end: int, excerpt: s
     full, problem = _repo_path(view, source)
     if problem:
         return failed(f"verbatim source {source} {problem}")
-    found = _source(view, full)
+    found = _source(view, full, reader)
     if found is None:
         return failed(f"verbatim source {source} does not exist; cite an existing file relative to the "
                       f"repository root")
@@ -1010,8 +1014,9 @@ def validate(view: KBView, focus: frozenset[str] = frozenset(), *, trust_state: 
     """Run every rule. `focus` names findings being written, so K3 and K9 address them.
 
     One SourceReader serves the whole validation, so each source is read once however many rules
-    consult it (SPEC §5.2.6). With `trust_state=False`, record checks read no machine-state registry,
-    tree.hash or allocation receipts; Stop uses this while git tracks `.kblam/`.
+    consult it (SPEC §5.2.6). With `trust_state=False`, checks read no machine-state registry,
+    tree.hash, allocation receipts or references resolving under `.kblam/`; Stop uses this while git
+    tracks `.kblam/`.
     """
     from kblam.k13 import k13  # these import Issue from here
     from kblam.k14 import k14
