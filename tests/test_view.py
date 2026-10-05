@@ -1,4 +1,4 @@
-"""load_view: the review root's bytes beside the findings' (SPEC §5.1.6)."""
+"""load_view: the review root's bytes beside the findings' (SPEC §5.2.6)."""
 
 from __future__ import annotations
 

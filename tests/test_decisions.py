@@ -1,4 +1,4 @@
-"""Subject digests, the status-change table, independence and the stored-decision checks (SPEC §5.1.2
+"""Subject digests, the status-change table, independence and the stored-decision checks (SPEC §5.2.2
 Subject digest, Decisions, Status changes). Offline: records are built as data, no parsing, no git."""
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ CREATOR, PROPONENT, THIRD = "reviewer-a", "researcher-a", "reviewer-b"
 FOLDERS = {"SC": "challenges", "CT": "tasks", "CU": "uses"}
 KIND_WORD = {"SC": "challenge", "CT": "task", "CU": "use"}   # the words a refusal names its kind by
 
-# SPEC §5.1.2 Subject digest, verbatim: the fields each kind's digest covers, in table order.
+# SPEC §5.2.2 Subject digest, verbatim: the fields each kind's digest covers, in table order.
 SPEC_SUBJECTS = {
     "SC": ("id", "source", "proposition", "scope", "classification", "basis", "usable", "limits"),
     "CT": ("id", "kind", "finding", "claim_fingerprint", "base_file_sha256", "question", "method",
@@ -29,10 +29,10 @@ SPEC_SUBJECTS = {
            "citation", "disposition", "reason", "proponent"),
 }
 
-# SPEC §5.1.2 "Independent means", verbatim: the fields `by` must differ from.
+# SPEC §5.2.2 "Independent means", verbatim: the fields `by` must differ from.
 SPEC_SELF = {"SC": ("creator",), "CT": ("creator", "proponent"), "CU": ("proponent",)}
 
-# SPEC §5.1.2 Status changes, the three rows that belong to one kind.
+# SPEC §5.2.2 Status changes, the three rows that belong to one kind.
 SPEC_TABLE = {
     "SC": {"open": ("confirmed", "rejected"), "confirmed": ("stale",), "rejected": ("stale",)},
     "CT": {"open": ("confirmed", "not_reproduced", "inconclusive"), "confirmed": ("stale",),
@@ -141,7 +141,7 @@ def test_a_use_challenge_bind_is_part_of_its_digest():
 
 
 def allowed(kind: str, old: str, new: str) -> bool:
-    """The §5.1.2 table re-derived from the SPEC text, independent of the module's data."""
+    """The §5.2.2 table re-derived from the SPEC text, independent of the module's data."""
     if new == old:                                   # rebind keeps the status: a task's and a use's, never stale
         return kind in ("CT", "CU") and old != "stale"
     if old == "open":
@@ -437,12 +437,12 @@ def test_a_status_outside_the_vocabulary_is_schema_issues_business():
     assert decision_issues(rec) == []
 
 
-def test_a_decision_issue_carries_the_k12_fields():
+def test_a_decision_issue_carries_the_k13_fields():
     rec = stored("SC", ["confirmed"])
     rec.data["status"] = "rejected"
     rec.meta = meta(status=5, decisions=10)
     issue, = decision_issues(rec)
-    assert (issue.code, issue.level, issue.owner, issue.path) == ("K12", "error", "SC-0001", rec.path)
+    assert (issue.code, issue.level, issue.owner, issue.path) == ("K13", "error", "SC-0001", rec.path)
     assert issue.line == 6                           # key_line is 1-based
     assert issue.is_error
 

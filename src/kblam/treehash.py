@@ -21,7 +21,7 @@ def tree_digest(view: KBView) -> str:
     return h.hexdigest()
 
 
-# --- format 2 (SPEC §5.1.6) ---------------------------------------------------------------------
+# --- format 2 (SPEC §5.2.6) ---------------------------------------------------------------------
 
 V2_TAG = "kblam-tree-v2"
 HEX_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -104,7 +104,7 @@ def _holds_records(cfg: Config, root: str) -> bool:
 
 
 def root_problem(cfg: Config, registered: set[str] | None) -> str | None:
-    """K12's and every mutating command's root check (SPEC §5.1.6): when tree.hash is format 2 and records
+    """K13's and every mutating command's root check (SPEC §5.2.6): when tree.hash is format 2 and records
     a root other than cfg.review_dir, "the review root changed from X to Y in kblam.toml; schema 1 fixes it
     at init" - unless neither root holds a record file (<root>/<kind folder>/*.yaml) and `registered`
     (registry.read_ids) is None or empty, in which case None. None for format 1 or no tree.hash."""
@@ -121,7 +121,7 @@ def root_problem(cfg: Config, registered: set[str] | None) -> str | None:
 
 
 def clean_before_v2(cfg: Config, view: KBView, has_records: bool) -> bool:
-    """The tree.hash rule before a write (SPEC §8, §5.1.6): True if tree.hash is format 2 with this root
+    """The tree.hash rule before a write (SPEC §8, §5.2.6): True if tree.hash is format 2 with this root
     and tree_digest_v2(view); or there is no tree.hash and not `has_records` (bootstrap). A format-1
     tree.hash never matches."""
     recorded = read_recorded(cfg)

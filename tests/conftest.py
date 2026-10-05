@@ -160,7 +160,7 @@ def kb(tmp_path: Path) -> KB:
     return base
 
 
-# --- M6.10: review records and a nested source repository (SPEC §5.1, §12 M6.10 tests) ----------------
+# --- M6.11: review records and a nested source repository (SPEC §5.2, §12 M6.11 tests) ----------------
 
 SOURCE_REPO = "resources/mx-docs"           # the nested source repository, relative to the KB root
 TRACE_PATH = "notes/full-scan-trace.md"     # its committed text file, relative to SOURCE_REPO

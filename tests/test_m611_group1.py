@@ -1,8 +1,8 @@
-"""SPEC §12 M6.10 acceptance tests, group 1: *Assertions* (A2).
+"""SPEC §12 M6.11 acceptance tests, group 1: *Assertions* (A2).
 
-Every test here drives the real CLI (`m610_helpers.kblam`) from a state its docstring states, and asserts
+Every test here drives the real CLI (`m611_helpers.kblam`) from a state its docstring states, and asserts
 the whole outcome of every command it runs: the exit status, the complete stdout and stderr, the files the
-command changed (whole-tree snapshots from `m610_helpers.tree`/`changed`, taken around each command, so a
+command changed (whole-tree snapshots from `m611_helpers.tree`/`changed`, taken around each command, so a
 stray write by any of them fails the test that ran it), the `validate` result afterwards and, for every
 feature command that reads the source, that `source_repo.snapshot()` is equal before and after. Offline
 and deterministic: the frozen date pins `created` and decision dates, the fixture KBs enable no Jev
@@ -16,7 +16,7 @@ import re
 from contextlib import contextmanager
 from pathlib import Path
 
-import m610_helpers as m
+import m611_helpers as m
 from kblam import records
 from kblam.finding import yaml_rt
 
@@ -45,7 +45,7 @@ F2 = "findings/calibration/F-0002-ratio.md"
 FINDINGS_INDEX = "findings/INDEX.md"
 A_FINDING = {FINDINGS_INDEX, TREE_HASH}                 # what a fixture kb.add adds beside the finding
 
-# The SC fields m610_helpers fills on a staged challenge, as `challenge show` prints them after the
+# The SC fields m611_helpers fills on a staged challenge, as `challenge show` prints them after the
 # standard filling; every test spells out the line its own record gives.
 SHOW_TAIL = (
     "proposition: The printed byte equality follows from the printed byte values\n"
@@ -111,19 +111,19 @@ def _rewrite_assertion(kb, path: Path, **fields) -> None:
         path.write_bytes(records.dump(data))
 
 
-def _k13_same_bytes(sc: str, finding: str, blob: str) -> str:
-    """The K13 error a confirmed challenge gives an excerpt of `finding` that quotes its assertion text
-    at the pinned version of notes/repeats.md (SPEC §5.1.4 K13, the same-bytes rule)."""
-    return (f"K13 findings/calibration/{finding}-ratio.md:15: {sc} challenges this quoted assertion at "
+def _k14_same_bytes(sc: str, finding: str, blob: str) -> str:
+    """The K14 error a confirmed challenge gives an excerpt of `finding` that quotes its assertion text
+    at the pinned version of notes/repeats.md (SPEC §5.2.4 K14, the same-bytes rule)."""
+    return (f"K14 findings/calibration/{finding}-ratio.md:15: {sc} challenges this quoted assertion at "
             f"{REPEATS}@{blob[:12]}:2-2; edit the finding or have this use reviewed "
             f"(kblam use review {sc} {finding} 1 --by NAME --proponent NAME). K10 is checked separately.")
 
 
 def _stale_warning(rec_id: str, label: str = "") -> str:
-    """The pattern of a K12 stale-reference warning about `rec_id`'s record file, as validate prints it:
-    "K12 warning research-review/challenges/SC-0001.yaml:<line>: [label: ]the source changed since
+    """The pattern of a K13 stale-reference warning about `rec_id`'s record file, as validate prints it:
+    "K13 warning research-review/challenges/SC-0001.yaml:<line>: [label: ]the source changed since
     SC-0001 was written"."""
-    return (rf"K12 warning research-review/challenges/{rec_id}\.yaml:\d+: {re.escape(label)}the source "
+    return (rf"K13 warning research-review/challenges/{rec_id}\.yaml:\d+: {re.escape(label)}the source "
             rf"changed since {rec_id} was written")
 
 
@@ -180,7 +180,7 @@ def test_a_source_edited_above_the_assertion_goes_stale_and_is_never_re_targeted
     file with other bytes than HEAD's blob, so `challenge new --lines 3-3 --by reviewer-a` records a
     provisional source (repo, commit and blob all null) with the working file's sha256, and the
     author's `kblam put` exits 0. A second edit above the assertion then leaves that reference stale:
-    `kblam validate` exits 0 with one K12 warning about the source, "the source changed since SC-0001
+    `kblam validate` exits 0 with one K13 warning about the source, "the source changed since SC-0001
     was written", and one for the basis entry read with it, and changes no file. The record's bytes,
     its assertion and its source sha256 are exactly as written — kblam never re-targets a reference at
     the bytes it now finds — and `challenge show` reads "state: stale". Source repository: unchanged.
@@ -265,7 +265,7 @@ def test_a_pinned_confirmed_challenge_is_evaluated_at_its_blob_after_a_new_commi
     """Start: the trace is committed and clean, so `challenge new --lines 3-3 --by reviewer-a` pins the
     source at HEAD's commit and blob, and reviewer-b confirms SC-0001 (both commands exit 0). A later
     commit rewrites the trace so the assertion text is gone from the working tree; `kblam validate`
-    still exits 0 with no diagnostic at all, because the assertion and the K12 pin checks are evaluated
+    still exits 0 with no diagnostic at all, because the assertion and the K13 pin checks are evaluated
     at the pinned blob, and `review list` still calls the record current. `challenge show` reads
     "version: <blob of the first commit>" and "state: pinned". Validate changes no file, and the source
     repository is unchanged by the run. A2."""
@@ -352,7 +352,7 @@ def test_only_the_occurrence_inside_the_lines_is_the_assertion(kb, source_repo):
     --by reviewer-a` finds one match inside its lines, so it captures occurrence 2 — the second match in
     the file — and the put exits 0. reviewer-b's `review decide --status confirmed` exits 0 and names
     F-0002, and not F-0001, as newly affected; `kblam challenge uses` lists F-0002's excerpt and not
-    F-0001's; `kblam validate` exits 1 with that one K13 error at the pinned blob and lines 2-2. The
+    F-0001's; `kblam validate` exits 1 with that one K14 error at the pinned blob and lines 2-2. The
     excerpt quoting the identical bytes at line 1 is untouched: the assertion is the occurrence it
     pinned, and kblam never re-targets it to another match. The source repository is unchanged. A2."""
     source_repo.commit(REPEATS_PATH, REPEATS_TEXT, "repeats")
@@ -381,7 +381,7 @@ def test_only_the_occurrence_inside_the_lines_is_the_assertion(kb, source_repo):
                       f"{m.expect(kb, sc)[:12]})\n"
                       f"kblam review decide: {sc} now affects F-0002; run kblam challenge uses {sc} for "
                       f"each excerpt and the command that fixes it\n"
-                      f"{_k13_same_bytes(sc, 'F-0002', blob)}\n"
+                      f"{_k14_same_bytes(sc, 'F-0002', blob)}\n"
                       f"kblam review decide: done, but kblam validate still fails (1 error(s) listed "
                       f"above, owned by other findings or records)\n")
     assert "F-0001" not in decided.out                            # the same bytes outside `lines`
@@ -396,7 +396,7 @@ def test_only_the_occurrence_inside_the_lines_is_the_assertion(kb, source_repo):
         failing = m.validate(kb)
 
     assert failing.code == 1 and failing.err == ""
-    assert failing.out == f"{_k13_same_bytes(sc, 'F-0002', blob)}\nkblam validate: 1 error(s) in findings/\n"
+    assert failing.out == f"{_k14_same_bytes(sc, 'F-0002', blob)}\nkblam validate: 1 error(s) in findings/\n"
     assert source_repo.snapshot() == read_before
     assert source_repo.snapshot() == source_before
 

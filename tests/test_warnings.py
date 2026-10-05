@@ -1,4 +1,4 @@
-"""Warnings and owners through every issue consumer (SPEC §5, §5.1.4; M6.10 U2).
+"""Warnings and owners through every issue consumer (SPEC §5, §5.2.4; M6.11 U2).
 
 A warning prints and nothing else: it never fails `kblam validate`, never refuses a put and never
 blocks a Stop. Only errors do, and those are what every consumer counts. K1-K11 issues name the
@@ -30,7 +30,7 @@ def inject(monkeypatch, kb):
     """Patch every module that calls `validate`, so each run also sees one issue per given level."""
     real = rules.validate
 
-    def install(*levels: str, code: str = "K13"):
+    def install(*levels: str, code: str = "K14"):
         extras = [Issue(FINDING, 0, code, MESSAGE, level=level, owner="F-0001") for level in levels]
 
         def patched(view, focus=frozenset()):
@@ -67,7 +67,7 @@ def test_a_warning_prints_and_validate_still_exits_zero(kb, inject, capsys):
 
     assert run_validate(kb) == 0
     out = capsys.readouterr().out
-    assert f"K13 warning {FINDING}: {MESSAGE}" in out
+    assert f"K14 warning {FINDING}: {MESSAGE}" in out
     assert "error(s)" not in out and "OK (1 findings)" in out
 
 
@@ -78,7 +78,7 @@ def test_an_error_of_the_same_shape_still_fails_validate(kb, inject, capsys):
 
     assert run_validate(kb) == 1
     out = capsys.readouterr().out
-    assert f"K13 {FINDING}: {MESSAGE}" in out and " warning " not in out
+    assert f"K14 {FINDING}: {MESSAGE}" in out and " warning " not in out
     assert "kblam validate: 1 error(s)" in out
 
 
@@ -89,7 +89,7 @@ def test_validate_counts_the_errors_beside_a_warning(kb, inject, capsys):
 
     assert run_validate(kb) == 1
     out = capsys.readouterr().out
-    assert f"K13 {FINDING}: {MESSAGE}" in out and f"K13 warning {FINDING}: {MESSAGE}" in out
+    assert f"K14 {FINDING}: {MESSAGE}" in out and f"K14 warning {FINDING}: {MESSAGE}" in out
     assert "kblam validate: 1 error(s)" in out
 
 
@@ -105,7 +105,7 @@ def test_a_warning_does_not_refuse_a_put(kb, inject, capsys):
 
     assert cli.main(["--root", str(kb.root), "put", str(path)]) == 0
     out = capsys.readouterr().out
-    assert f"K13 warning {FINDING}: {MESSAGE}" in out
+    assert f"K14 warning {FINDING}: {MESSAGE}" in out
     assert "rejected" not in out and "is unchanged" not in out
     assert path.name in out and not path.exists()   # installed, not refused
     installed = kb.findings / "calibration" / path.name
@@ -113,7 +113,7 @@ def test_a_warning_does_not_refuse_a_put(kb, inject, capsys):
 
 
 def test_an_error_of_another_rule_still_refuses_a_put(kb, inject, capsys):
-    inject("error", code="K1")   # a K1-K11 error refuses a finding put (SPEC §5.1.4)
+    inject("error", code="K1")   # a K1-K11 error refuses a finding put (SPEC §5.2.4)
     assert cli.main(["--root", str(kb.root), "new", "calibration", "motor warm-up drift"]) == 0
     path = kb.root / capsys.readouterr().out.strip()
     fill(path, CLAIM_A)
@@ -126,9 +126,9 @@ def test_an_error_of_another_rule_still_refuses_a_put(kb, inject, capsys):
     assert path.is_file() and not (kb.findings / "calibration" / path.name).exists()
 
 
-def test_a_k13_error_the_put_does_not_newly_affect_is_kept_and_does_not_refuse(kb, inject, capsys):
-    """K13 refuses a put only for an excerpt the installed finding did not already have affected
-    (SPEC §5.1.4), so the finding's other K13 errors are listed, not obeyed."""
+def test_a_k14_error_the_put_does_not_newly_affect_is_kept_and_does_not_refuse(kb, inject, capsys):
+    """K14 refuses a put only for an excerpt the installed finding did not already have affected
+    (SPEC §5.2.4), so the finding's other K14 errors are listed, not obeyed."""
     inject("error")
     assert cli.main(["--root", str(kb.root), "new", "calibration", "motor warm-up drift"]) == 0
     path = kb.root / capsys.readouterr().out.strip()
@@ -136,7 +136,7 @@ def test_a_k13_error_the_put_does_not_newly_affect_is_kept_and_does_not_refuse(k
 
     result = store.put(kb.cfg, path)
     assert result.ok and result.issues == []
-    assert [(i.code, i.level) for i in result.kept] == [("K13", "error")]
+    assert [(i.code, i.level) for i in result.kept] == [("K14", "error")]
     assert (kb.findings / "calibration" / path.name).is_file()
 
 
@@ -149,7 +149,7 @@ def test_put_reports_a_warning_in_result_warnings_not_issues(kb, inject, monkeyp
 
     result = store.put(kb.cfg, path)
     assert result.ok and result.issues == []
-    assert [i.code for i in result.warnings] == ["K13"] and result.warnings[0].level == "warning"
+    assert [i.code for i in result.warnings] == ["K14"] and result.warnings[0].level == "warning"
     assert (kb.findings / "calibration" / "F-0002-drift.md").is_file()
 
 
@@ -175,7 +175,7 @@ def test_an_error_of_the_same_shape_still_blocks_the_stop_hook(kb, inject, capsy
     assert stop_hook(kb) == 0
     answer = json.loads(capsys.readouterr().out)
     assert answer["decision"] == "block"
-    assert f"K13 {FINDING}: {MESSAGE}" in answer["reason"]
+    assert f"K14 {FINDING}: {MESSAGE}" in answer["reason"]
 
 
 # --- owner --------------------------------------------------------------------------------------

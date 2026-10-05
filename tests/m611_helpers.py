@@ -1,12 +1,12 @@
-"""Helpers for the SPEC §12 M6.10 acceptance tests (the twelve test groups): stage, fill, put and
+"""Helpers for the SPEC §12 M6.11 acceptance tests (the twelve test groups): stage, fill, put and
 decide review records through the real CLI, so a group file reads as a scenario and asserts on output.
 
-Use `import m610_helpers` (tests/ is on sys.path; a module without the `test_` prefix is not collected)
+Use `import m611_helpers` (tests/ is on sys.path; a module without the `test_` prefix is not collected)
 with conftest's `kb` and `source_repo` fixtures. `kb` is a KB holding one evidence folder
 (evidence/2026-09-22-ratio/) and no findings; `source_repo` is a nested Git repository at
 resources/mx-docs whose notes/full-scan-trace.md holds TRACE_TEXT (four lines, LF), committed.
 
-    import m610_helpers as m
+    import m611_helpers as m
 
     frozen_today = m.frozen_today            # module level: pins created and decision dates
 
@@ -17,7 +17,7 @@ resources/mx-docs whose notes/full-scan-trace.md holds TRACE_TEXT (four lines, L
         assert m.validate(kb).code == 0
 
 The use in that example is not decoration: an installed excerpt inside a confirmed challenge's
-assertion is a K13 error until a current use covers it, so the challenge alone leaves validate at
+assertion is a K14 error until a current use covers it, so the challenge alone leaves validate at
 exit 1. `test_the_documented_example` runs the sequence exactly as written.
 
 Driving the CLI
@@ -51,7 +51,7 @@ empty stderr, and a staged file whose ID matches the printed SC-/CT-/CU- ID (fou
 - `confirmed_challenge(kb, source_repo, lines, *, by, decider, **fields) -> str` is `challenge(...)`
   plus the pin a confirmation needs (`challenge pin`, when `challenge new` left the source
   provisional) and `review decide --status confirmed` by `decider`, who must differ from `by`
-  (independence, §5.1.2).
+  (independence, §5.2.2).
 - `approved_use(kb, sc_id, finding_id, ordinal=1, *, proponent, reviewer) -> str` drafts the use as
   `reviewer`, puts it and approves it by `reviewer`, who must differ from `proponent`.
 - `confirmed_task(kb, ct_id, *, by, evidence=PRIMARY_EVIDENCE, reason=…) -> Run` decides `confirmed`;
@@ -68,7 +68,7 @@ Findings and sources
 --------------------
 - `quoting_finding(kb, finding_id, source_repo, lines, *, slug="ratio", claim=CLAIM, path=None,
   body="") -> Path` places a finding through `kb.add` (fixture setup, not a put) whose one verbatim
-  excerpt quotes exactly lines A-B of the source, so K10 verifies it and K13 sees it inside a
+  excerpt quotes exactly lines A-B of the source, so K10 verifies it and K14 sees it inside a
   challenge on those lines. `topic`, `title`, `label`, `scope` and `evidence` go through to
   conftest's `finding_text`.
 - `verbatim(tag, excerpt) -> str` is a `<!-- verbatim: tag -->` blockquote block, for a finding body
@@ -87,8 +87,8 @@ Findings and sources
   review root's INDEX.md from the records present (the empty index when there are none, as
   `kblam review index` writes it) and records .kblam/tree.hash for the tree as it is now, as
   `kblam validate --record` would. Call it after installing records or findings out of band, and
-  before a command that validates, which would otherwise report K7 or K12. Never call it in a test
-  whose subject is K7, K12 or tree.hash behaviour: it re-records tree.hash unconditionally, so it
+  before a command that validates, which would otherwise report K7 or K13. Never call it in a test
+  whose subject is K7, K13 or tree.hash behaviour: it re-records tree.hash unconditionally, so it
   would accept the very divergence under test.
 - `source_repo.snapshot()` (conftest) is "the source is unchanged": working bytes, HEAD, index and
   refs, equal before and after.
@@ -103,7 +103,7 @@ Reading a KB
 
 Order, and the traps
 --------------------
-- A put of a finding that quotes a confirmed challenge's assertion is refused (K13, §5.1.4). Build
+- A put of a finding that quotes a confirmed challenge's assertion is refused (K14, §5.2.4). Build
   findings before the challenge is confirmed (`quoting_finding`, or `kb.add`), or edit a finding
   that already had the excerpt.
 - A confirmation needs a pinned, available source. `confirmed_challenge` pins a provisional one for
@@ -162,7 +162,7 @@ PRIMARY_EVIDENCE = f"observed:{EVIDENCE_PATH}:row 0"
 @pytest.fixture(autouse=True)
 def frozen_today(monkeypatch):
     """Pin `created` and a decision's `date` at TODAY. Declare it at module level
-    (`frozen_today = m610_helpers.frozen_today`) in any group file that compares record bytes or
+    (`frozen_today = m611_helpers.frozen_today`) in any group file that compares record bytes or
     show output; it is autouse, so every test in that module gets it."""
     monkeypatch.setattr(review_stage, "_today", lambda: TODAY)
     monkeypatch.setattr(review_write, "_today", lambda: TODAY)
@@ -258,7 +258,7 @@ def accept_tree(kb) -> None:
     (the empty index when there are none, as `kblam review index` writes it) and record
     .kblam/tree.hash for the tree as it is now, as `kblam validate --record` would. Call it after
     installing records or findings out of band, and before a validating command. It re-records
-    tree.hash unconditionally, so a test whose subject is K7, K12 or tree.hash must not call it."""
+    tree.hash unconditionally, so a test whose subject is K7, K13 or tree.hash must not call it."""
     view = load_view(kb.cfg)
     kb.write(f"{kb.cfg.review_dir}/INDEX.md", generate_review_index(view))
     write_tree_hash_v2(kb.cfg, load_view(kb.cfg))
@@ -316,7 +316,7 @@ def _fill(path: Path, defaults: Mapping, fields: Mapping) -> dict:
 
 def _sc_defaults(kb, path: str, classification: str) -> dict:
     """The blank SC fields filled the way a reviewer would: a claim, a scope, a classification and one
-    basis entry on the source itself (put hashes it and gives it the source's pin, §5.1.5)."""
+    basis entry on the source itself (put hashes it and gives it the source's pin, §5.2.5)."""
     role = "model-mismatch" if classification == "wrong_model" else "internal-inconsistency"
     return {
         "proposition": "The printed byte equality follows from the printed byte values",
@@ -521,7 +521,7 @@ def _source_lines(source_repo, path: str, a: int, b: int) -> str:
 def quoting_finding(kb, finding_id: str, source_repo, lines: object, *, slug: str = "ratio",
                     claim: str = CLAIM, path: str | None = None, body: str = "", **kw) -> Path:
     """Place a finding through `kb.add` whose one verbatim excerpt quotes exactly lines A-B of the
-    source, so K10 verifies it and K13 relates it to a challenge on those lines. `body` is extra prose
+    source, so K10 verifies it and K14 relates it to a challenge on those lines. `body` is extra prose
     before the quote; anything else in `**kw` goes to conftest's finding_text."""
     path = path or source_repo.kb_path()
     a, b = _span(lines)

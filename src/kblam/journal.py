@@ -1,4 +1,4 @@
-"""`.kblam/journal.json`: marks a multi-file write in progress (SPEC §5.1.6 Interrupted writes).
+"""`.kblam/journal.json`: marks a multi-file write in progress (SPEC §5.2.6 Interrupted writes).
 
 A write that changes more than one file among the two roots and the registry calls begin() first,
 then writes each file (records and findings, then indexes, then the registry), then tree.hash, then

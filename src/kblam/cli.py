@@ -1,5 +1,5 @@
 """Command-line entry point: `kblam <command>` (SPEC §7; M1-M3, M5, M6 and M6.5 commands, and the
-§5.1.5 source challenge, claim task and reviewed use commands). Exit codes: EXIT_HELP."""
+§5.2.5 source challenge, claim task and reviewed use commands). Exit codes: EXIT_HELP."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import re
 import sys
 from pathlib import Path
 
-from kblam import k12, k14, records, registry, review_stage, review_write, writes
+from kblam import k13, k15, records, registry, review_stage, review_write, writes
 from kblam.config import ConfigError, load_config
 from kblam.finding import ID_RE
 from kblam.hook import SKILL_POINTER
@@ -40,14 +40,14 @@ exit status:
 
 
 def _pending_note(pending: list[str]) -> str:
-    """The pending-task count a validate summary carries, when there is one (SPEC §5.1.4 K14)."""
+    """The pending-task count a validate summary carries, when there is one (SPEC §5.2.4 K15)."""
     return f"; {len(pending)} pending task(s)" if pending else ""
 
 
 def _forget_missing(cfg) -> None:
     """`validate --record --forget-missing`: drop the registered IDs whose records are gone, printing each
-    (SPEC §5.1.6). The drop stands even when the validation that follows fails."""
-    missing = registry.missing(cfg, k12.present_ids(load_view(cfg)))
+    (SPEC §5.2.6). The drop stands even when the validation that follows fails."""
+    missing = registry.missing(cfg, k13.present_ids(load_view(cfg)))
     if not missing:
         return
     registry.write_ids(cfg, (registry.read_ids(cfg) or set()) - set(missing))
@@ -65,7 +65,7 @@ def _validate(cfg, args) -> int:
     items = open_items(cfg, view)
     for item in items:
         print(item.describe())
-    pending = k14.k14_pending(view, SourceReader(cfg, view))  # printed, never a failure (SPEC §5.1.4)
+    pending = k15.k15_pending(view, SourceReader(cfg, view))  # printed, never a failure (SPEC §5.2.4)
     for line in pending:
         print(line)
     failures = errors(issues)
@@ -75,7 +75,7 @@ def _validate(cfg, args) -> int:
               + ("; tree.hash not recorded" if args.record else ""))
         return EXIT_INVALID
     if args.record:
-        ids = writes.registry_after(cfg, k12.present_ids(view), set())  # created after a clone (§5.1.6)
+        ids = writes.registry_after(cfg, k13.present_ids(view), set())  # created after a clone (§5.2.6)
         if ids is not None:
             registry.write_ids(cfg, ids)
         write_tree_hash_v2(cfg, view)
@@ -91,7 +91,7 @@ def _cmd_validate(cfg, args) -> int:
         return _validate(cfg, args)
     _print_checks("validate --record", check_findings(cfg, None, command="validate --record",
                                                      client_factory=JevClient))
-    with writes.locked(cfg, "validate --record", mutating=True):  # it writes tree.hash (SPEC §5.1.6)
+    with writes.locked(cfg, "validate --record", mutating=True):  # it writes tree.hash (SPEC §5.2.6)
         return _validate(cfg, args)
 
 
@@ -122,16 +122,16 @@ def _check_notes(command: str, check) -> None:
 
 
 def _rebind_command(rec_id: str, view) -> str:
-    """The rebind command the put suggests for a record it made stale (SPEC §5.1.4, §5.1.5). Running it
+    """The rebind command the put suggests for a record it made stale (SPEC §5.2.4, §5.2.5). Running it
     keeps the status and passes that status's closing checks again, so a closed task must cite its primary
     evidence once more; every other record's rebind takes no evidence."""
     command = f"kblam review rebind {rec_id} --by NAME --reason TEXT --expect D"
     status = next((rec.status for rec in view.records if rec.id == rec_id), None)
-    return command + (" --evidence PROVENANCE:PATH:LOCATOR" if status in k14.PRIMARY_EVIDENCE else "")
+    return command + (" --evidence PROVENANCE:PATH:LOCATOR" if status in k15.PRIMARY_EVIDENCE else "")
 
 
 def _cmd_put(cfg, args) -> int:
-    if records.FILENAME_RE.match(Path(args.file).name):  # an SC-/CT-/CU- file: a record put (§5.1.5)
+    if records.FILENAME_RE.match(Path(args.file).name):  # an SC-/CT-/CU- file: a record put (§5.2.5)
         return _write_result(cfg, "put", review_write.put_record(cfg, Path(args.file)))
     result = put(cfg, Path(args.file), client_factory=JevClient)
     for issue in result.issues + result.warnings:
@@ -164,7 +164,7 @@ def _cmd_put(cfg, args) -> int:
               f"edit {dependent}. kblam validate fails until then")
     for item in result.review + ([result.unchecked] if result.unchecked else []):
         print(f"kblam put: {item.describe()}. kblam validate fails until it is closed")
-    for rec_id in result.stale:  # SPEC §5.1.4: the put lists what it makes stale
+    for rec_id in result.stale:  # SPEC §5.2.4: the put lists what it makes stale
         print(f"kblam put: {rec_id} is now stale (this put changed {result.finding_id}, which it is bound "
               f"to); a reviewer rechecks it and runs {_rebind_command(rec_id, result.view)}. kblam "
               f"validate fails until then")
@@ -177,7 +177,7 @@ def _cmd_put(cfg, args) -> int:
     return EXIT_OK
 
 
-# --- source challenges, claim tasks, reviewed uses and decisions (SPEC §5.1.5) -------------------
+# --- source challenges, claim tasks, reviewed uses and decisions (SPEC §5.2.5) -------------------
 
 
 def _print_text(text: str) -> None:
@@ -186,8 +186,8 @@ def _print_text(text: str) -> None:
 
 
 def _write_result(cfg, command: str, result: WriteResult) -> int:
-    """Print a record write's outcome: what refused it, what it left behind, or what it did (SPEC §5.1.4
-    "Where each rule blocks", §5.1.5). Returns the exit status."""
+    """Print a record write's outcome: what refused it, what it left behind, or what it did (SPEC §5.2.4
+    "Where each rule blocks", §5.2.5). Returns the exit status."""
     view = load_view(cfg)  # after the call: a refused write changed nothing, and `format` reads the map
     if not result.ok:
         for issue in result.issues:      # errors owned by this record refused the write
@@ -212,7 +212,7 @@ def _write_result(cfg, command: str, result: WriteResult) -> int:
         print(f"kblam review rebind: {result.rec_id} rebound, now {result.status} (subject digest {short})")
     else:  # challenge pin
         print(f"kblam challenge pin: {result.rec_id} pinned (subject digest {short})")
-    if result.newly_affected:  # confirmations only (SPEC §5.1.4)
+    if result.newly_affected:  # confirmations only (SPEC §5.2.4)
         print(f"kblam review decide: {result.rec_id} now affects {', '.join(result.newly_affected)}; run "
               f"kblam challenge uses {result.rec_id} for each excerpt and the command that fixes it")
     for issue in result.remaining:   # errors owned by other records or findings: validate still fails
@@ -224,7 +224,7 @@ def _write_result(cfg, command: str, result: WriteResult) -> int:
 
 
 def _lines(text: str) -> tuple[int, int]:
-    """`--lines A-B`: two positive decimal integers with A <= B (SPEC §5.1.5); anything else is a usage
+    """`--lines A-B`: two positive decimal integers with A <= B (SPEC §5.2.5); anything else is a usage
     error. Whether the range fits the source is review_stage's to refuse."""
     match = re.fullmatch(r"([0-9]+)-([0-9]+)", text)   # [0-9], so a Unicode digit such as '３' is not one
     if match is not None:
@@ -306,7 +306,7 @@ def _cmd_review_list(cfg, args) -> int:
 def _add_by(parser) -> None:
     parser.add_argument("--by", required=True, metavar="NAME",
                         help="the person acting: a name starting with a letter or digit, holding only "
-                             "letters, digits, '.', '_', '@' and '-' (SPEC §5.1.2)")
+                             "letters, digits, '.', '_', '@' and '-' (SPEC §5.2.2)")
 
 
 def _add_proponent(parser) -> None:
@@ -558,7 +558,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="rewrite the rule, the skill, the hook entries and a kblam pre-commit hook to the "
                         "installed version (kblam.toml is never overwritten)")
 
-    p = sub.add_parser("challenge", help="source challenges (§5.1.5): new or edit stages one, put installs "
+    p = sub.add_parser("challenge", help="source challenges (§5.2.5): new or edit stages one, put installs "
                                          "it, pin fixes its source version, decide closes it, and show and "
                                          "uses read it")
     ch = p.add_subparsers(dest="challenge_command", required=True, metavar="COMMAND")
@@ -584,12 +584,12 @@ def build_parser() -> argparse.ArgumentParser:
                                    "and its decisions")
     s.add_argument("id", metavar="SC-NNNN")
     s.set_defaults(func=_cmd_challenge_show, command_name="challenge show")
-    s = ch.add_parser("uses", help="print every finding excerpt K13 relates to a confirmed challenge, and "
+    s = ch.add_parser("uses", help="print every finding excerpt K14 relates to a confirmed challenge, and "
                                    "the command that fixes each")
     s.add_argument("id", metavar="SC-NNNN")
     s.set_defaults(func=_cmd_challenge_uses, command_name="challenge uses")
 
-    p = sub.add_parser("task", help="claim tasks (§5.1.5): new or edit stages one, put installs it, decide "
+    p = sub.add_parser("task", help="claim tasks (§5.2.5): new or edit stages one, put installs it, decide "
                                     "closes it and show reads it")
     ta = p.add_subparsers(dest="task_command", required=True, metavar="COMMAND")
     s = ta.add_parser("new", help="stage a task bound to a finding's current revision and print its path")
@@ -607,7 +607,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("id", metavar="CT-NNNN")
     s.set_defaults(func=_cmd_task_show, command_name="task show")
 
-    p = sub.add_parser("use", help="reviewed uses (§5.1.5): review stages one for a confirmed challenge's "
+    p = sub.add_parser("use", help="reviewed uses (§5.2.5): review stages one for a confirmed challenge's "
                                    "affected excerpt")
     us = p.add_subparsers(dest="use_command", required=True, metavar="COMMAND")
     s = us.add_parser("review", help="stage a use of an affected excerpt of an installed finding and print "
@@ -620,7 +620,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_proponent(s)
     s.set_defaults(func=_cmd_use_review, command_name="use review")
 
-    p = sub.add_parser("review", help="decisions on records, the record list and the review index (§5.1.5)")
+    p = sub.add_parser("review", help="decisions on records, the record list and the review index (§5.2.5)")
     rv = p.add_subparsers(dest="review_command", required=True, metavar="COMMAND")
     s = rv.add_parser("decide", help="append a decision to a record after checking the transition and the "
                                      "kind's closing requirements")
@@ -674,7 +674,7 @@ def main(argv: list[str] | None = None) -> int:
         return args.func(cfg, args)
     except (ConfigError, StoreError, LockError, JevUnavailable, ReviewError) as exc:
         pointer = f" {SKILL_POINTER}" if args.command == "put" and not isinstance(exc, ConfigError) else ""
-        # A §5.1.5 command names all of its words ("kblam challenge new: ..."); the older ones keep
+        # A §5.2.5 command names all of its words ("kblam challenge new: ..."); the older ones keep
         # their single word, as they always have.
         command = getattr(args, "command_name", None) or args.command
         print(f"kblam {command}: {exc}{pointer}", file=sys.stderr)

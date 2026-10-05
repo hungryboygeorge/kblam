@@ -1,4 +1,4 @@
-"""The record-ID registry, `.kblam/review-ids` (SPEC §5.1.6)."""
+"""The record-ID registry, `.kblam/review-ids` (SPEC §5.2.6)."""
 
 from __future__ import annotations
 

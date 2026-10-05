@@ -1,4 +1,4 @@
-"""The shared frame of every locked command and every write to the two roots (SPEC §5.1.6).
+"""The shared frame of every locked command and every write to the two roots (SPEC §5.2.6).
 
 `locked` takes `.kblam/lock`, recovers an interrupted write, and (for a mutating command) refuses a
 changed review root. `apply` writes a planned change in the SPEC's order: the journal when more than
@@ -40,7 +40,7 @@ def regenerate_indexes(cfg: Config) -> None:
 
 def mutation_refusal(cfg: Config) -> str | None:
     """Why a mutating command must refuse before reading anything else, or None: the review root in
-    kblam.toml differs from the one a format-2 tree.hash records (treehash.root_problem, SPEC §5.1.6),
+    kblam.toml differs from the one a format-2 tree.hash records (treehash.root_problem, SPEC §5.2.6),
     or the registry cannot be read (its ValueError message)."""
     try:
         registered = registry.read_ids(cfg)
@@ -78,7 +78,7 @@ def locked(cfg: Config, command: str, *, mutating: bool) -> Iterator[None]:
 
 def registry_after(cfg: Config, present: set[str], register: set[str]) -> set[str] | None:
     """The registry a write should leave, or None when it should not be written: the current registry
-    (or, when there is none, the IDs of the records present, per SPEC §5.1.6 "at its first write")
+    (or, when there is none, the IDs of the records present, per SPEC §5.2.6 "at its first write")
     plus `register`. None when that equals the registry on disk, or when there is no registry, no record
     is present and nothing is registered (a KB that has never had a record gets no registry file)."""
     current = registry.read_ids(cfg)

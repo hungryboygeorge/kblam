@@ -1,4 +1,4 @@
-"""Git pins (SPEC §5.1.2 Git pins): owning_worktree, oid_length, read_blob, verify_pin, auto_pin.
+"""Git pins (SPEC §5.2.2 Git pins): owning_worktree, oid_length, read_blob, verify_pin, auto_pin.
 
 Every test runs against repositories the fixtures build under tmp_path, with system and global Git
 config ignored: deterministic and offline. The gitpin calls under test must never change the source
@@ -107,7 +107,7 @@ def test_no_auto_pin_without_head(kb):
 
 
 def test_pin_in_the_repository_itself_is_dot(kb):
-    """repo "." is this repository's own worktree (SPEC §5.1.2 File references)."""
+    """repo "." is this repository's own worktree (SPEC §5.2.2 File references)."""
     cfg = kb.cfg
     repo = SourceRepo(kb.root, ".").init()
     repo.commit("evidence/note.md", "committed here\n", "note")

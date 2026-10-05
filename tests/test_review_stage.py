@@ -1,4 +1,4 @@
-"""Staging and reading review records (SPEC §5.1.5): `challenge new/edit/show/uses`, `task
+"""Staging and reading review records (SPEC §5.2.5): `challenge new/edit/show/uses`, `task
 new/edit/show`, `use review` and `review list`. Offline, deterministic: dates come from a fixed
 _today, and the source of a challenge is a nested Git repository built by the source_repo fixture."""
 
@@ -12,14 +12,14 @@ import pytest
 
 from conftest import (KBLAM_TOML, NO_EMBEDDINGS, PROMPT_TOML, SOURCE_REPO, TRACE_PATH, TRACE_TEXT,
                       dump_record, record_data)
-from kblam import journal, k12, k13, matching, records, review_stage, writes
+from kblam import journal, k13, k14, matching, records, review_stage, writes
 from kblam.decisions import subject_digest
 from kblam.finding import fingerprint
 from kblam.sources import sha256_hex
 from kblam.store import StoreError
 from kblam.view import load_view
 
-from test_k13 import (CLAIM, LINE3, NEW_TEXT, REVIEW, TRACE, add_finding, deciding,
+from test_k14 import (CLAIM, LINE3, NEW_TEXT, REVIEW, TRACE, add_finding, deciding,
                       put as install_record, scene, sc, use)
 
 TODAY = datetime.date(2026, 9, 28)
@@ -548,7 +548,7 @@ def relation_lines(kb, challenge_id: str = "SC-0001") -> list[str]:
 
 
 def excerpt_line(kb, extra: str = "") -> str:
-    """The reported line of the one excerpt of F-0001, with the finding path and line K13 gives it."""
+    """The reported line of the one excerpt of F-0001, with the finding path and line K14 gives it."""
     view, reader = scene(kb)
     finding = view.findings[0]
     match = matching.finding_matches(view, reader, finding)[0]
@@ -592,7 +592,7 @@ def test_a_range_overlap_stays_a_warning_even_when_a_use_covers_it(kb, source_re
     installed(kb, "CU", use(kb))                # a current use of that very excerpt
     view, reader = scene(kb)
     rec = next(r for r in view.records if r.id == "CU-0001")
-    assert k12.use_current(view, reader, rec) is True
+    assert k13.use_current(view, reader, rec) is True
     assert relation_lines(kb) == [f"{excerpt_line(kb)} range: warning; kblam edit F-0001"]
 
 
@@ -618,12 +618,12 @@ def test_challenge_uses_reports_nothing_for_a_confirmed_challenge_nothing_relate
     assert relation_lines(kb) == ["no finding excerpt or reference relates to SC-0001"]
 
 
-def test_challenge_relations_is_empty_for_a_challenge_k13_does_not_confirm(kb, source_repo):
+def test_challenge_relations_is_empty_for_a_challenge_k14_does_not_confirm(kb, source_repo):
     installed(kb, "SC", sc(source_repo, "open"))
     add_finding(kb, "3", LINE3)
     view, reader = scene(kb)
-    assert k13.challenge_relations(view, reader, "SC-0001") == []
-    assert k13.challenge_relations(view, reader, "SC-0009") == []
+    assert k14.challenge_relations(view, reader, "SC-0001") == []
+    assert k14.challenge_relations(view, reader, "SC-0009") == []
 
 
 def test_challenge_uses_refuses_an_unknown_or_malformed_challenge(kb):

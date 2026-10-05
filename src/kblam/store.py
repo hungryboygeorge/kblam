@@ -1,10 +1,10 @@
-"""Writes: ID allocation, staging (`new`, `edit`), `put`, `ack` and `index` (SPEC §7, §5.1.4, §5.1.6).
+"""Writes: ID allocation, staging (`new`, `edit`), `put`, `ack` and `index` (SPEC §7, §5.2.4, §5.2.6).
 
 Every locked command goes through `writes.locked`: `new` and `edit` stage only, so they take the lock
 without refusing a changed review root; `put`, `ack` and `index` are mutating, so they refuse one and
-recover an interrupted write first. `put` blocks on K1-K11 as before, on K13 only for an affected
-excerpt the installed finding did not already have affected, and never on K12 or K14 (SPEC §5.1.4
-"Where each rule blocks"); the tasks and uses it makes stale, the K13 errors it keeps and the errors it
+recover an interrupted write first. `put` blocks on K1-K11 as before, on K14 only for an affected
+excerpt the installed finding did not already have affected, and never on K13 or K15 (SPEC §5.2.4
+"Where each rule blocks"); the tasks and uses it makes stale, the K14 errors it keeps and the errors it
 does not refuse come back in `PutResult` for the CLI to report. Each write goes through `writes.apply`,
 which journals a change of more than one file and records the format-2 `tree.hash`.
 """
@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from kblam import k13, k14, matching, review, writes
+from kblam import k14, k15, matching, review, writes
 from kblam.check import Checker, CheckResult
 from kblam.config import Config
 from kblam.finding import (
@@ -68,10 +68,10 @@ class PutResult:
     review: list[review.ReviewItem] = field(default_factory=list) # review items open for this write
     unchecked: review.ReviewItem | None = None                    # set when Jev could not answer everything
     rejected_items: list[review.ReviewItem] = field(default_factory=list)  # recorded by a refused put (§6.4)
-    stale: list[str] = field(default_factory=list)                # CT/CU IDs this put makes stale (§5.1.4)
-    kept: list[Issue] = field(default_factory=list)               # K13 errors the put leaves in place
+    stale: list[str] = field(default_factory=list)                # CT/CU IDs this put makes stale (§5.2.4)
+    kept: list[Issue] = field(default_factory=list)               # K14 errors the put leaves in place
     remaining: list[Issue] = field(default_factory=list)          # candidate errors that neither refuse nor
-                                                                  # are kept K13 errors
+                                                                  # are kept K14 errors
 
     @property
     def rejected(self) -> bool:
@@ -233,7 +233,7 @@ def _check_edit_base(cfg: Config, finding_id: str, current: KBView, replaced: li
 
 
 def regenerate_index(cfg: Config) -> KBView:
-    """`kblam index`: rewrite INDEX.md from frontmatter and record tree.hash (format 2, SPEC §5.1.6)."""
+    """`kblam index`: rewrite INDEX.md from frontmatter and record tree.hash (format 2, SPEC §5.2.6)."""
     with writes.locked(cfg, "index", mutating=True):
         view = load_view(cfg)
         clean = clean_before_v2(cfg, view, bool(view.records))
@@ -318,8 +318,8 @@ def put(cfg: Config, source: Path, *, client_factory=None) -> PutResult:
     rewrite reports the dependents it left suspect, and validate fails until they are acked.
     Replacing an existing ID needs the record kblam edit wrote, matching the file as it is now.
     A refused write records a rejected item per rejecting verdict (§6.4).
-    K1-K11 refuse as before; K12 and K14 never do, and K13 refuses only for an excerpt the installed
-    finding did not already have affected (§5.1.4).
+    K1-K11 refuse as before; K13 and K15 never do, and K14 refuses only for an excerpt the installed
+    finding did not already have affected (§5.2.4).
     Jev is asked before the lock is taken; under the lock the candidates are recomputed against the
     current tree and only pairs it gained meanwhile are asked (SPEC §12 M5). `client_factory`
     builds the JevClient (tests pass one with a fake transport).
@@ -376,7 +376,7 @@ def _prepare(cfg: Config, source: Path) -> tuple[PutResult, KBView]:
     staged, stamped = _stamp_nulls(parse_finding(target, raw), others, display_path(cfg, source))
     files = {p: b for p, b in current.files.items() if p not in replaced}
     files[target] = staged.raw
-    # K12-K14 read the review records off the view, so the candidate carries the current ones over.
+    # K13-K15 read the review records off the view, so the candidate carries the current ones over.
     view = KBView(cfg=cfg, files=files, display={target: display_path(cfg, source)},
                   review_files=dict(current.review_files), review_symlinks=set(current.review_symlinks))
     view.files[view.index_path] = generate_index(view)
@@ -385,8 +385,8 @@ def _prepare(cfg: Config, source: Path) -> tuple[PutResult, KBView]:
                        removed=[p for p in replaced if p != target], stamped=stamped)
     issues = validate(view, focus=frozenset({finding_id}))
     found = errors(issues)
-    # K12 and K14 never refuse a finding put; K3 refuses only this finding's own dependents (its owner
-    # is the dependent, not the path K3 is displayed at); K13 refuses below (SPEC §5.1.4).
+    # K13 and K15 never refuse a finding put; K3 refuses only this finding's own dependents (its owner
+    # is the dependent, not the path K3 is displayed at); K14 refuses below (SPEC §5.2.4).
     result.issues = [i for i in found
                      if i.code not in REVIEW_CODES and (i.code != "K3" or i.owner == finding_id)]
     readers = SourceReader(cfg, current), SourceReader(cfg, view)
@@ -397,7 +397,7 @@ def _prepare(cfg: Config, source: Path) -> tuple[PutResult, KBView]:
     return result, current
 
 
-REVIEW_CODES = ("K12", "K13", "K14")  # the rules that refuse through their own scope, not the K1-K11 sweep
+REVIEW_CODES = ("K13", "K14", "K15")  # the rules that refuse through their own scope, not the K1-K11 sweep
 RETIRED_STATUSES = ("stale", "withdrawn")  # a put lists the tasks and uses it makes stale, not those already retired
 
 NEW_EXCERPT_MESSAGE = (
@@ -408,17 +408,17 @@ NEW_EXCERPT_MESSAGE = (
 
 def _newly_affected(result: PutResult, current: KBView, readers: tuple[SourceReader, SourceReader],
                     found: list[Issue]) -> list[Issue]:
-    """The K13 errors that refuse this put (SPEC §5.1.4 "Where each rule blocks"): the excerpts whose
+    """The K14 errors that refuse this put (SPEC §5.2.4 "Where each rule blocks"): the excerpts whose
     (challenge ID, canonical source key, tag_sha256) the installed finding did not already have affected,
-    reported at the tag line of the excerpt as K13 reports them. An excerpt is affected whether or not a
-    use covers it (SPEC §5.1.4), and K13 reports no error for one a current use covers, so the refusal is
-    synthesised from the same wording. The finding's other K13 errors - the excerpts it already had
-    affected - go to result.kept; K13 never refuses for those."""
+    reported at the tag line of the excerpt as K14 reports them. An excerpt is affected whether or not a
+    use covers it (SPEC §5.2.4), and K14 reports no error for one a current use covers, so the refusal is
+    synthesised from the same wording. The finding's other K14 errors - the excerpts it already had
+    affected - go to result.kept; K14 never refuses for those."""
     finding_id, view = result.finding_id, result.view
     reader_installed, reader_candidate = readers
-    installed = k13.affected_triples(current, reader_installed, finding_id)
-    affected = k13.affected_triples(view, reader_candidate, finding_id)
-    errors_here = [i for i in found if i.code == "K13" and i.owner == finding_id]
+    installed = k14.affected_triples(current, reader_installed, finding_id)
+    affected = k14.affected_triples(view, reader_candidate, finding_id)
+    errors_here = [i for i in found if i.code == "K14" and i.owner == finding_id]
     by_tag: dict[tuple[str, str], list[str]] = {}
     for challenge, key, tag in affected - installed:
         by_tag.setdefault((key, tag), []).append(challenge)
@@ -443,16 +443,16 @@ def _newly_affected(result: PutResult, current: KBView, readers: tuple[SourceRea
 
 def _new_excerpt_issue(written: Finding, finding_id: str, line: int, challenge: str,
                        ordinal: int) -> Issue:
-    """K13's refusal for a newly affected excerpt K13 reports no error for (a current use covers it, and a
-    use binds an installed finding, so the put that would install the excerpt is refused, SPEC §5.1.4).
+    """K14's refusal for a newly affected excerpt K14 reports no error for (a current use covers it, and a
+    use binds an installed finding, so the put that would install the excerpt is refused, SPEC §5.2.4).
     One issue per challenge, so the command each names is the one that would address that challenge."""
-    review = k13.USE_REVIEW.format(challenge=challenge, finding=finding_id, ordinal=ordinal)
-    return Issue(written.path, line, "K13", NEW_EXCERPT_MESSAGE.format(challenges=challenge, review=review),
+    review = k14.USE_REVIEW.format(challenge=challenge, finding=finding_id, ordinal=ordinal)
+    return Issue(written.path, line, "K14", NEW_EXCERPT_MESSAGE.format(challenges=challenge, review=review),
                  "error", finding_id)
 
 
 def _made_stale(result: PutResult, current: KBView, readers: tuple[SourceReader, SourceReader]) -> list[str]:
-    """The IDs of the CT and CU records this put makes stale (SPEC §5.1.4 "Where each rule blocks"),
+    """The IDs of the CT and CU records this put makes stale (SPEC §5.2.4 "Where each rule blocks"),
     in ID order: those bound to this finding whose binding held on the current view and no longer holds
     on the candidate. A task or use already stale or withdrawn is not listed."""
     reader_installed, reader_candidate = readers
@@ -465,7 +465,7 @@ def _made_stale(result: PutResult, current: KBView, readers: tuple[SourceReader,
             continue
         if rec.kind == "CT":
             # task_binding_problems returns the reasons the binding is broken, so [] means it holds
-            broke = not k14.task_binding_problems(current, rec) and k14.task_binding_problems(result.view, rec)
+            broke = not k15.task_binding_problems(current, rec) and k15.task_binding_problems(result.view, rec)
         else:
             broke = _finding_binding(current, data) and not _finding_binding(result.view, data)
         if broke:
@@ -475,7 +475,7 @@ def _made_stale(result: PutResult, current: KBView, readers: tuple[SourceReader,
 
 def _finding_binding(view: KBView, data: dict) -> bool:
     """Whether a CU's finding binding holds on this view: the finding exists once, and its K3
-    fingerprint and file sha256 are the ones the use bound (SPEC §5.1.3 "A use is current")."""
+    fingerprint and file sha256 are the ones the use bound (SPEC §5.2.3 "A use is current")."""
     found = [f for f in view.findings if f.file_id == data.get("finding") and isinstance(f.meta, dict)]
     if len(found) != 1:
         return False
@@ -484,7 +484,7 @@ def _finding_binding(view: KBView, data: dict) -> bool:
 
 
 def _record_order(rec_id: str) -> tuple[int, str]:
-    """Numeric ID order, as k14 and view.findings use it: CT-0009 before CT-00010."""
+    """Numeric ID order, as k15 and view.findings use it: CT-0009 before CT-00010."""
     number = rec_id[3:]
     return (int(number) if number.isdigit() else 0, rec_id)
 
@@ -512,7 +512,7 @@ def _put(cfg: Config, source: Path, checker: Checker) -> PutResult:
 
     clean = clean_before_v2(cfg, current, bool(current.records))
     # INDEX.md is written only when the put changes it (a body-only edit does not), so the journal lists
-    # the files this put really writes, as regenerate_index does (SPEC §5.1.6 "Interrupted writes").
+    # the files this put really writes, as regenerate_index does (SPEC §5.2.6 "Interrupted writes").
     index = ([(view.index_path, view.files[view.index_path])]
              if current.files.get(view.index_path) != view.files[view.index_path] else [])
     changes = [(target, view.files[target])] + [(old, None) for old in result.removed] + index

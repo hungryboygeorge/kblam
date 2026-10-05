@@ -18,7 +18,7 @@ CLAIM_B = "The motor warm-up drift settles within 90 seconds of power-on at 4000
 
 
 def recorded_digest(cfg) -> str | None:
-    """The digest `.kblam/tree.hash` records (format 2, SPEC §5.1.6), or None if there is none."""
+    """The digest `.kblam/tree.hash` records (format 2, SPEC §5.2.6), or None if there is none."""
     recorded = read_recorded(cfg)
     return None if recorded is None else recorded[2]
 

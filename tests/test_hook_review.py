@@ -1,9 +1,9 @@
-"""M6.10: the hooks guard the review root too (SPEC §8 items 1-3, §12 M6.10 test group 11).
+"""M6.11: the hooks guard the review root too (SPEC §8 items 1-3, §12 M6.11 test group 11).
 
 The review root (`research-review/` by default) is guarded like `findings/`: every write under it is
 denied, and a removal only for the root itself, a kind folder (`challenges`, `tasks`, `uses`), a
 record file (`SC-*.yaml`, `CT-*.yaml`, `CU-*.yaml`) or a glob that could name one of those, so a
-stray file there can still be deleted (that is how a K12 stray-file error is fixed). Under `.kblam/`,
+stray file there can still be deleted (that is how a K13 stray-file error is fixed). Under `.kblam/`,
 `.kblam/review-staging/` is exempt as `.kblam/staging/` is, and `.kblam/review-receipts/` is not. The
 Stop hook's format-2 digest covers findings/ and the review root. Offline and deterministic: the
 hook is driven exactly as tests/test_hook.py drives it.
@@ -194,7 +194,7 @@ def test_the_bash_removal_deny_reads_as_under_kblam_it_does(kb, monkeypatch, cap
 @pytest.mark.parametrize("command", [
     "rm research-review/INDEX.md",                          # the generated index is regenerable
     "rm research-review/notes.md",
-    "rm research-review/challenges/notes.md",               # a K12 stray: how it is fixed
+    "rm research-review/challenges/notes.md",               # a K13 stray: how it is fixed
     "rm research-review/challenges/*.txt",
     "rm -rf research-review/scratch/",
     "rm research-review/challenges/SC-0001.txt",
@@ -351,7 +351,7 @@ def test_removals_follow_the_configured_root(custom, monkeypatch, capsys):
 def test_pre_tool_use_on_a_review_path_imports_only_the_hook_code(kb):
     """SPEC §8: a PreToolUse call imports only the hook code, and validating a review path needs none
     of the validator, the Jev client or the record modules."""
-    banned = ("kblam.check", "kblam.cli", "kblam.jev", "kblam.k12", "kblam.k13", "kblam.k14", "kblam.records",
+    banned = ("kblam.check", "kblam.cli", "kblam.jev", "kblam.k13", "kblam.k14", "kblam.k15", "kblam.records",
               "kblam.review", "kblam.review_stage", "kblam.review_write", "kblam.rules", "kblam.store",
               "kblam.treehash", "kblam.view")
     probe = ("import json, sys; from kblam.entry import main; code = main(['hook', 'PreToolUse']); "
@@ -369,7 +369,7 @@ def test_pre_tool_use_on_a_review_path_imports_only_the_hook_code(kb):
 
 
 def test_stop_blocks_on_a_record_changed_out_of_band(review_kb, monkeypatch, capsys):
-    """The format-2 digest covers the review root (SPEC §5.1.6), so a hand-edited record reaches K12."""
+    """The format-2 digest covers the review root (SPEC §5.2.6), so a hand-edited record reaches K13."""
     review_kb.add("F-0001", "motor", E1)
     assert call("Stop", stop(review_kb), monkeypatch, capsys) == (0, None, "")  # the tree as kblam left it
     review_kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0009"))  # a hand edit
@@ -379,14 +379,14 @@ def test_stop_blocks_on_a_record_changed_out_of_band(review_kb, monkeypatch, cap
 
     assert code == 0
     assert "findings/ was changed outside kblam put" in reason
-    assert f"K12 {REVIEW}/challenges/SC-0001.yaml" in reason
+    assert f"K13 {REVIEW}/challenges/SC-0001.yaml" in reason
     assert "does not match the file name's ID" in reason
     assert reason.endswith(POINTER)
 
 
 def test_stop_is_silent_while_a_format_2_tree_hash_matches_the_review_root(review_kb, monkeypatch, capsys):
     """A matching tree.hash stays on the fast path: the hash is kblam's record of the tree, and a
-    later out-of-band change is what Stop validates (SPEC §5.1.4 decides this deliberately)."""
+    later out-of-band change is what Stop validates (SPEC §5.2.4 decides this deliberately)."""
     review_kb.add("F-0001", "motor", E1)
     review_kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0009"))
     review_kb.reindex()                              # the tree as kblam would have left it

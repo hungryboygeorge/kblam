@@ -1,4 +1,4 @@
-"""Review records: SC- challenges, CT- tasks, CU- uses (SPEC §5.1.2, §5.1.3 field tables).
+"""Review records: SC- challenges, CT- tasks, CU- uses (SPEC §5.2.2, §5.2.3 field tables).
 
 Parsing and structural checks only: no filesystem or git access here.
 """
@@ -22,7 +22,7 @@ from kblam.sources import FileRef
 KINDS = {"SC": "challenges", "CT": "tasks", "CU": "uses"}   # ID prefix -> kind folder
 ID_RE = re.compile(r"^(SC|CT|CU)-\d{4,}$")
 FILENAME_RE = re.compile(r"^((SC|CT|CU)-\d{4,})\.yaml$")
-NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]*")        # fullmatch; case-sensitive (SPEC §5.1.2)
+NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]*")        # fullmatch; case-sensitive (SPEC §5.2.2)
 HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 FINGERPRINT_RE = re.compile(r"^[0-9a-f]{8}$")
 OID_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -117,29 +117,29 @@ def parse_record(path: str, raw: bytes) -> Record:
 
 
 def schema_code(kind: str, key: str) -> str:
-    """K12 for §5.1.2 fields (including proponent), K14 for a CT's §5.1.3 fields."""
-    return "K12" if kind != "CT" or key in COMMON_KEYS else "K14"
+    """K13 for §5.2.2 fields (including proponent), K15 for a CT's §5.2.3 fields."""
+    return "K13" if kind != "CT" or key in COMMON_KEYS else "K15"
 
 
 def schema_issues(rec: Record, *, staged: bool) -> list[Issue]:
-    """Structural checks of the §5.1.2 and §5.1.3 field tables, in field order.
+    """Structural checks of the §5.2.2 and §5.2.3 field tables, in field order.
 
     Unknown and missing keys; types (booleans are not integers); non-empty strings; names (NAME_RE);
     line and offset ranges; hex and object-ID syntax; repo/commit/blob all set or all null; path syntax
     (paths.syntax_problem, no filesystem); the kind's vocabularies; `schema` other than 1 gives
     "unsupported schema version N"; `id` equal to the filename's ID; `outcomes` with exactly its three
     keys; decision entries (DECISION_KEYS; evidence entries are file references plus `locator` and
-    `provenance`; the provenance vocabulary is checked by K12, which has the config). Blank values ("",
+    `provenance`; the provenance vocabulary is checked by K13, which has the config). Blank values ("",
     null, [] where content is required) are errors unless `staged`, where they are allowed.
-    Every issue: code "K12" (K14 for a CT's §5.1.3 fields, excluding proponent), level "error",
+    Every issue: code "K13" (K15 for a CT's §5.2.3 fields, excluding proponent), level "error",
     owner rec.id or "",
     path rec.path, line rec.key_line(<top-level key>) or 0.
     """
     if rec.data is None:
-        return [Issue(rec.path, 0, "K12", rec.error or "record did not parse", "error", rec.id or "")]
+        return [Issue(rec.path, 0, "K13", rec.error or "record did not parse", "error", rec.id or "")]
     kind = rec.kind
     if kind not in KEYS:
-        return []   # not a record at all: how the review root names its files is K12's own check (§5.1.4)
+        return []   # not a record at all: how the review root names its files is K13's own check (§5.2.4)
 
     data = rec.data
     issues: list[Issue] = []
@@ -158,7 +158,7 @@ def schema_issues(rec: Record, *, staged: bool) -> list[Issue]:
 
     for key in data:
         if key not in KEYS[kind]:
-            add(key, f"unknown key {key!r}", "K12")     # no field of the kind's table allows it
+            add(key, f"unknown key {key!r}", "K13")     # no field of the kind's table allows it
     for key in KEYS[kind]:
         if key == "schema":
             continue
@@ -188,7 +188,7 @@ def file_ref(mapping: dict) -> FileRef:
     return FileRef(*(mapping.get(key) for key in REF_KEYS))
 
 
-# --- values (SPEC §5.1.2 Values) ---------------------------------------------------------------
+# --- values (SPEC §5.2.2 Values) ---------------------------------------------------------------
 
 
 def _is_int(value) -> bool:
@@ -201,7 +201,7 @@ def _missing(value) -> bool:
 
 
 def _blank(value) -> bool:
-    """No content: `_missing`, or an empty list or mapping (§5.1.2 Blank values)."""
+    """No content: `_missing`, or an empty list or mapping (§5.2.2 Blank values)."""
     return _missing(value) or (isinstance(value, (list, dict)) and not value)
 
 
@@ -377,7 +377,7 @@ def _check_finding_ids(rec, top_key, prefix, value, staged, add, argument):
 
 
 def _ref_mapping(rec, top_key, prefix, mapping, staged, add, extra_keys=()):
-    """One file reference (SPEC §5.1.2): REF_KEYS and the caller's extra keys, plus the pin rule."""
+    """One file reference (SPEC §5.2.2): REF_KEYS and the caller's extra keys, plus the pin rule."""
     for name in mapping:
         if name not in REF_KEYS and name not in extra_keys:
             add(top_key, f"{prefix}: unknown key {name!r}")

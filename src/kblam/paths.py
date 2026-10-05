@@ -1,6 +1,6 @@
-"""Paths in review records, verbatim tags and decision evidence (SPEC §5.1.2 Paths).
+"""Paths in review records, verbatim tags and decision evidence (SPEC §5.2.2 Paths).
 
-One function gives every path its canonical key; K10, the records, decision evidence and K13 all
+One function gives every path its canonical key; K10, the records, decision evidence and K14 all
 use it. Records keep the path as written, for display.
 """
 
@@ -93,7 +93,7 @@ def canonical_key(cfg: Config, raw: str) -> str:
 def protected(cfg: Config, resolved: Path) -> str | None:
     """The protected root a resolved target is or lies under, or None: 'findings' (cfg.findings_dir),
     'review' (cfg.review_dir), 'state' (.kblam/) or 'history' (a cfg.history_dirs folder). Such a path
-    is never a source or primary evidence (SPEC §5.1.2). Compared as resolved paths, case-insensitively
+    is never a source or primary evidence (SPEC §5.2.2). Compared as resolved paths, case-insensitively
     on Windows."""
     target = Path(resolved).resolve(strict=False)
     root = cfg.repo_root.resolve()

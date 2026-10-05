@@ -1,4 +1,4 @@
-"""The shared write frame (SPEC §5.1.6): `writes.locked` and `writes.apply`.
+"""The shared write frame (SPEC §5.2.6): `writes.locked` and `writes.apply`.
 
 `locked` is `.kblam/lock` plus journal recovery plus (for a mutating command) the root and registry
 refusal; `apply` writes a planned change in the SPEC's order and journals a change of more than one
@@ -44,7 +44,7 @@ def clean_now(kb) -> bool:
 
 
 def test_a_locked_command_recovers_an_interrupted_write(kb, capsys):
-    """SPEC §5.1.6 Interrupted writes: the next command that takes the lock recovers first."""
+    """SPEC §5.2.6 Interrupted writes: the next command that takes the lock recovers first."""
     kb.add("F-0001", "sensor", CLAIM_A)
     kb.write(SC, record_text("SC"))
     recorded = (kb.cfg.state_dir / "tree.hash").read_bytes()
@@ -96,7 +96,7 @@ def test_a_failed_recovery_keeps_the_journal_and_refuses_the_command(kb, monkeyp
 
 
 def test_a_changed_review_root_refuses_a_mutating_command_only(kb):
-    """SPEC §5.1.6: every mutating command refuses a changed root; staging commands do not."""
+    """SPEC §5.2.6: every mutating command refuses a changed root; staging commands do not."""
     kb.add("F-0001", "sensor", CLAIM_A)
     kb.write(SC, record_text("SC"))
     kb.write(".kblam/tree.hash", format_line("research-notes", ZERO64))
@@ -118,7 +118,7 @@ def test_an_unreadable_registry_refuses_a_mutating_command(kb):
 
 @pytest.mark.parametrize("first", ["index", "ack", "put"])
 def test_the_first_write_after_a_clone_recreates_the_registry(kb, first):
-    """SPEC §5.1.6: kblam creates the registry from the records present at its first write after a clone."""
+    """SPEC §5.2.6: kblam creates the registry from the records present at its first write after a clone."""
     kb.add("F-0001", "sensor", CLAIM_A)
     kb.add("F-0002", "motor", CLAIM_B, topic="motor", extra="depends_on:\n  F-0001: deadbeef\n")
     kb.write(SC, record_text("SC"))
@@ -137,7 +137,7 @@ def test_the_first_write_after_a_clone_recreates_the_registry(kb, first):
 
 
 def test_a_kb_with_no_records_gets_no_registry(kb):
-    """SPEC §5.1.6: the registry appears only once a record is present, so a plain KB never gains one."""
+    """SPEC §5.2.6: the registry appears only once a record is present, so a plain KB never gains one."""
     kb.add("F-0001", "sensor", CLAIM_A)
     assert registry.read_ids(kb.cfg) is None
 
@@ -160,7 +160,7 @@ def test_registry_after_is_none_until_a_record_is_present(kb):
 
 
 def test_apply_advances_tree_hash_and_writes_in_the_specs_order(kb, monkeypatch):
-    """SPEC §5.1.6: the journal first, then records and findings, then indexes, then the registry."""
+    """SPEC §5.2.6: the journal first, then records and findings, then indexes, then the registry."""
     kb.add("F-0001", "sensor", CLAIM_A)
     kb.write(SC, record_text("SC"))
     kb.reindex()                                          # the fixture accepts the tree, as --record would

@@ -1,4 +1,4 @@
-"""SPEC §12 M6.10 group 10: concurrency and interrupted writes (Acceptance 6)."""
+"""SPEC §12 M6.11 group 10: concurrency and interrupted writes (Acceptance 6)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-import m610_helpers as m
+import m611_helpers as m
 from conftest import KB, SourceRepo
 from kblam import lock, records, store, writes
 from kblam.finding import yaml_rt
@@ -152,7 +152,7 @@ def test_changed_challenge_refuses_inspected_digest_then_fresh_digest_succeeds(k
     .kblam/tree.hash}; pin changes {research-review/challenges/SC-0001.yaml,
     .kblam/tree.hash}. validate exits 0, OK (0 findings); changes none.
     Every command leaves source bytes, HEAD, index and refs unchanged; fixture commit
-    before pin is outside command windows. No K12/K13/K14 diagnostic remains.
+    before pin is outside command windows. No K13/K14/K15 diagnostic remains.
     """
     if command == "pin":
         source_repo.write(m.TRACE_PATH, m.TRACE_TEXT + "A new final line.\n")
@@ -472,7 +472,7 @@ def race(kb, source_repo, tmp_path, left, right, left_changes, right_changes):
     bootstrap.write_text(
         "import sys, json\n"
         f"sys.path.insert(0, {str(Path(__file__).parent)!r})\n"
-        "from test_m610_group10 import race_worker\n"
+        "from test_m611_group10 import race_worker\n"
         "race_worker(*sys.argv[1:5], json.loads(sys.argv[5]))\n",
         encoding="utf-8", newline="\n")
     processes = []

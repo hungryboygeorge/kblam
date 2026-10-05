@@ -303,7 +303,7 @@ def test_invalid_kblam_toml_stops_init_before_writing(repo, capsys, no_hook_chec
 
 def test_an_unreadable_registry_is_refused_without_a_traceback(repo, capsys, no_hook_check):
     """The findings index step's writes.locked (mutating) runs inside init's try, so store's refusal (SPEC
-    §5.1.6) is reported, not raised, and it comes before that step writes the index."""
+    §5.2.6) is reported, not raised, and it comes before that step writes the index."""
     assert kblam_init(capsys)[0] == 0
     (repo / "findings" / "INDEX.md").unlink()                     # so init writes the index again
     (repo / ".kblam").mkdir(exist_ok=True)

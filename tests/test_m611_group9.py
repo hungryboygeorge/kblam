@@ -1,4 +1,4 @@
-"""M6.10 group 9: root integrity and additive upgrades (Acceptance 7).
+"""M6.11 group 9: root integrity and additive upgrades (Acceptance 7).
 
 Every CLI call has its own whole-KB and source-repository write window. Init's pre-commit
 hook is included as well: m.tree deliberately omits Git administrative files.
@@ -15,7 +15,7 @@ from dataclasses import asdict
 
 import pytest
 
-import m610_helpers as m
+import m611_helpers as m
 from conftest import KB, SourceRepo, TRACE_PATH, TRACE_TEXT, ZERO64, record_data
 from kblam import init, records, treehash
 from kblam.finding import yaml_rt
@@ -34,7 +34,7 @@ SC_STAGE = ".kblam/review-staging/SC-0001.yaml"
 SC_RECEIPT = ".kblam/review-receipts/SC-0001.json"
 ROOT_MESSAGE = ("the review root changed from research-review to research-notes in kblam.toml; "
                 "schema 1 fixes it at init")
-MISSING_MESSAGE = ("K12 research-notes/challenges/SC-0001.yaml: SC-0001 is missing from "
+MISSING_MESSAGE = ("K13 research-notes/challenges/SC-0001.yaml: SC-0001 is missing from "
                    "research-notes/; records are never deleted or renamed; restore it from git\n")
 INIT_PATHS = {"kblam.toml", "findings/INDEX.md", REVIEW_INDEX, ".gitattributes", ".gitignore",
               ".claude/rules/kblam-findings.md", ".claude/skills/kblam-write/SKILL.md",
@@ -202,7 +202,7 @@ def test_format_2_root_change_refuses_every_mutation(kb, source_repo, monkeypatc
     .kblam/pairs.sqlite and .kblam/review.jsonl; every other mutation changes none (D47/D50:
     Jev check work precedes the lock). Neither root, the registry nor tree.hash changes.
     init prints only its header and kept config before refusing. validate afterwards exits 1
-    with K12 root-change and missing SC-0001 diagnostics; changes none. Source unchanged per call.
+    with K13 root-change and missing SC-0001 diagnostics; changes none. Source unchanged per call.
     """
     path = new_challenge(kb, source_repo)
     put_challenge(kb, source_repo, path)
@@ -227,7 +227,7 @@ def test_format_2_root_change_refuses_every_mutation(kb, source_repo, monkeypatc
                  if name in {"record", "forget-missing"} else set())
     call(kb, source_repo, argv, changed=permitted, code=1, out=expected_out,
          err=f"kblam {command}: {ROOT_MESSAGE}{pointer}\n")
-    validate(kb, source_repo, code=2, diagnostics=f"K12 kblam.toml: {ROOT_MESSAGE}\n" + MISSING_MESSAGE)
+    validate(kb, source_repo, code=2, diagnostics=f"K13 kblam.toml: {ROOT_MESSAGE}\n" + MISSING_MESSAGE)
 
 
 @pytest.mark.parametrize("hash_format", ["format-1", "missing"])
@@ -237,7 +237,7 @@ def test_legacy_or_missing_hash_reports_ids_missing_from_changed_root(kb, source
     .kblam/review-receipts/SC-0001.json) and put (exit 0/destination;
     research-review/challenges/SC-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
     .kblam/tree.hash and staged removal). Then format-1 or absent tree.hash stores no root and
-    kblam.toml is hand-edited to research-notes. validate (no actor) exits 1, reports only K12
+    kblam.toml is hand-edited to research-notes. validate (no actor) exits 1, reports only K13
     SC-0001 missing from research-notes, and changes none; repeating it has the same outcome.
     Source unchanged per call; the old record and registry remain, no recategorisation occurs.
     """
@@ -349,7 +349,7 @@ def test_update_preserves_a_populated_review_index(fresh_repo, hand_edited):
     With the populated index generated or hand-edited, two init --update calls (no actor) exit
     0, say INDEX.md exists; not regenerated, change none. A hand edit also keeps tree.hash
     with the changed-outside-kblam note. validate after each update changes none: exit 0/OK
-    for the generated index, exit 1/K12 INDEX.md differs for the hand edit. Source unchanged.
+    for the generated index, exit 1/K13 INDEX.md differs for the hand edit. Source unchanged.
     """
     kb, source_repo = fresh_repo
     initialize(kb, source_repo)
@@ -364,7 +364,7 @@ def test_update_preserves_a_populated_review_index(fresh_repo, hand_edited):
             if hand_edited else ""))
         assert (kb.root / REVIEW_INDEX).read_bytes() == populated
         validate(kb, source_repo, code=int(hand_edited), diagnostics=(
-            "K12 research-review/INDEX.md: INDEX.md differs from the generated review index; it is "
+            "K13 research-review/INDEX.md: INDEX.md differs from the generated review index; it is "
             "never edited by hand. Run kblam review index to regenerate it\n" if hand_edited else ""))
 
 

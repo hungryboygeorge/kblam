@@ -1,6 +1,6 @@
 """`kblam init [--update]` and the review root: the review INDEX.md, the record-ID registry and the
-format-2 tree.hash (SPEC §11 step 6, §12 M6.5 "As built" order, §5.1.6 "Record-ID registry",
-"tree.hash, format 2" and "Upgrade", §12 M6.10 test group 9).
+format-2 tree.hash (SPEC §11 step 6, §12 M6.5 "As built" order, §5.2.6 "Record-ID registry",
+"tree.hash, format 2" and "Upgrade", §12 M6.11 test group 9).
 
 Init runs in a fresh `git init` repository under tmp_path (the fixture is test_init's). Nothing here
 reaches Jev or the network: every validation is `rules.validate`, which asks no model. The hook check is
@@ -137,7 +137,7 @@ def test_a_fresh_repo_gets_both_indexes_a_registry_free_tree_hash(repo, capsys, 
     assert (repo / REVIEW_INDEX).read_bytes() == generate_review_index(load_view(kb.cfg))
     assert treehash.read_recorded(kb.cfg) == (2, REVIEW, treehash.tree_digest_v2(load_view(kb.cfg)))
     assert not (repo / REGISTRY).exists()
-    assert rules.errors(rules.validate(load_view(kb.cfg))) == []      # K12 is clean over the new index
+    assert rules.errors(rules.validate(load_view(kb.cfg))) == []      # K13 is clean over the new index
 
 
 def test_a_second_update_changes_nothing(repo, capsys, no_hook_check):
@@ -179,7 +179,7 @@ def test_a_populated_review_index_is_never_replaced(repo, capsys, no_hook_check)
 
 
 def test_the_registry_is_created_from_the_records_present(repo, capsys, no_hook_check):
-    """SPEC §5.1.6 "Record-ID registry": created from the records present, with no report line of its own."""
+    """SPEC §5.2.6 "Record-ID registry": created from the records present, with no report line of its own."""
     assert kblam_init(capsys)[0] == 0
     add_record(repo, "SC")
     add_record(repo, "CT")
@@ -206,7 +206,7 @@ def test_a_registry_already_there_is_left_as_it_is(repo, capsys, no_hook_check):
 
 
 def test_an_interrupted_write_is_recovered_before_tree_hash_is_read(repo, capsys, no_hook_check):
-    """SPEC §5.1.6 "Interrupted writes": recovery restores tree.hash to the journal's value, and init
+    """SPEC §5.2.6 "Interrupted writes": recovery restores tree.hash to the journal's value, and init
     reads the file after it, so it reports `kept` instead of recording over the restored value."""
     assert kblam_init(capsys)[0] == 0
     ensure_kb(repo)
@@ -251,7 +251,7 @@ def test_a_matched_format_2_tree_hash_records_inits_own_writes(repo, capsys, no_
 
 
 def test_a_format_1_tree_hash_migrates_when_the_findings_tree_matches(repo, capsys, no_hook_check):
-    """SPEC §5.1.6 "Upgrade": format 2 only from a matching findings tree and a clean validation, and Jev
+    """SPEC §5.2.6 "Upgrade": format 2 only from a matching findings tree and a clean validation, and Jev
     state, `R-`/`U-` items and finding text are untouched."""
     assert kblam_init(capsys)[0] == 0
     kb = ensure_kb(repo)
@@ -293,7 +293,7 @@ def test_a_created_findings_index_says_nothing_about_tree_hash(repo, capsys, no_
 
 def test_a_format_1_tree_hash_is_kept_after_an_out_of_band_change(repo, capsys, no_hook_check):
     """A format-1 digest the findings tree no longer matches is left for `kblam validate --record`, and
-    `kept` does not change the exit status (SPEC §5.1.6 "Upgrade")."""
+    `kept` does not change the exit status (SPEC §5.2.6 "Upgrade")."""
     assert kblam_init(capsys)[0] == 0
     ensure_kb(repo)
     legacy = go_legacy(repo, ZERO64)
@@ -326,7 +326,7 @@ def test_a_format_1_tree_hash_is_kept_when_validation_fails(repo, capsys, no_hoo
 
 
 def test_an_open_review_item_blocks_the_format_1_migration(repo, capsys, no_hook_check):
-    """SPEC §5.1.6 "Upgrade": the matching digest is not enough, an open item keeps the file as it is.
+    """SPEC §5.2.6 "Upgrade": the matching digest is not enough, an open item keeps the file as it is.
     The item's fingerprints are F-0001's current ones, so reconcile does not close it."""
     assert kblam_init(capsys)[0] == 0
     kb = ensure_kb(repo)
@@ -350,7 +350,7 @@ def test_an_open_review_item_blocks_the_format_1_migration(repo, capsys, no_hook
 
 
 def test_a_missing_tree_hash_with_records_present_is_not_bootstrapped(repo, capsys, no_hook_check):
-    """SPEC §8, §5.1.6: a missing tree.hash is bootstrapped only while the review root holds no records."""
+    """SPEC §8, §5.2.6: a missing tree.hash is bootstrapped only while the review root holds no records."""
     assert kblam_init(capsys)[0] == 0
     ensure_kb(repo)
     add_record(repo, "SC")
@@ -366,7 +366,7 @@ def test_a_missing_tree_hash_with_records_present_is_not_bootstrapped(repo, caps
 
 
 def test_a_root_change_without_records_is_recorded(repo, capsys, no_hook_check):
-    """SPEC §5.1.6: while neither root holds a record and the registry is empty, init records the new
+    """SPEC §5.2.6: while neither root holds a record and the registry is empty, init records the new
     root, and the old root's index is left as it was."""
     assert kblam_init(capsys)[0] == 0
     kb = ensure_kb(repo)
@@ -385,7 +385,7 @@ def test_a_root_change_without_records_is_recorded(repo, capsys, no_hook_check):
 
 
 def test_a_root_change_with_records_refuses_and_writes_nothing(repo, capsys, no_hook_check):
-    """SPEC §5.1.6: the root is fixed at init while a record exists; the refusal changes nothing."""
+    """SPEC §5.2.6: the root is fixed at init while a record exists; the refusal changes nothing."""
     assert kblam_init(capsys)[0] == 0
     kb = ensure_kb(repo)
     record = add_record(repo, "SC")

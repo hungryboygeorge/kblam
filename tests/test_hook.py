@@ -282,7 +282,7 @@ def test_stop_after_a_clean_out_of_band_change_is_silent_and_leaves_tree_hash(hk
 
 
 def test_stop_validates_when_tree_hash_is_in_the_old_format(hkb, monkeypatch, capsys):
-    """SPEC §5.1.6 Upgrade: a bare hex tree.hash never matches, so the tree counts as changed and Stop runs
+    """SPEC §5.2.6 Upgrade: a bare hex tree.hash never matches, so the tree counts as changed and Stop runs
     the rules; the hook leaves the file as it is."""
     hkb.add("F-0001", "motor", E1)
     (hkb.findings / "calibration").mkdir(exist_ok=True)
@@ -299,7 +299,7 @@ def test_stop_validates_when_tree_hash_is_in_the_old_format(hkb, monkeypatch, ca
 
 
 def test_stop_validates_a_stray_in_the_review_root(hkb, monkeypatch, capsys):
-    """The format-2 digest covers the review root too (SPEC §5.1.6), so an out-of-band file there reaches K12."""
+    """The format-2 digest covers the review root too (SPEC §5.2.6), so an out-of-band file there reaches K13."""
     hkb.add("F-0001", "motor", E1)
     assert call("Stop", stop(hkb), monkeypatch, capsys) == (0, None, "")
     recorded = read_recorded(hkb.cfg)
@@ -308,7 +308,7 @@ def test_stop_validates_a_stray_in_the_review_root(hkb, monkeypatch, capsys):
     code, answer, _ = call("Stop", stop(hkb), monkeypatch, capsys)
 
     assert code == 0
-    assert "K12" in blocked(answer) and "notes.md" in blocked(answer)
+    assert "K13" in blocked(answer) and "notes.md" in blocked(answer)
     assert read_recorded(hkb.cfg) == recorded
 
 

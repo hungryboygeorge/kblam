@@ -1,4 +1,4 @@
-"""SPEC §12 M6.10 group 11: exit status, Stop and review-path enforcement."""
+"""SPEC §12 M6.11 group 11: exit status, Stop and review-path enforcement."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-import m610_helpers as m
+import m611_helpers as m
 from conftest import record_data
 from kblam import records
 from kblam.finding import yaml_rt
@@ -123,13 +123,13 @@ def u23k_hook(kb, source_repo, monkeypatch, event, payload, *, out="", paths=())
 
 
 def u23k_warning(path=U23K_FINDING):
-    return (f"K13 warning {path}:15: the cited range {m.TRACE}:3-3 overlaps lines 3-3 of "
+    return (f"K14 warning {path}:15: the cited range {m.TRACE}:3-3 overlaps lines 3-3 of "
             "SC-0001's assertion without quoting it; check that the excerpt does not rely on the "
             "challenged text (kblam challenge uses SC-0001 lists what SC-0001 affects)\n")
 
 
-def u23k_k13(source_repo):
-    return (f"K13 {U23K_FINDING}:15: SC-0001 challenges this quoted assertion at "
+def u23k_k14(source_repo):
+    return (f"K14 {U23K_FINDING}:15: SC-0001 challenges this quoted assertion at "
             f"{m.TRACE}@{source_repo.blob(m.TRACE_PATH)[:12]}:3-3; edit the finding or have this use "
             "reviewed (kblam use review SC-0001 F-0001 1 --by NAME --proponent NAME). "
             "K10 is checked separately.\n")
@@ -142,14 +142,14 @@ def test_warnings_only_validate_finding_put_and_stop_exit_zero(kb, source_repo, 
     {.kblam/review-staging/SC-0001.yaml, .kblam/review-receipts/SC-0001.json}; put SC (0,
     installed path): {research-review/challenges/SC-0001.yaml, research-review/INDEX.md,
     .kblam/review-ids, .kblam/tree.hash, .kblam/review-staging/SC-0001.yaml}; decide confirmed
-    --by reviewer-b (0, confirmed + K13 range warning): {research-review/challenges/SC-0001.yaml,
-    research-review/INDEX.md, .kblam/tree.hash}. validate (0, K13 warning and OK): none.
+    --by reviewer-b (0, confirmed + K14 range warning): {research-review/challenges/SC-0001.yaml,
+    research-review/INDEX.md, .kblam/tree.hash}. validate (0, K14 warning and OK): none.
     edit F-0001 (no --by, 0, staged path): {.kblam/staging/F-0001-ratio.md,
-    .kblam/staging/F-0001.edit-base.json}; finding put (no --by, 0, installed path + K13 warning + disabled Jev):
+    .kblam/staging/F-0001.edit-base.json}; finding put (no --by, 0, installed path + K14 warning + disabled Jev):
     {findings/calibration/F-0001-ratio.md, .kblam/staging/F-0001-ratio.md, .kblam/tree.hash,
     .kblam/staging/F-0001.edit-base.json, .kblam/pairs.sqlite, .kblam/review.jsonl,
     .kblam/checks.jsonl}. validate afterwards (0,
-    same K13 warning and OK): none. An out-of-band body edit forces Stop's validating path;
+    same K14 warning and OK): none. An out-of-band body edit forces Stop's validating path;
     hook Stop (no --by, 0, silent): {.kblam/checks.jsonl}; validate afterwards
     (0, warning and OK): none.
     Every CLI call preserves the source's working bytes, HEAD, index and refs.
@@ -239,16 +239,16 @@ def test_matching_tree_hash_after_confirmation_leaves_stop_silent_while_validate
     .kblam/review-receipts/SC-0001.json}; put open SC (0, installed path):
     {research-review/challenges/SC-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
     .kblam/tree.hash, .kblam/review-staging/SC-0001.yaml}; decide confirmed --by reviewer-b
-    (0, confirmed, now affects F-0001, K13 quoted assertion, validate still fails):
+    (0, confirmed, now affects F-0001, K14 quoted assertion, validate still fails):
     {research-review/challenges/SC-0001.yaml, research-review/INDEX.md, .kblam/tree.hash}.
     hook Stop and SubagentStop (no --by, 0, silent): each none, since kblam recorded the tree.
-    validate afterwards (no --by, 1, K13 challenges this quoted assertion and 1 error): none.
+    validate afterwards (no --by, 1, K14 challenges this quoted assertion and 1 error): none.
     Every call preserves the source's bytes, HEAD, index and refs.
     """
     m.quoting_finding(kb, "F-0001", source_repo, "3-3")
     m.accept_tree(kb)
     u23k_challenge(kb, source_repo)
-    issue = u23k_k13(source_repo)
+    issue = u23k_k14(source_repo)
     u23k_confirm(kb, source_repo, issues=issue, affected=True)
     for event in ("Stop", "SubagentStop"):
         u23k_hook(kb, source_repo, monkeypatch, event, {"stop_hook_active": False})

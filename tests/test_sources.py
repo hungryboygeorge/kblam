@@ -1,4 +1,4 @@
-"""File references and the one source reader per validation (SPEC §5.1.2 File references, §5.1.6).
+"""File references and the one source reader per validation (SPEC §5.2.2 File references, §5.2.6).
 
 Every test runs against repositories the fixtures build under tmp_path, with system and global Git
 config ignored: deterministic and offline. `reads` is asserted throughout: each identity is read
@@ -68,7 +68,7 @@ def test_a_current_source_is_the_working_file(kb):
 
 
 def test_a_git_pin_survives_a_changed_working_file(kb, source_repo):
-    """SPEC §5.1.2: the verified blob is read with git cat-file, never by a checkout."""
+    """SPEC §5.2.2: the verified blob is read with git cat-file, never by a checkout."""
     sha, pin = trace_pin(source_repo)
     raw = source_repo.kb_path()
     source_repo.write(TRACE_PATH, TRACE_TEXT + "Row 104: added after the commit.\n")
@@ -97,7 +97,7 @@ def test_a_snapshot_pins_bytes_the_working_file_does_not_hold(kb):
 
 
 def test_a_snapshot_with_other_bytes_is_no_copy(kb):
-    """SPEC §5.1.2: a snapshot is checked by content hash, so another revision is not the copy."""
+    """SPEC §5.2.2: a snapshot is checked by content hash, so another revision is not the copy."""
     raw = "evidence/2026-09-22-ratio/log.txt"
     kb.write("evidence/2026-09-22-ratio/snapshots/log-v2.txt", b"revision 3\n")
     resolved = reader_for(kb).resolve(ref(raw, digest(b"revision 2\n"),
@@ -206,7 +206,7 @@ def test_a_directory_is_refused(kb):
 
 
 def test_non_string_fields_do_not_raise(kb, source_repo):
-    """records.schema_issues reports bad types (SPEC §5.1.2), so resolve() only has to stay standing."""
+    """records.schema_issues reports bad types (SPEC §5.2.2), so resolve() only has to stay standing."""
     sha, pin = trace_pin(source_repo)
     raw = source_repo.kb_path()
     reader = reader_for(kb)
@@ -229,7 +229,7 @@ def test_non_string_fields_do_not_raise(kb, source_repo):
 
 
 def test_two_versions_of_one_path_are_distinct_entries(kb, source_repo):
-    """SPEC §5.1.6: a blob is keyed by (worktree toplevel, object ID), so two revisions never share."""
+    """SPEC §5.2.6: a blob is keyed by (worktree toplevel, object ID), so two revisions never share."""
     raw = source_repo.kb_path()
     first, first_blob = source_repo.head(), source_repo.blob(TRACE_PATH)
     second_text = TRACE_TEXT + "Row 104: bytes 0x40 0x41\n"
@@ -261,7 +261,7 @@ def test_a_second_resolve_adds_no_reads(kb, source_repo):
 
 
 def test_a_basis_entry_on_the_source_is_read_at_the_sources_pin(kb, source_repo):
-    """SPEC §5.1.3 Basis: an entry with the source's key and no pin of its own follows the source's pin,
+    """SPEC §5.2.3 Basis: an entry with the source's key and no pin of its own follows the source's pin,
     so checking out another commit does not make it stale."""
     sha, pin = trace_pin(source_repo)
     raw = source_repo.kb_path()
@@ -311,7 +311,7 @@ def test_another_path_is_not_given_the_sources_pin(kb, source_repo):
 
 
 def test_a_findings_path_comes_from_the_view(kb):
-    """SPEC §5.1.6: findings/ is never a source, so its bytes are the view's, not the disk's."""
+    """SPEC §5.2.6: findings/ is never a source, so its bytes are the view's, not the disk's."""
     path = "findings/calibration/F-0001-ratio.md"
     kb.add("F-0001", "ratio", "The two curves agree to 0.1%.")
     on_disk = (kb.root / path).read_bytes()
@@ -349,7 +349,7 @@ def test_a_path_absent_from_the_view_is_missing(kb):
 
 
 def test_a_symlink_into_findings_is_served_from_the_view(kb):
-    """The exclusion tests the resolved target (SPEC §5.1.2 Paths), so a symlink does not escape it."""
+    """The exclusion tests the resolved target (SPEC §5.2.2 Paths), so a symlink does not escape it."""
     path = "findings/calibration/F-0001-ratio.md"
     link = "evidence/2026-09-22-ratio/lnk.md"
     kb.add("F-0001", "ratio", "The two curves agree to 0.1%.")

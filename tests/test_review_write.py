@@ -1,5 +1,5 @@
-"""`put`, `review decide`, `review rebind`, `challenge pin` and `review index` (SPEC §5.1.4 "Where each
-rule blocks", §5.1.5, §5.1.6). The fixtures stage records exactly as review_stage does (a
+"""`put`, `review decide`, `review rebind`, `challenge pin` and `review index` (SPEC §5.2.4 "Where each
+rule blocks", §5.2.5, §5.2.6). The fixtures stage records exactly as review_stage does (a
 `.kblam/review-staging/<ID>.yaml` file and an allocation or edit-base receipt in
 `.kblam/review-receipts/`), because the staging commands are a different unit; the records themselves
 and their sources come from the nested Git fixture repository. Offline and deterministic: `_today` is
@@ -55,7 +55,7 @@ def captured_lines(first: int, last: int) -> dict:
 
 
 def assertion(**fields) -> dict:
-    """A source's assertion (SPEC §5.1.3): lines 3-3, the quoted text, its sha256 and occurrence."""
+    """A source's assertion (SPEC §5.2.3): lines 3-3, the quoted text, its sha256 and occurrence."""
     base = {"lines": [3, 3], "text": WORD, "sha256": WORD_SHA, "occurrence": 1}
     base.update(fields)
     return base
@@ -81,7 +81,7 @@ def source_ref(repo=None, *, sha: str = SHA, pin: bool = True, **fields) -> dict
 
 def sc_data(repo=None, *, rec_id: str = "SC-0002", spec: dict | None = None, basis=None,
             pin: bool = True, sha: str = SHA, **fields) -> dict:
-    """A staged SC's data (SPEC §5.1.3). `spec` replaces fields of the assertion, `basis` the entries."""
+    """A staged SC's data (SPEC §5.2.3). `spec` replaces fields of the assertion, `basis` the entries."""
     data = record_data("SC", rec_id)
     data["source"] = {**source_ref(repo, sha=sha, pin=pin), "assertion": assertion(**(spec or {}))}
     data["basis"] = [basis_entry()] if basis is None else basis
@@ -104,7 +104,7 @@ def ct_data(kb, *, rec_id: str = "CT-0001", finding: str = FINDING, **fields) ->
 
 def cu_data(kb, *, rec_id: str = "CU-0001", challenge: str = "SC-0001", finding: str = FINDING,
             ordinal: int = 1, **fields) -> dict:
-    """A staged CU's data bound to the installed challenge and finding (SPEC §5.1.3)."""
+    """A staged CU's data bound to the installed challenge and finding (SPEC §5.2.3)."""
     digest, raw_sha = finding_binding(kb, finding)
     data = record_data("CU", rec_id)
     data["challenge"] = challenge
@@ -141,7 +141,7 @@ def digest_of(kb, rec_id: str) -> str:
 
 def with_decision(kind: str, data: dict, status: str, *, by: str = DECIDER,
                   evidence: list | None = None) -> dict:
-    """Append the one decision `status` needs, with the subject digest it binds (SPEC §5.1.2)."""
+    """Append the one decision `status` needs, with the subject digest it binds (SPEC §5.2.2)."""
     data["status"] = status
     data["decisions"] = [{"date": TODAY, "by": by, "status": status, "reason": "reviewed the record",
                           "evidence": list(evidence or []), "bind": None}]
@@ -156,7 +156,7 @@ def excerpt_body(*tags: tuple[str, str]) -> str:
 
 
 def allocation(kind: str, data: dict, captured: dict | None = None) -> dict:
-    """The allocation receipt review_stage writes for `data` (SPEC §5.1.5 Receipts)."""
+    """The allocation receipt review_stage writes for `data` (SPEC §5.2.5 Receipts)."""
     created = data["created"]
     payload = {"id": data["id"], "creator": data["creator"],
                "created": created.isoformat() if isinstance(created, datetime.date) else created}
@@ -755,7 +755,7 @@ def test_a_refused_put_maps_the_line_to_the_staged_file_when_put_filled_fields_i
 
     result = review_write.put_record(ready.cfg, staged)
 
-    assert [issue.code for issue in result.issues] == ["K12"]
+    assert [issue.code for issue in result.issues] == ["K13"]
     issue = result.issues[0]
     assert issue.message.startswith("linked_findings[0] names F-0009, which is no finding in findings/")
     assert issue.path == ".kblam/review-staging/SC-0003.yaml"
@@ -853,8 +853,8 @@ def test_decide_confirmed_lists_newly_affected_findings(ready):
 
     assert result.ok, [issue.message for issue in result.issues]
     assert result.newly_affected == [FINDING]
-    assert [(issue.code, issue.owner) for issue in result.remaining] == [("K13", FINDING)]
-    assert [issue.code for issue in blocking(ready)] == ["K13"]
+    assert [(issue.code, issue.owner) for issue in result.remaining] == [("K14", FINDING)]
+    assert [issue.code for issue in blocking(ready)] == ["K14"]
 
 
 def test_decide_refuses_approving_a_use_that_is_not_current(ready):
@@ -876,7 +876,7 @@ def test_decide_approves_a_current_use(ready, source_repo):
 
     assert result.ok, [issue.message for issue in result.issues]
     assert installed_data(ready, "CU-0001")["status"] == "approved"
-    assert [issue for issue in blocking(ready) if issue.code == "K13"] == []
+    assert [issue for issue in blocking(ready) if issue.code == "K14"] == []
 
 
 def test_decide_confirmed_needs_primary_evidence_from_evidence_flag(ready, source_repo):
@@ -941,7 +941,7 @@ def test_rebind_restores_a_tasks_binding_after_the_finding_changed(ready):
     install(ready, "CT", ct_data(ready))
     ready.add(FINDING, "ratio", "The ratio is 1.0017 across 2048 pixels, re-measured.",
               body=excerpt_body(("3-3", WORD)))
-    assert {issue.code for issue in blocking(ready)} == {"K14"}
+    assert {issue.code for issue in blocking(ready)} == {"K15"}
 
     result = review_write.rebind(ready.cfg, "CT-0001", DECIDER, "rechecked the revised finding",
                                  digest_of(ready, "CT-0001"), [])
@@ -1216,8 +1216,8 @@ def test_pin_refuses_a_snapshot_inside_the_findings_or_the_review_root(ready):
 
 def test_pin_refuses_a_snapshot_inside_a_history_folder(ready):
     """A `history_dirs` folder is a protected root too (paths.protected), so it is no place for the
-    project-owned copy that stands in for a source's bytes (SPEC §5.1.2: a snapshot is a copy of the
-    source, and §5.1.2's canonical key rules a history path out as a source)."""
+    project-owned copy that stands in for a source's bytes (SPEC §5.2.2: a snapshot is a copy of the
+    source, and §5.2.2's canonical key rules a history path out as a source)."""
     ready.write("history/snapshots/trace.md", TRACE_TEXT)
     install(ready, "SC", sc_data(pin=False))
 

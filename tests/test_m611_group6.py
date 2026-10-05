@@ -1,6 +1,6 @@
-"""SPEC §12 M6.10 test group 6, *Independence and identity* (Acceptance 5).
+"""SPEC §12 M6.11 test group 6, *Independence and identity* (Acceptance 5).
 
-Every test drives the real CLI through `m610_helpers.kblam` (`kblam.cli.main` in process), one call at a
+Every test drives the real CLI through `m611_helpers.kblam` (`kblam.cli.main` in process), one call at a
 time: each single command — setup commands included — runs inside its own `changes(...)` bracket, which
 asserts that the whole KB tree and the source repository change by exactly the paths that command may
 change (`set()` for a refusal or a read-only command), and every `Run` is asserted in full (exit status,
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-import m610_helpers as m
+import m611_helpers as m
 from kblam import records
 from kblam.finding import yaml_rt
 
@@ -94,23 +94,23 @@ def key_line(kb, rec_id: str, key: str) -> int:
     return records.parse_record(rel, m.record_path(kb, rec_id).read_bytes()).key_line(key)
 
 
-def k13_line(kb, source_repo) -> str:
-    """The K13 error SC-0001 leaves over F-0001's excerpt, exactly as a command prints it (SPEC §5.1.4):
+def k14_line(kb, source_repo) -> str:
+    """The K14 error SC-0001 leaves over F-0001's excerpt, exactly as a command prints it (SPEC §5.2.4):
     the confirmed challenge's assertion is quoted by an installed finding with no current use."""
     text = (kb.root / FINDING).read_text(encoding="utf-8")
     tag = f"<!-- verbatim: {m.TRACE}:3-3 -->"
     line = next(i for i, row in enumerate(text.splitlines(), 1) if row.strip() == tag)
     version = source_repo.blob(m.TRACE_PATH)[:12]
-    return (f"K13 {FINDING}:{line}: SC-0001 challenges this quoted assertion at {m.TRACE}@{version}:3-3; "
+    return (f"K14 {FINDING}:{line}: SC-0001 challenges this quoted assertion at {m.TRACE}@{version}:3-3; "
             f"edit the finding or have this use reviewed (kblam use review SC-0001 F-0001 1 --by NAME "
             f"--proponent NAME). K10 is checked separately.")
 
 
-def k13_after_confirmation(kb, source_repo) -> str:
-    """What `review decide --status confirmed` prints after its own line when it leaves the K13 error: a
-    decision that confirms a challenge lists the findings it newly makes fail K13 (SPEC §5.1.4)."""
+def k14_after_confirmation(kb, source_repo) -> str:
+    """What `review decide --status confirmed` prints after its own line when it leaves the K14 error: a
+    decision that confirms a challenge lists the findings it newly makes fail K14 (SPEC §5.2.4)."""
     return ("kblam review decide: SC-0001 now affects F-0001; run kblam challenge uses SC-0001 for each "
-            "excerpt and the command that fixes it\n" + k13_line(kb, source_repo) + "\n"
+            "excerpt and the command that fixes it\n" + k14_line(kb, source_repo) + "\n"
             "kblam review decide: done, but kblam validate still fails (1 error(s) listed above, owned by "
             "other findings or records)\n")
 
@@ -121,16 +121,16 @@ def failed(n: int) -> str:
 
 
 def bind_message(stale: str, now: str) -> str:
-    """The K12 message a hand edit of a decided record gets (SPEC §5.1.2 Decisions)."""
+    """The K13 message a hand edit of a decided record gets (SPEC §5.2.2 Decisions)."""
     return (f"the last decision's bind is {stale} but the record's subject digest is {now}; a decided "
             f"record cannot be edited, so the record was changed by hand")
 
 
 def identity_output(path: str, line: int, field: str, current: str, original: str) -> str:
-    """The whole stdout the ruling expects for a hand-changed identity field (SPEC 269, 1937): the K12
+    """The whole stdout the ruling expects for a hand-changed identity field (SPEC 269, 1937): the K13
     message, then validate's summary. The two values are quoted as kblam's other identity diagnostics
     quote a parsed value, so a date renders as its `YYYY-MM-DD` text."""
-    return (f"K12 {path}:{line}: {field} is {current!r}, but it was allocated as {original!r} (id, "
+    return (f"K13 {path}:{line}: {field} is {current!r}, but it was allocated as {original!r} (id, "
             f"created, creator and proponent never change after allocation)\n{failed(1)}\n")
 
 
@@ -138,7 +138,7 @@ def identity_output(path: str, line: int, field: str, current: str, original: st
 
 
 def reference(path: str) -> dict:
-    """A blank file reference: `put` hashes the working file and pins it (SPEC §5.1.5)."""
+    """A blank file reference: `put` hashes the working file and pins it (SPEC §5.2.5)."""
     return {"path": path, "sha256": None, "repo": None, "commit": None, "blob": None, "snapshot": None}
 
 
@@ -242,12 +242,12 @@ def validate(kb, source_repo, *, code: int, out: str) -> m.Run:
 
 
 def install_drafted_use(kb, source_repo) -> tuple[str, str]:
-    """F-0001 quoting trace line 3, SC-0001 confirmed on it (which leaves the K13 error over F-0001) and
+    """F-0001 quoting trace line 3, SC-0001 confirmed on it (which leaves the K14 error over F-0001) and
     CU-0001 drafted open by INDEPENDENT for proponent PROPONENT. Returns ("SC-0001", "CU-0001")."""
     m.quoting_finding(kb, "F-0001", source_repo, "3-3")           # fixture setup, outside every window
     install_challenge(kb, source_repo)
     decide(kb, source_repo, "SC-0001", "confirmed", by=INDEPENDENT,
-           extra=k13_after_confirmation(kb, source_repo))
+           extra=k14_after_confirmation(kb, source_repo))
     with changes(kb, source_repo, {staged("CU-0001"), RECEIPT.format("CU-0001")}):
         run = m.kblam(kb, "use", "review", "SC-0001", "F-0001", "1", "--by", INDEPENDENT,
                       "--proponent", PROPONENT)
@@ -255,7 +255,7 @@ def install_drafted_use(kb, source_repo) -> tuple[str, str]:
     edit(kb.root / staged("CU-0001"), **use_fields())
     with changes(kb, source_repo, {PATH["CU"], INDEX, REGISTRY, TREE_HASH, staged("CU-0001")}):
         run = m.kblam(kb, "put", str(kb.root / staged("CU-0001")))
-    check(run, code=0, out=f"kblam put: CU-0001 -> {PATH['CU']}\n{k13_line(kb, source_repo)}\n"
+    check(run, code=0, out=f"kblam put: CU-0001 -> {PATH['CU']}\n{k14_line(kb, source_repo)}\n"
                            "kblam put: done, but kblam validate still fails (1 error(s) listed above, "
                            "owned by other findings or records)\n")
     return "SC-0001", "CU-0001"
@@ -329,51 +329,51 @@ def test_a_task_proponent_cannot_close_its_own_task(kb, source_repo):
 
 
 def test_a_use_proponent_cannot_approve_its_own_use(kb, source_repo):
-    """Start: SC-0001 confirmed, F-0001 quotes its assertion (a K13 error), CU-0001 open: drafted by
+    """Start: SC-0001 confirmed, F-0001 quotes its assertion (a K14 error), CU-0001 open: drafted by
     reviewer-b, proponent researcher-a. Command: `kblam review decide CU-0001 --status approved --by
     researcher-a` (its proponent). Exit 1, stderr "kblam review decide: researcher-a is CU-0001's
     proponent; a closing decision needs someone else", stdout empty. Files: none. Validation afterwards:
-    exit 1, the K13 error over F-0001 (a merely drafted use covers nothing). A5."""
+    exit 1, the K14 error over F-0001 (a merely drafted use covers nothing). A5."""
     install_drafted_use(kb, source_repo)
     decide_refused(kb, source_repo, "CU-0001", "approved", by=PROPONENT,
                    err="kblam review decide: researcher-a is CU-0001's proponent; a closing decision needs "
                        "someone else\n")
-    validate(kb, source_repo, code=1, out=f"{k13_line(kb, source_repo)}\n{failed(1)}\n")
+    validate(kb, source_repo, code=1, out=f"{k14_line(kb, source_repo)}\n{failed(1)}\n")
 
 
 def test_a_uses_creator_may_approve_it(kb, source_repo):
-    """Start: SC-0001 confirmed, F-0001 quotes its assertion (a K13 error), CU-0001 open, drafted by
+    """Start: SC-0001 confirmed, F-0001 quotes its assertion (a K14 error), CU-0001 open, drafted by
     reviewer-b (its creator) for proponent researcher-a. Command: `kblam review decide CU-0001 --status
     approved --by reviewer-b`. Exit 0, "kblam review decide: CU-0001 is now approved (subject digest …)".
     Files: the use record, the review index (its Status cell) and tree.hash. Validation afterwards: exit
-    0, the current use resolves the K13 overlap. A5: a use's creator may approve it, its proponent may
+    0, the current use resolves the K14 overlap. A5: a use's creator may approve it, its proponent may
     not."""
     install_drafted_use(kb, source_repo)
     decide(kb, source_repo, "CU-0001", "approved", by=INDEPENDENT)
     validate(kb, source_repo, code=0, out="kblam validate: OK (1 findings)\n")
 
 
-# --- a stored self-decision is a K12 error, for each kind -----------------------------------------
+# --- a stored self-decision is a K13 error, for each kind -----------------------------------------
 
 
 @pytest.mark.parametrize(("kind", "actor", "role"), [
     ("SC", CREATOR, "creator"), ("CT", CREATOR, "creator"), ("CT", PROPONENT, "proponent"),
     ("CU", PROPONENT, "proponent"),
 ])
-def test_a_stored_self_decision_is_a_k12_error(kb, source_repo, kind, actor, role):
+def test_a_stored_self_decision_is_a_k13_error(kb, source_repo, kind, actor, role):
     """Start: a decided record of `kind` (SC-0001 confirmed; CT-0001 confirmed; CU-0001 approved), its
     validation clean, decided by the independent reviewer-b. Hand edit (fixture setup, outside every
     window): the record's decision names the record's own creator or proponent instead. Command: `kblam
-    validate`. Exit 1, "K12 <record>:<decisions line>: decisions[0]: <name> is <ID>'s <role>; a closing
+    validate`. Exit 1, "K13 <record>:<decisions line>: decisions[0]: <name> is <ID>'s <role>; a closing
     decision needs someone else", and no other error. Files: none (validate is read-only). A5: a stored
-    decision that needed independence and lacks it is a K12 error."""
+    decision that needed independence and lacks it is a K13 error."""
     rec_id = decided(kb, source_repo, kind)
     validate(kb, source_repo, code=0, out=clean(kind))
     data = yaml_rt().load(m.record_path(kb, rec_id).read_bytes().decode("utf-8"))
     data["decisions"][0]["by"] = actor
     m.record_path(kb, rec_id).write_bytes(records.dump(data))
     validate(kb, source_repo, code=1,
-             out=f"K12 {PATH[kind]}:{key_line(kb, rec_id, 'decisions')}: decisions[0]: {actor} is "
+             out=f"K13 {PATH[kind]}:{key_line(kb, rec_id, 'decisions')}: decisions[0]: {actor} is "
                  f"{rec_id}'s {role}; a closing decision needs someone else\n{failed(1)}\n")
 
 
@@ -535,7 +535,7 @@ def test_a_proponent_outside_the_name_pattern_is_refused(kb, source_repo):
     reviewer-a --proponent 'not a name'`. Exit 1, stderr "kblam task new: --proponent 'not a name' is not
     a name: letters, digits, '.', '_', '@' and '-', starting with a letter or a digit", stdout empty.
     Files: none (nothing is staged and no receipt is written). Validation afterwards: exit 0. A5
-    (§5.1.2 Values)."""
+    (§5.2.2 Values)."""
     kb.add("F-0001", "ratio", m.CLAIM)                                # fixture setup
     with changes(kb, source_repo, set()):
         run = m.kblam(kb, "task", "new", "F-0001", "--kind", "replication", "--by", CREATOR,
@@ -546,28 +546,28 @@ def test_a_proponent_outside_the_name_pattern_is_refused(kb, source_repo):
     validate(kb, source_repo, code=0, out="kblam validate: OK (1 findings)\n")
 
 
-# --- identity by hand is a K12 error --------------------------------------------------------------
+# --- identity by hand is a K13 error --------------------------------------------------------------
 
 
-def test_a_hand_changed_id_is_a_k12_error(kb, source_repo):
+def test_a_hand_changed_id_is_a_k13_error(kb, source_repo):
     """Start: SC-0001 installed open by reviewer-a. Hand edit (fixture setup): the record's `id` becomes
-    SC-0009 while its file name does not. Command: `kblam validate`. Exit 1, "K12
+    SC-0009 while its file name does not. Command: `kblam validate`. Exit 1, "K13
     research-review/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file name's ID (SC-0001)"
-    and no other error. Files: none (validate is read-only). A5: a record's ID matches its file (§5.1.4
-    K12)."""
+    and no other error. Files: none (validate is read-only). A5: a record's ID matches its file (§5.2.4
+    K13)."""
     install_challenge(kb, source_repo)
     edit(m.record_path(kb, "SC-0001"), id="SC-0009")
     validate(kb, source_repo, code=1,
-             out=f"K12 {PATH['SC']}:{key_line(kb, 'SC-0001', 'id')}: id: 'SC-0009' does not match the file "
+             out=f"K13 {PATH['SC']}:{key_line(kb, 'SC-0001', 'id')}: id: 'SC-0009' does not match the file "
                  f"name's ID (SC-0001)\n{failed(1)}\n")
 
 
-def test_a_hand_changed_proponent_on_a_decided_task_is_a_k12_error(kb, source_repo):
+def test_a_hand_changed_proponent_on_a_decided_task_is_a_k13_error(kb, source_repo):
     """Start: CT-0001 confirmed by the independent reviewer-b, its validation clean. Hand edit (fixture
-    setup): the record's `proponent` becomes researcher-c. Command: `kblam validate`. Exit 1, "K12
+    setup): the record's `proponent` becomes researcher-c. Command: `kblam validate`. Exit 1, "K13
     research-review/tasks/CT-0001.yaml:<decisions line>: the last decision's bind is <the digest at the
     decision> but the record's subject digest is <the digest now>; a decided record cannot be edited, so
-    the record was changed by hand", plus the K12 identity error at the proponent line. Files: none.
+    the record was changed by hand", plus the K13 identity error at the proponent line. Files: none.
     A5: a proponent is fixed at allocation and part of a task's subject, so a hand change breaks both
     identity and the decision's bind."""
     install_task(kb, source_repo)
@@ -579,7 +579,7 @@ def test_a_hand_changed_proponent_on_a_decided_task_is_a_k12_error(kb, source_re
     identity = identity_output(PATH["CT"], key_line(kb, "CT-0001", "proponent"), "proponent",
                                "researcher-c", PROPONENT).splitlines()[0]
     validate(kb, source_repo, code=1,
-             out=f"{identity}\nK12 {PATH['CT']}:{key_line(kb, 'CT-0001', 'decisions')}: "
+             out=f"{identity}\nK13 {PATH['CT']}:{key_line(kb, 'CT-0001', 'decisions')}: "
                  f"{bind_message(stale, now)}\n{failed(2)}\n")
 
 
@@ -587,11 +587,11 @@ def test_a_hand_changed_proponent_on_a_decided_task_is_a_k12_error(kb, source_re
     pytest.param("created", "2026-09-27", "2026-09-28", id="created"),
     pytest.param("creator", "reviewer-c", CREATOR, id="creator"),
 ])
-def test_a_hand_changed_created_or_creator_is_a_k12_error(kb, source_repo, field, value, original):
+def test_a_hand_changed_created_or_creator_is_a_k13_error(kb, source_repo, field, value, original):
     """Start: CT-0001 confirmed by the independent reviewer-b, its validation clean. Hand edit (fixture
-    setup): the record's `created` (a day earlier) or `creator` (reviewer-c) changes, against SPEC §5.1.2
+    setup): the record's `created` (a day earlier) or `creator` (reviewer-c) changes, against SPEC §5.2.2
     line 269 (id, created, creator and proponent never change after allocation). Command: `kblam
-    validate`. The lead's ruling (SPEC 269, 1937) fixes the expected diagnostic as "K12
+    validate`. The lead's ruling (SPEC 269, 1937) fixes the expected diagnostic as "K13
     research-review/tasks/CT-0001.yaml:<the field's line>: <field> is '<the value now>', but it was
     allocated as '<the value at allocation>' (id, created, creator and proponent never change after
     allocation)", exit 1, stderr empty. Neither field is in a task's
@@ -615,13 +615,13 @@ def test_a_hand_changed_created_or_creator_is_a_k12_error(kb, source_repo, field
 
 def test_a_hand_installed_record_without_a_proponent_is_an_error(kb, source_repo):
     """Start: CT-0001 installed open on F-0001, its `proponent` key removed by hand (fixture setup).
-    Command: `kblam validate`. Exit 1, stderr empty, "K12 research-review/tasks/CT-0001.yaml: missing key
-    'proponent'" and no other error, then the summary: proponent is a common-format field (§5.1.2), so
-    its schema errors are K12's. Files: none (validate is read-only). A5: a task or a use needs a
-    proponent (§5.1.3 field tables)."""
+    Command: `kblam validate`. Exit 1, stderr empty, "K13 research-review/tasks/CT-0001.yaml: missing key
+    'proponent'" and no other error, then the summary: proponent is a common-format field (§5.2.2), so
+    its schema errors are K13's. Files: none (validate is read-only). A5: a task or a use needs a
+    proponent (§5.2.3 field tables)."""
     install_task(kb, source_repo)
     drop(m.record_path(kb, "CT-0001"), "proponent")
-    validate(kb, source_repo, code=1, out=f"K12 {PATH['CT']}: missing key 'proponent'\n{failed(1)}\n")
+    validate(kb, source_repo, code=1, out=f"K13 {PATH['CT']}: missing key 'proponent'\n{failed(1)}\n")
 
 
 # --- a hand edit of a decided record --------------------------------------------------------------
@@ -630,10 +630,10 @@ def test_a_hand_installed_record_without_a_proponent_is_an_error(kb, source_repo
 @pytest.mark.parametrize(("kind", "field"), [
     ("SC", "proposition"), ("CT", "method"), ("CU", "reason"),
 ])
-def test_a_hand_edit_of_a_decided_record_is_a_k12_bind_mismatch(kb, source_repo, kind, field):
+def test_a_hand_edit_of_a_decided_record_is_a_k13_bind_mismatch(kb, source_repo, kind, field):
     """Start: a decided, effective record of `kind` whose validation is clean (SC-0001 confirmed; CT-0001
     confirmed; CU-0001 approved). Hand edit (fixture setup): one free field changes -- a field no review
-    index cell shows, so the index stays byte-identical. Command: `kblam validate`. Exit 1, "K12
+    index cell shows, so the index stays byte-identical. Command: `kblam validate`. Exit 1, "K13
     <record>:<decisions line>: the last decision's bind is <the digest at the decision> but the record's
     subject digest is <the digest now>; a decided record cannot be edited, so the record was changed by
     hand", and no other error. Files: none. A5: a decision goes stale when any input kblam hashed for it
@@ -644,5 +644,5 @@ def test_a_hand_edit_of_a_decided_record_is_a_k12_bind_mismatch(kb, source_repo,
     edit(m.record_path(kb, rec_id), **{field: "A narrower revision, written by hand"})
     now = m.expect(kb, rec_id)
     validate(kb, source_repo, code=1,
-             out=f"K12 {PATH[kind]}:{key_line(kb, rec_id, 'decisions')}: {bind_message(stale, now)}\n"
+             out=f"K13 {PATH[kind]}:{key_line(kb, rec_id, 'decisions')}: {bind_message(stale, now)}\n"
                  f"{failed(1)}\n")

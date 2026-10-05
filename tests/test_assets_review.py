@@ -1,4 +1,4 @@
-"""The review assets against the real tool (§8.2, §12 M6.10): the reading rule, the write skill and the
+"""The review assets against the real tool (§8.2, §12 M6.11): the reading rule, the write skill and the
 kblam.toml template name the review root through its token, every command they show parses with the
 CLI's own parser, and every diagnostic they quote is one the code prints.
 
@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from kblam import cli, decisions, init, k12, k13, k14, review_write
+from kblam import cli, decisions, init, k13, k14, k15, review_write
 from kblam.config import DEFAULT_REVIEW, load_config
 
 RULE = "rules/kblam-findings.md"
@@ -31,7 +31,7 @@ ASSETS = (RULE, SKILL)
 # are its floor): a rewrite that drops one is a rewrite that told the reader less.
 MINIMUM = {RULE: 2, SKILL: 25}
 
-# The values the assets' placeholders stand for: an MX-100 source and evidence package, as SPEC §5.1
+# The values the assets' placeholders stand for: an MX-100 source and evidence package, as SPEC §5.2
 # writes its examples. A substitution is applied to a command before it is parsed, longest first.
 SOURCE = "resources/mx-docs/notes/full-scan-trace.md"
 EVIDENCE = "observed:evidence/2026-09-27-mx100-trace-reread/README.md:row-102"
@@ -57,22 +57,22 @@ SUBSTITUTIONS = (
 # diagnostic an author meets while writing a record, so the skill and the code must not drift apart.
 QUOTED = (
     ("the source changed since kblam challenge new; run it again", review_write),
-    ("records are never deleted or renamed", k12),
-    ("INDEX.md is missing; run kblam review index", k12),
-    ("INDEX.md differs from the generated review index", k12),
-    ("holds only SC-, CT- and CU- records in their kind's folder", k12),
+    ("records are never deleted or renamed", k13),
+    ("INDEX.md is missing; run kblam review index", k13),
+    ("INDEX.md differs from the generated review index", k13),
+    ("holds only SC-, CT- and CU- records in their kind's folder", k13),
     ("only an open challenge can be pinned", review_write),
     ("changed since your edit", review_write),
     ("changed since you inspected it; show it again", review_write),
     ("a closing decision needs someone else", decisions),
-    ("challenges this quoted assertion at", k13),
-    ("and this excerpt quotes its assertion text from another version of that file", k13),
+    ("challenges this quoted assertion at", k14),
+    ("and this excerpt quotes its assertion text from another version of that file", k14),
     ("reserved for the coordinator or the user", cli),
-    ("with no primary support", k12),
-    ("no basis entry has role counterevidence or internal-inconsistency", k12),
-    ("no basis entry has role model-mismatch", k12),
-    ("the source changed since", k12),
-    ("the pinned version is not present", k12),
+    ("with no primary support", k13),
+    ("no basis entry has role counterevidence or internal-inconsistency", k13),
+    ("no basis entry has role model-mismatch", k13),
+    ("the source changed since", k13),
+    ("the pinned version is not present", k13),
     ("a pin is never replaced", review_write),
     ("a decision that keeps the status belongs to", review_write),
     ("no longer has the excerpt it cites", review_write),
@@ -153,7 +153,7 @@ def settings_of(cfg) -> dict:
 
 @pytest.mark.parametrize("rel", ASSETS)
 def test_every_command_the_assets_show_parses_with_the_cli(rel):
-    """A command the rule or the skill tells an author to run is one the CLI accepts (§5.1.5). The
+    """A command the rule or the skill tells an author to run is one the CLI accepts (§5.2.5). The
     placeholders are the assets' own: an ID, a name, a digest prefix, a source path or a flag."""
     text = rendered(rel)
     broken = [span for span in re.findall(r"`([^`]*)`", text, re.S)
@@ -178,11 +178,11 @@ def test_every_command_the_assets_show_parses_with_the_cli(rel):
 
 
 def test_the_skill_shows_the_commands_the_diagnostics_print():
-    """The command a K13 or a K14 diagnostic names is the one the skill gives the author (§5.1.4)."""
+    """The command a K14 or a K15 diagnostic names is the one the skill gives the author (§5.2.4)."""
     skill = one_line(rendered(SKILL))
-    assert k13.USE_REVIEW.format(challenge="SC-0001", finding="F-0012", ordinal=2) in skill
-    assert k14.REBIND.format(rid="CT-0001") in skill
-    assert f"{k14.REBIND.format(rid='CT-0001')} --evidence PROVENANCE:PATH:LOCATOR" in skill
+    assert k14.USE_REVIEW.format(challenge="SC-0001", finding="F-0012", ordinal=2) in skill
+    assert k15.REBIND.format(rid="CT-0001") in skill
+    assert f"{k15.REBIND.format(rid='CT-0001')} --evidence PROVENANCE:PATH:LOCATOR" in skill
     assert "kblam challenge new <source-path> --lines A-B --by NAME" in skill
 
 
@@ -202,7 +202,7 @@ def test_a_quoted_diagnostic_is_one_the_code_prints(fragment, module):
 @pytest.mark.parametrize("rel", ASSETS)
 def test_the_assets_name_the_roots_only_through_their_tokens(rel):
     """The rule and the skill name the KB root and the review root through init's tokens, and the
-    rendered text carries the configured root and no token (§12 M6.10, init.KB_ROOT_TOKEN)."""
+    rendered text carries the configured root and no token (§12 M6.11, init.KB_ROOT_TOKEN)."""
     raw = init._asset(rel).decode("utf-8")
     assert init.KB_ROOT_TOKEN in raw and init.REVIEW_ROOT_TOKEN in raw
     assert "findings/" not in raw and "research-review" not in raw   # neither default is written out

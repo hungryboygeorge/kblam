@@ -1,4 +1,4 @@
-"""File references and the one source reader per validation (SPEC §5.1.2 File references, §5.1.6)."""
+"""File references and the one source reader per validation (SPEC §5.2.2 File references, §5.2.6)."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from kblam import gitpin, paths
 from kblam.config import Config
 from kblam.gitpin import GitPin
 
-# What a STALE or UNAVAILABLE reference says. K12 writes the record-specific sentence from the state
-# (SPEC §5.1.2 resolver); these are the short generic lines it builds on, and the parenthesis after
+# What a STALE or UNAVAILABLE reference says. K13 writes the record-specific sentence from the state
+# (SPEC §5.2.2 resolver); these are the short generic lines it builds on, and the parenthesis after
 # MESSAGE_NO_COPY names what was missing.
 MESSAGE_UNREADABLE = "the path cannot be read as a file"
 MESSAGE_MISSING = "the working file is missing"
@@ -39,7 +39,7 @@ def _canonical_key(cfg: Config, raw) -> str | None:
 
 @dataclass(frozen=True)
 class FileRef:
-    """A challenge's source, a basis entry or a decision's evidence entry (SPEC §5.1.2).
+    """A challenge's source, a basis entry or a decision's evidence entry (SPEC §5.2.2).
 
     Values as parsed: records.schema_issues reports bad types, so resolve() must tolerate any value
     here that is not a string (treat it as missing).
@@ -86,7 +86,7 @@ class Resolved:
 
 
 class SourceReader:
-    """Serves every source read of one validation (K4, K5, K10, K12-K14): each identity is read once.
+    """Serves every source read of one validation (K4, K5, K10, K13-K15): each identity is read once.
 
     Cache keys, which are also the `reads` identities:
       ("working", canonical key)           a working-tree file; findings/ and review-root paths come
@@ -128,13 +128,13 @@ class SourceReader:
         return self._once(("snapshot", key, sha256), lambda: self._snapshot_bytes(target, sha256))
 
     def resolve(self, ref: FileRef, *, pinned_source: FileRef | None = None) -> Resolved:
-        """Evaluate a reference (SPEC §5.1.2): the first of current, pinned, stale, unavailable that
+        """Evaluate a reference (SPEC §5.2.2): the first of current, pinned, stale, unavailable that
         applies.
 
         A pin is always verified (gitpin.verify_pin with read=self.blob): "invalid" sets `error`, "absent"
         only makes the pin unusable. `pinned_source`: when `ref` has no pin and no snapshot and its
         canonical key equals pinned_source's, `ref` is evaluated with pinned_source's pin and snapshot (a
-        basis entry on the source itself, SPEC §5.1.3 Basis), and a ref.sha256 that differs from
+        basis entry on the source itself, SPEC §5.2.3 Basis), and a ref.sha256 that differs from
         pinned_source.sha256 is an `error`.
         """
         raw = ref.path
@@ -201,7 +201,7 @@ class SourceReader:
 
     def _once(self, identity: tuple, read):
         """The bytes of `identity`, read at most once: the first lookup counts one read whether or not it
-        found bytes, and a later lookup is a cache hit, including for a None (SPEC §5.1.6)."""
+        found bytes, and a later lookup is a cache hit, including for a None (SPEC §5.2.6)."""
         if identity not in self._cache:
             self.reads[identity] += 1
             self._cache[identity] = read()

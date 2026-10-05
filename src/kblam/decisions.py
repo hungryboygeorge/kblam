@@ -1,4 +1,4 @@
-"""Subject digests, decisions and status changes (SPEC §5.1.2 Subject digest, Decisions, Status changes)."""
+"""Subject digests, decisions and status changes (SPEC §5.2.2 Subject digest, Decisions, Status changes)."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ SUBJECT_FIELDS = {
 
 KIND_WORDS = {"SC": "challenge", "CT": "task", "CU": "use"}
 
-# The §5.1.2 table (SPEC lines 371-384) as data: kind -> from -> the statuses that kind's own rows
+# The §5.2.2 table (SPEC lines 371-384) as data: kind -> from -> the statuses that kind's own rows
 # allow. The two rows that hold for every kind -- any status except `open` (and an SC's `confirmed`) to
 # `open`, and `open` to `stale` -- name no kind, so `_allowed` adds them.
 TRANSITIONS = {
@@ -40,7 +40,7 @@ REOPEN_REFUSED = ("a confirmed challenge is never reopened; retire it with --sta
                   "new challenge")
 
 # The fields `decide` and `rebind` compare `--by` against, in the order a message names them (SPEC
-# §5.1.2 "Independent means": an SC's creator; a CT's creator and proponent; a CU's proponent, whose
+# §5.2.2 "Independent means": an SC's creator; a CT's creator and proponent; a CU's proponent, whose
 # creator may approve it).
 SELF_ROLES = {"SC": ("creator",), "CT": ("creator", "proponent"), "CU": ("proponent",)}
 
@@ -75,7 +75,7 @@ def _allowed(kind: str, old: str) -> tuple[str, ...]:
 def transition_problem(kind: str, old: str, new: str) -> str | None:
     """None if a decision may take a `kind` record from `old` to `new`, else why not.
 
-    The §5.1.2 table, plus `rebind` keeping the status (old == new, for CT and CU, old not stale). A
+    The §5.2.2 table, plus `rebind` keeping the status (old == new, for CT and CU, old not stale). A
     confirmed SC never goes back to open ("a confirmed challenge is never reopened; retire it with
     --status stale and file a new challenge").
     """
@@ -105,7 +105,7 @@ def needs_independence(kind: str, old: str, new: str) -> bool:
 
 
 def independence_problem(kind: str, data: dict, by: str) -> str | None:
-    """None if `by` is independent for this record (SPEC §5.1.2): for SC, by != creator; for CT, by differs
+    """None if `by` is independent for this record (SPEC §5.2.2): for SC, by != creator; for CT, by differs
     from creator and proponent; for CU, by != proponent (the creator may approve). Else a message naming
     the role, e.g. "reviewer-b is SC-0001's creator; a closing decision needs someone else"."""
     rid = data.get("id")
@@ -117,10 +117,10 @@ def independence_problem(kind: str, data: dict, by: str) -> str | None:
 
 
 def decision_issues(rec: Record) -> list[Issue]:
-    """K12 errors on a parsed record's decisions (skips what schema_issues reports as malformed):
+    """K13 errors on a parsed record's decisions (skips what schema_issues reports as malformed):
     status differs from the last decision's (or from `open` with none); when status is not open, the
     last decision's bind differs from subject_digest; a decision sequence that breaks transition_problem
-    (replayed from `open`); a stored decision that needed independence and lacks it. code K12, level
+    (replayed from `open`); a stored decision that needed independence and lacks it. code K13, level
     error, owner rec.id, path rec.path."""
     data = rec.data
     kind = rec.kind
@@ -131,12 +131,12 @@ def decision_issues(rec: Record) -> list[Issue]:
     issues: list[Issue] = []
 
     def add(line: int, message: str) -> None:
-        issues.append(Issue(rec.path, line, "K12", message, owner=rec.id or ""))
+        issues.append(Issue(rec.path, line, "K13", message, owner=rec.id or ""))
 
     entries = data.get("decisions")
     if not isinstance(entries, list):
         entries = []                                 # schema_issues reports a `decisions` that is not a list
-    previous = "open"                                # open until a decision sets the status (SPEC §5.1.2)
+    previous = "open"                                # open until a decision sets the status (SPEC §5.2.2)
     last_status: str | None = None
     last_bind: str | None = None
     for i, entry in enumerate(entries):

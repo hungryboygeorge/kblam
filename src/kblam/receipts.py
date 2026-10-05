@@ -1,4 +1,4 @@
-"""Allocation and edit-base receipts of review records, `.kblam/review-receipts/` (SPEC §5.1.5).
+"""Allocation and edit-base receipts of review records, `.kblam/review-receipts/` (SPEC §5.2.5).
 
 kblam's state, not the author's: the allocation receipt `<ID>.json` is never rewritten; the edit-base
 receipt `<ID>.edit-base.json` holds the sha256 of the installed record's bytes when it was copied.

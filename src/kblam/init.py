@@ -1,11 +1,11 @@
 """`kblam init [--update]`: set up the git repository containing the current directory (SPEC §12 M6.5).
 
 It writes what the project needs and the user commits: kblam.toml (only if absent), the two indexes and
-the record-ID registry (§5.1.6, §11 step 6: created when missing, from the files present, and never
+the record-ID registry (§5.2.6, §11 step 6: created when missing, from the files present, and never
 replaced), the .gitattributes and .gitignore lines, the reading rule and the write skill, kblam's hook
 entries merged into .claude/settings.json, the CLAUDE.md line (§8.2) and the git pre-commit hook. Those
 indexes are written by init itself, not through writes.apply, so the only tree.hash line and warning is
-its own. Last it writes `.kblam/tree.hash` in format 2 (§5.1.6 "Upgrade"): created, migrated from
+its own. Last it writes `.kblam/tree.hash` in format 2 (§5.2.6 "Upgrade"): created, migrated from
 format 1, updated with a changed review root, or kept, with the message saying what to run instead. It
 never commits and never writes outside the repository root. A file kblam owns that differs from the
 installed version is reported and left alone unless --update is given; kblam.toml is never overwritten.
@@ -25,7 +25,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-from kblam import k12, registry, review, rules, treehash, writes
+from kblam import k13, registry, review, rules, treehash, writes
 from kblam.config import CONFIG_NAME, ConfigError, load_config
 from kblam.index import generate_index
 from kblam.lock import LockError
@@ -168,7 +168,7 @@ class Init:
                 self.report("created", rel, "kblam index")
 
     def review_index(self, cfg) -> None:
-        """The review root's INDEX.md and the record-ID registry (SPEC §11 step 6, §5.1.6).
+        """The review root's INDEX.md and the record-ID registry (SPEC §11 step 6, §5.2.6).
 
         The index is created from the records present when it is missing, and a file that is there,
         whatever it holds, is never touched. In the same locked step the registry is created from the IDs
@@ -184,12 +184,12 @@ class Init:
             else:
                 atomic_write(path, generate_review_index(view))
                 self.report("created", rel, "kblam review index")
-            registered = writes.registry_after(cfg, k12.present_ids(view), set())
+            registered = writes.registry_after(cfg, k13.present_ids(view), set())
             if registered is not None:
                 registry.write_ids(cfg, registered)
 
     def tree_hash(self, cfg, started, matched: bool) -> None:
-        """The tree.hash line, last (SPEC §12 M6.5 "As built", §5.1.6 "tree.hash, format 2" and "Upgrade").
+        """The tree.hash line, last (SPEC §12 M6.5 "As built", §5.2.6 "tree.hash, format 2" and "Upgrade").
 
         `started` is treehash.read_recorded of the file as init found it, before its own writes, and
         `matched` whether the tree matched it then. Nothing is written unless the rule allows it: the
@@ -448,7 +448,7 @@ def _run_hook(argv: list[str], handler: dict, payload: dict, repo: Path, env: di
 def _started_tree(cfg) -> tuple[tuple[int, str | None, str] | None, bool]:
     """(treehash.read_recorded as init finds it, whether the tree matches it), read under the lock and
     before init writes anything: an interrupted write is recovered by then, so `started` is the value
-    recovery restored rather than the one it replaced (SPEC §5.1.6)."""
+    recovery restored rather than the one it replaced (SPEC §5.2.6)."""
     started = treehash.read_recorded(cfg)
     if started is None:
         return None, False
@@ -470,7 +470,7 @@ def _write_tree_hash_v2(cfg, view) -> bool:
 
 
 def _validation_clean(cfg, view) -> bool:
-    """Whether the tree `view` passes the full validation (SPEC §5.1.6 "Upgrade"): no errors and no open
+    """Whether the tree `view` passes the full validation (SPEC §5.2.6 "Upgrade"): no errors and no open
     review or unchecked item. Warnings and pending tasks are fine; nothing here asks Jev or the network."""
     return not rules.errors(rules.validate(view)) and not review.open_items(cfg, view)
 
@@ -499,7 +499,7 @@ def run(update: bool, cwd: Path | None = None) -> int:
         state.prompt(cfg.jev.get("prompt") if isinstance(cfg.jev, dict) else None,
                      _template_prompt(template))
         # The state of tree.hash as init finds it, read under the lock: taking it recovers an interrupted
-        # write first, and recovery restores tree.hash to the journal's value (SPEC §5.1.6). A read before
+        # write first, and recovery restores tree.hash to the journal's value (SPEC §5.2.6). A read before
         # that would let init record over the restored value and report its own undo as its own writes.
         with writes.locked(cfg, "init", mutating=False):
             started, matched = _started_tree(cfg)

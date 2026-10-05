@@ -43,7 +43,7 @@ DEFAULT_KB = {
     "history_dirs": ["history"],
 }
 
-# SPEC §9 [review] (§5.1): the review root and the provenance vocabularies of basis and decision evidence.
+# SPEC §9 [review] (§5.2): the review root and the provenance vocabularies of basis and decision evidence.
 DEFAULT_REVIEW = {
     "root": "research-review",
     "provenance": ["observed", "decoded", "inferred", "unknown"],
@@ -99,22 +99,22 @@ class Config:
 
     @property
     def review_staging_dir(self) -> Path:
-        """SC-/CT-/CU- records being written, awaiting put: the author's to edit (SPEC §5.1.5)."""
+        """SC-/CT-/CU- records being written, awaiting put: the author's to edit (SPEC §5.2.5)."""
         return self.state_dir / "review-staging"
 
     @property
     def review_receipts_dir(self) -> Path:
-        """Allocation and edit-base receipts of review records: kblam's state (SPEC §5.1.5)."""
+        """Allocation and edit-base receipts of review records: kblam's state (SPEC §5.2.5)."""
         return self.state_dir / "review-receipts"
 
     @property
     def review_ids_path(self) -> Path:
-        """The record-ID registry (SPEC §5.1.6)."""
+        """The record-ID registry (SPEC §5.2.6)."""
         return self.state_dir / "review-ids"
 
     @property
     def journal_path(self) -> Path:
-        """Present only while a multi-file write is in progress (SPEC §5.1.6)."""
+        """Present only while a multi-file write is in progress (SPEC §5.2.6)."""
         return self.state_dir / "journal.json"
 
 

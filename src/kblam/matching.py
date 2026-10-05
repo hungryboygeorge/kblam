@@ -1,4 +1,4 @@
-"""Text matching shared by assertions, K10 and K13 (SPEC §5.1.3 Assertion, CU tag_sha256; §5.1.4 K13).
+"""Text matching shared by assertions, K10 and K14 (SPEC §5.2.3 Assertion, CU tag_sha256; §5.2.4 K14).
 
 Text is the source decoded as UTF-8 with line endings normalised to LF (finding.normalise_newlines),
 nothing else normalised. Spans are half-open character ranges [start, end) in that text.
@@ -53,7 +53,7 @@ def line_starts(text: str) -> list[int]:
 
 
 def assertion_match(text: str, needle: str, lines: tuple[int, int]) -> tuple[int, tuple[int, int]] | str:
-    """Locate an assertion (SPEC §5.1.3): (occurrence, span), or a refusal message.
+    """Locate an assertion (SPEC §5.2.3): (occurrence, span), or a refusal message.
 
     `lines` = (A, B) are inclusive 1-based lines of `text`; a match counts only if it lies wholly within
     them (start at or after line A's start; end at or before the end of line B, its newline excluded).
@@ -129,13 +129,13 @@ def byte_to_char_map(data: bytes) -> list[int]:
 def tag_sha256(body_lines: list[str], start: int, end: int) -> str:
     """sha256 hex of UTF-8("\\n".join(body_lines[start:end])): the verbatim tag's line through the end of
     its block (end exclusive), fences or blockquote markers and indentation included, no final newline
-    (SPEC §5.1.3 CU citation)."""
+    (SPEC §5.2.3 CU citation)."""
     return hashlib.sha256("\n".join(body_lines[start:end]).encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
 class ExcerptMatch:
-    """K10's and K13's one match result for one verbatim tag of a finding (SPEC §5.1.4 K13 paragraph 1)."""
+    """K10's and K14's one match result for one verbatim tag of a finding (SPEC §5.2.4 K14 paragraph 1)."""
     ordinal: int                  # 1-based position among the finding's verbatim tags (malformed ones count)
     start: int                    # body-line index of the tag
     end: int                      # body-line index just past the block
@@ -234,7 +234,7 @@ def _range(tag: re.Match) -> tuple[int, ...]:
 def _read_source(view, reader, source: str, full: Path) -> tuple[bytes | None, str | None]:
     """(bytes, canonical key) of a source path K10 accepted. A path K10 accepts but paths refuses (a
     `..` segment that stays inside the repository, a `:` in a name) keeps K10's own read and gets no
-    key: K13 matches on the key, so it ignores such an excerpt, and K10's verdict does not change."""
+    key: K14 matches on the key, so it ignores such an excerpt, and K10's verdict does not change."""
     try:
         key = paths.canonical_key(reader.cfg, source)
     except paths.PathRefused:

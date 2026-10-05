@@ -1,9 +1,9 @@
-"""SPEC §12 M6.10 test group 3, K13 (acceptance criterion A2): affected uses, end to end through the
+"""SPEC §12 M6.11 test group 3, K14 (acceptance criterion A2): affected uses, end to end through the
 real CLI on the fixture KB and its nested Git source repository. Each test states its start state,
 the command and actor, the exit status, the diagnostics, the files changed and the validation that
 follows.
 
-Every CLI invocation is bracketed on its own by `command`: a whole-KB `m610_helpers.tree` snapshot
+Every CLI invocation is bracketed on its own by `command`: a whole-KB `m611_helpers.tree` snapshot
 and a `SourceRepo.snapshot()` are taken just before the call and compared just after, so a call that
 writes anything but the paths it is expected to write - in the KB or in the source repository -
 fails the test. The setup helpers are expanded into their steps (`challenge new`, the author's
@@ -12,7 +12,7 @@ stdout and stderr. The fixture's own writes (a finding by hand, an edit or a com
 repository) sit outside the windows.
 
 Findings are placed out of band (`kb.add`), because the put that would install a finding quoting a
-confirmed challenge's assertion is itself refused (§5.1.4, test group 4); a state in which such a
+confirmed challenge's assertion is itself refused (§5.2.4, test group 4); a state in which such a
 finding exists is built before the confirmation. Offline and deterministic: the frozen date pins
 `created` and a decision's `date`, and the fixtures enable no Jev verdict.
 """
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import m610_helpers as m
+import m611_helpers as m
 from kblam import records
 from kblam.finding import yaml_rt
 
@@ -40,7 +40,7 @@ NEW_TEXT = "# a heading added above\n" + m.TRACE_TEXT   # another version: every
 
 
 def rel(kb, path: Path) -> str:
-    """A path as `m610_helpers.tree` names it."""
+    """A path as `m611_helpers.tree` names it."""
     return path.relative_to(kb.root).as_posix()
 
 
@@ -67,7 +67,7 @@ def put_line(rec_id: str, folder: str) -> str:
 
 
 def done_but(what: str, errors: int) -> str:
-    """The tail a record write prints when errors owned by others remain (SPEC §5.1.4)."""
+    """The tail a record write prints when errors owned by others remain (SPEC §5.2.4)."""
     return (f"kblam {what}: done, but kblam validate still fails ({errors} error(s) listed above, "
             f"owned by other findings or records)")
 
@@ -77,13 +77,13 @@ def diagnostic(code: str, message: str, *, line: int = TAG_LINE, level: str = "e
     return f"{code}{' warning' if level == 'warning' else ''} {FINDING}:{line}: {message}"
 
 
-def k13_line(message: str, *, line: int = TAG_LINE, level: str = "error") -> str:
-    """The K13 diagnostic on F-0001 at `line`."""
-    return diagnostic("K13", message, line=line, level=level)
+def k14_line(message: str, *, line: int = TAG_LINE, level: str = "error") -> str:
+    """The K14 diagnostic on F-0001 at `line`."""
+    return diagnostic("K14", message, line=line, level=level)
 
 
 def same_bytes(path: str, version: str, *, lines: str = "3-3", ordinal: int = 1) -> str:
-    """The §5.1.4 same-bytes error, with the pin's 12-hex version prefix (k13.MESSAGE_SAME_BYTES)."""
+    """The §5.2.4 same-bytes error, with the pin's 12-hex version prefix (k14.MESSAGE_SAME_BYTES)."""
     return (f"SC-0001 challenges this quoted assertion at {path}@{version}:{lines}; edit the finding or "
             f"have this use reviewed (kblam use review SC-0001 F-0001 {ordinal} --by NAME --proponent "
             f"NAME). K10 is checked separately.")
@@ -98,7 +98,7 @@ def trace_version(source_repo) -> str:
 
 
 def sc_fields(kb, path: str) -> dict:
-    """The blank SC fields the author fills before the first put (SPEC §5.1.5): a proposition, a
+    """The blank SC fields the author fills before the first put (SPEC §5.2.5): a proposition, a
     scope, a classification and one basis entry on the source itself, which `put` hashes and pins."""
     return {
         "proposition": "The printed byte equality follows from the printed byte values",
@@ -142,7 +142,7 @@ def pinned(kb, rec_id: str) -> bool:
 
 def new_challenge(kb, source_repo, path: str, *, lines: str = "3-3", text: str | None = None) -> Path:
     """`challenge new` in its window, then the author's filling of the staged file (fixture setup,
-    outside the windows). `text` narrows the captured line as §5.1.3 allows before the first put;
+    outside the windows). `text` narrows the captured line as §5.2.3 allows before the first put;
     `put` then computes the assertion's sha256 and occurrence."""
     staged = kb.root / STAGING / "SC-0001.yaml"
     run = command(kb, source_repo, {rel(kb, staged), f"{RECEIPTS}/SC-0001.json"},
@@ -187,15 +187,15 @@ def decide(kb, source_repo, rec_id: str, status: str, *argv: object) -> m.Run:
 # --- same bytes -----------------------------------------------------------------------------------
 
 
-def test_a_finding_quoting_the_assertion_of_a_confirmed_challenge_is_one_k13_error(kb, source_repo):
+def test_a_finding_quoting_the_assertion_of_a_confirmed_challenge_is_one_k14_error(kb, source_repo):
     """Start: F-0001 quotes trace line 3 verbatim; SC-0001 (creator reviewer-a, one
     primary-provenance basis entry on the source) is confirmed by reviewer-b on lines 3-3 and pinned
     at HEAD. F-0001 was installed before the confirmation, as a finding put would refuse it.
 
     Commands: `challenge new` (exit 0, the staged path), `put` (exit 0, the record line), `review
     decide --status confirmed --by reviewer-b` (exit 0, the digest line, the finding it newly
-    affects and the K13 error it leaves) and `kblam validate`, no actor, exit 1 with exactly the
-    §5.1.4 same-bytes message at the excerpt's tag line. Files changed: the staging file and its
+    affects and the K14 error it leaves) and `kblam validate`, no actor, exit 1 with exactly the
+    §5.2.4 same-bytes message at the excerpt's tag line. Files changed: the staging file and its
     receipt, then the record, the index, the registry and tree.hash, then the record, the index and
     tree.hash again; `validate` changes nothing, and the source repository is unchanged throughout.
     Acceptance 2: an excerpt affected by a confirmed challenge is surfaced."""
@@ -204,7 +204,7 @@ def test_a_finding_quoting_the_assertion_of_a_confirmed_challenge_is_one_k13_err
     staged = new_challenge(kb, source_repo, m.TRACE)
     ok_run(install(kb, source_repo, staged, SC_RECORD), put_line("SC-0001", "challenges"))
 
-    error = k13_line(same_bytes(m.TRACE, trace_version(source_repo)))
+    error = k14_line(same_bytes(m.TRACE, trace_version(source_repo)))
     confirmed = decide(kb, source_repo, "SC-0001", "confirmed", "--by", "reviewer-b",
                        "--reason", "read the source and pinned it")
     ok_run(confirmed,
@@ -221,14 +221,14 @@ def test_a_finding_quoting_the_assertion_of_a_confirmed_challenge_is_one_k13_err
 
 
 def test_a_current_approved_use_covers_the_excerpt_and_the_validation_is_clean(kb, source_repo):
-    """Start: as the test above, with `validate` failing one K13 error: F-0001 quotes the assertion
+    """Start: as the test above, with `validate` failing one K14 error: F-0001 quotes the assertion
     of the confirmed, pinned SC-0001.
 
     Commands, each exit 0 and each in its own window: `challenge new`, `put`, `review decide
     --status confirmed --by reviewer-b`; `use review SC-0001 F-0001 1 --by reviewer-b --proponent
-    researcher-a` (prints the staged CU-0001.yaml); `put` of the use (the record line, the K13 error
+    researcher-a` (prints the staged CU-0001.yaml); `put` of the use (the record line, the K14 error
     it leaves and its tail); `review decide --status approved --by reviewer-b`, who is not the
-    proponent; `validate`, exit 0 with no K13 line; `challenge uses SC-0001` and `review list`, both
+    proponent; `validate`, exit 0 with no K14 line; `challenge uses SC-0001` and `review list`, both
     read-only. Files changed: the staged files and receipts, then the record, index, registry and
     tree.hash. The source repository is unchanged throughout. Acceptance 2: a current use covers the
     excerpt."""
@@ -236,7 +236,7 @@ def test_a_current_approved_use_covers_the_excerpt_and_the_validation_is_clean(k
 
     staged = new_challenge(kb, source_repo, m.TRACE)
     ok_run(install(kb, source_repo, staged, SC_RECORD), put_line("SC-0001", "challenges"))
-    error = k13_line(same_bytes(m.TRACE, trace_version(source_repo)))
+    error = k14_line(same_bytes(m.TRACE, trace_version(source_repo)))
     confirmed = decide(kb, source_repo, "SC-0001", "confirmed", "--by", "reviewer-b",
                        "--reason", "read the source and pinned it")
     ok_run(confirmed,
@@ -272,7 +272,7 @@ def test_only_the_second_of_two_matches_in_the_cited_range_intersects_the_assert
     pinned at HEAD.
 
     Commands: `challenge new`, `put`, `review decide --status confirmed --by reviewer-b`, and
-    `kblam validate`, no actor, exit 1 with one K13 error, the same-bytes message: the second match
+    `kblam validate`, no actor, exit 1 with one K14 error, the same-bytes message: the second match
     intersects, so the excerpt is affected even though the first does not, and the
     overlap-without-quoting warning is not what it gets. Files changed: as the first test; the
     validation changes nothing and the source repository is unchanged. Acceptance 2: an affected
@@ -281,7 +281,7 @@ def test_only_the_second_of_two_matches_in_the_cited_range_intersects_the_assert
 
     staged = new_challenge(kb, source_repo, m.TRACE, text=ASSERTION)
     ok_run(install(kb, source_repo, staged, SC_RECORD), put_line("SC-0001", "challenges"))
-    error = k13_line(same_bytes(m.TRACE, trace_version(source_repo)))
+    error = k14_line(same_bytes(m.TRACE, trace_version(source_repo)))
     ok_run(decide(kb, source_repo, "SC-0001", "confirmed", "--by", "reviewer-b",
                   "--reason", "read the source and pinned it"),
            f"kblam review decide: SC-0001 is now confirmed (subject digest "
@@ -304,15 +304,15 @@ def test_a_cited_range_that_overlaps_without_quoting_is_a_warning_that_passes_va
     confirmed by reviewer-b on lines 3-3, pinned at HEAD.
 
     Commands: `challenge new`, `put`, `review decide --status confirmed --by reviewer-b` - which
-    leaves no K13 error, a warning never failing anything - and `kblam validate`, no actor, exit 0
-    with one K13 warning naming the cited range and the assertion's lines, then the OK summary.
+    leaves no K14 error, a warning never failing anything - and `kblam validate`, no actor, exit 0
+    with one K14 warning naming the cited range and the assertion's lines, then the OK summary.
     Files changed: as the first test; the validation changes nothing and the source repository is
     unchanged. Acceptance 2: a candidate overlap is surfaced without blocking."""
     quoted_trace(kb, "F-0001", "Row 102: bytes 0x3A 0x3B")
 
     staged = new_challenge(kb, source_repo, m.TRACE, text=ASSERTION)
     ok_run(install(kb, source_repo, staged, SC_RECORD), put_line("SC-0001", "challenges"))
-    warning = k13_line(f"the cited range {m.TRACE}:3-3 overlaps lines 3-3 of SC-0001's assertion "
+    warning = k14_line(f"the cited range {m.TRACE}:3-3 overlaps lines 3-3 of SC-0001's assertion "
                        f"without quoting it; check that the excerpt does not rely on the challenged "
                        f"text (kblam challenge uses SC-0001 lists what SC-0001 affects)", level="warning")
     ok_run(decide(kb, source_repo, "SC-0001", "confirmed", "--by", "reviewer-b",
@@ -349,7 +349,7 @@ def test_another_version_quoting_the_assertion_is_version_unproved(kb, source_re
     source_repo.write(m.TRACE_PATH, NEW_TEXT)                  # another version of the source
     m.quoting_finding(kb, "F-0001", source_repo, "4-4")
 
-    unproved = k13_line(
+    unproved = k14_line(
         f"SC-0001 was judged on {m.TRACE}@{trace_version(source_repo)} only, and this excerpt quotes "
         f"its assertion text from another version of that file. This does not show that the version is "
         f"wrong: challenge it (kblam challenge new {m.TRACE} --lines 4-4 --by NAME) or have this use "
@@ -366,7 +366,7 @@ def test_another_version_that_does_not_quote_the_assertion_reports_nothing(kb, s
     none of the assertion's text and none of which the assertion text holds.
 
     Commands: `challenge new`, `put`, `review decide --status confirmed --by reviewer-b`, and
-    `kblam validate`, no actor, exit 0 with no K13 line at all: kblam does not guess at text shared
+    `kblam validate`, no actor, exit 0 with no K14 line at all: kblam does not guess at text shared
     between versions. Files changed: the record, index, registry and tree.hash on the writes; the
     validation changes nothing and the source repository is unchanged. Acceptance 2: only an excerpt
     quoting the assertion is surfaced across versions."""
@@ -410,10 +410,10 @@ def test_an_evidence_entry_and_prose_that_name_the_challenged_source_are_warning
 
     tail = "(kblam challenge uses SC-0001 lists what SC-0001 affects)"
     ok_run(command(kb, source_repo, set(), "validate"),
-           k13_line(f"evidence lists {m.TRACE}, which SC-0001 challenges; a listed source is not "
+           k14_line(f"evidence lists {m.TRACE}, which SC-0001 challenges; a listed source is not "
                     f"shown to be safe, so check what this finding takes from it against SC-0001's "
                     f"assertion and limits {tail}", line=7, level="warning"),
-           k13_line(f"the text names {m.TRACE}, which SC-0001 challenges; a named source is not "
+           k14_line(f"the text names {m.TRACE}, which SC-0001 challenges; a named source is not "
                     f"shown to be safe, so check that the claim does not rest on SC-0001's "
                     f"assertion {tail}", line=13, level="warning"),
            "kblam validate: OK (1 findings)")
@@ -440,7 +440,7 @@ def test_an_offset_tag_in_a_crlf_multibyte_source_maps_inside_the_assertion_span
     2-2, pinned at HEAD. F-0001's offset tag then points at the raw byte offset of "the two bytes".
 
     Commands: `challenge new` on the new file, `put`, `review decide --status confirmed --by
-    reviewer-b` (no finding yet), and `kblam validate`, no actor, exit 1 with one K13 error: the
+    reviewer-b` (no finding yet), and `kblam validate`, no actor, exit 1 with one K14 error: the
     raw-byte match is mapped into the LF-normalised text and lands inside the assertion's span,
     despite the two bytes of CRLF and the multibyte character before it. Files changed: as the first
     test; the validation changes nothing and the source repository is unchanged (the fixture commit
@@ -456,7 +456,7 @@ def test_an_offset_tag_in_a_crlf_multibyte_source_maps_inside_the_assertion_span
 
     kb.add("F-0001", "ratio", m.CLAIM, body=m.verbatim(f"{path}:@0x{inside:X}", "the two bytes"))
 
-    error = k13_line(same_bytes(path, source_repo.blob("notes/crlf.md")[:12], lines="2-2"))
+    error = k14_line(same_bytes(path, source_repo.blob("notes/crlf.md")[:12], lines="2-2"))
     run = command(kb, source_repo, set(), "validate")
     assert (run.code, run.out.splitlines(), run.err) == (
         1, [error, "kblam validate: 1 error(s) in findings/"], "")
@@ -468,7 +468,7 @@ def test_an_offset_tag_before_the_assertion_span_in_the_same_source_reports_noth
     before the assertion text.
 
     Commands: `challenge new`, `put`, `review decide --status confirmed --by reviewer-b`, and
-    `kblam validate`, no actor, exit 0 with no K13 line: the mapped span lies before the assertion's
+    `kblam validate`, no actor, exit 0 with no K14 line: the mapped span lies before the assertion's
     span, and an offset tag never gets the cited-range warning. Files changed: as the first test; the
     validation changes nothing and the source repository is unchanged. Acceptance 2: the same source
     yields a diagnostic only where the span really intersects."""
@@ -492,14 +492,14 @@ def test_an_offset_tag_before_the_assertion_span_in_the_same_source_reports_noth
 def test_use_review_refuses_a_binary_exempt_excerpt(kb, source_repo):
     """Start: SC-0001 is confirmed by reviewer-b on lines 3-3, pinned at HEAD. The trace's working
     file is then replaced by binary bytes (a fixture write; the pinned challenge stays confirmed and
-    available), so F-0001's excerpt on it is binary-exempt - K10 does not check it and K13 does not
+    available), so F-0001's excerpt on it is binary-exempt - K10 does not check it and K14 does not
     report it.
 
     Commands: `challenge new`, `put`, `review decide --status confirmed --by reviewer-b`, then `use
     review SC-0001 F-0001 1 --by reviewer-b --proponent researcher-a`, exit 1 with the binary-exempt
     refusal: a binary-exempt excerpt never qualifies as a use. Files changed: the three setup
     commands as the first test, and the refusal changes nothing - no CU- record is staged, no
-    receipt written. `validate` afterwards exits 0 with no K10 or K13 line, and the source repository
+    receipt written. `validate` afterwards exits 0 with no K10 or K14 line, and the source repository
     is unchanged by every command. Acceptance 2: a binary-exempt excerpt can never be covered."""
     staged = new_challenge(kb, source_repo, m.TRACE)
     ok_run(install(kb, source_repo, staged, SC_RECORD), put_line("SC-0001", "challenges"))
@@ -527,7 +527,7 @@ def test_two_identical_tag_and_block_copies_are_separate_uses_by_ordinal(kb, sou
     pinned at HEAD.
 
     Commands, each in its own window and each exit 0: `challenge new`, `put`, `review decide --status
-    confirmed --by reviewer-b` (which lists both K13 errors it leaves); `validate` exits 1 with one
+    confirmed --by reviewer-b` (which lists both K14 errors it leaves); `validate` exits 1 with one
     error per copy, naming excerpt 1 and excerpt 2; `use review ... 1`, `put` (which lists both
     errors) and `review decide --status approved --by reviewer-b` (which lists the one left) cover
     the first copy only; `validate` then exits 1 with the single error for excerpt 2, whose recovery
@@ -540,8 +540,8 @@ def test_two_identical_tag_and_block_copies_are_separate_uses_by_ordinal(kb, sou
 
     second_copy = TAG_LINE + 5        # the copy's tag, five body lines below the first (m.verbatim)
     version = trace_version(source_repo)
-    first_error = k13_line(same_bytes(m.TRACE, version))
-    second_error = k13_line(same_bytes(m.TRACE, version, ordinal=2), line=second_copy)
+    first_error = k14_line(same_bytes(m.TRACE, version))
+    second_error = k14_line(same_bytes(m.TRACE, version, ordinal=2), line=second_copy)
 
     staged = new_challenge(kb, source_repo, m.TRACE)
     ok_run(install(kb, source_repo, staged, SC_RECORD), put_line("SC-0001", "challenges"))
@@ -585,19 +585,19 @@ def test_two_identical_tag_and_block_copies_are_separate_uses_by_ordinal(kb, sou
            f"CU-0002 use approved {m.expect(kb, 'CU-0002')[:12]} SC-0001 in F-0001 excerpt 2 current")
 
 
-# --- what K13 leaves to others --------------------------------------------------------------------
+# --- what K14 leaves to others --------------------------------------------------------------------
 
 
 def test_an_excerpt_failing_k10_is_reported_by_k10_alone(kb, source_repo):
     """Start: F-0001 quotes "Row 102: bytes 0x3A 0x3C; the two bytes are equal." under a line-3 tag.
     The source prints 0x3B, so the excerpt occurs nowhere and K10 fails it; it contains the
-    assertion's text, so K13 would relate it if K10 had passed it. SC-0001 is confirmed by
+    assertion's text, so K14 would relate it if K10 had passed it. SC-0001 is confirmed by
     reviewer-b on lines 3-3, pinned at HEAD.
 
     Commands: `challenge new`, `put` (which lists the K10 error owned by F-0001), `review decide
     --status confirmed --by reviewer-b` (which lists it again), and `kblam validate`, no actor, exit
-    1 with the K10 failure alone - no K13 line names the excerpt. Files changed: as the first test;
-    the validation changes nothing and the source repository is unchanged. Acceptance 2: K13 never
+    1 with the K10 failure alone - no K14 line names the excerpt. Files changed: as the first test;
+    the validation changes nothing and the source repository is unchanged. Acceptance 2: K14 never
     waives K10, and an unchecked excerpt is K10's to report."""
     quoted_trace(kb, "F-0001", "Row 102: bytes 0x3A 0x3C; the two bytes are equal.")
 
@@ -615,4 +615,4 @@ def test_an_excerpt_failing_k10_is_reported_by_k10_alone(kb, source_repo):
     run = command(kb, source_repo, set(), "validate")
     assert (run.code, run.out.splitlines(), run.err) == (
         1, [k10, "kblam validate: 1 error(s) in findings/"], "")
-    assert not [line for line in run.out.splitlines() if line.startswith("K13 ")]
+    assert not [line for line in run.out.splitlines() if line.startswith("K14 ")]

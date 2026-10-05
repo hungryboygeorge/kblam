@@ -1,4 +1,4 @@
-"""SPEC §12 M6.10 test group 12, source safety (A1), end to end through the CLI.
+"""SPEC §12 M6.11 test group 12, source safety (A1), end to end through the CLI.
 
 Every test drives `kblam.cli.main` in process, as the console entry point runs it, and asserts the exit
 status, the exact diagnostics, which files changed and the validation result afterwards. Two trees are
@@ -13,11 +13,11 @@ watched around every command:
 
 Offline and deterministic: `_today` is pinned and no fixture enables a Jev verdict.
 
-The canonical key of SPEC §5.1.2 is what every spelling of one path must give: `\\`, `./`, a doubled
-`/`, case on Windows and a symlink alias all key to the one source, so K13 (Acceptance 2) applies to
+The canonical key of SPEC §5.2.2 is what every spelling of one path must give: `\\`, `./`, a doubled
+`/`, case on Windows and a symlink alias all key to the one source, so K14 (Acceptance 2) applies to
 each spelling. A path that traverses, is drive-relative, is a UNC or alternate-data-stream path, or
 resolves out of the repository or into a protected root, is refused instead — by the command that
-takes it, by K12 in a record, or by K10 in a verbatim tag.
+takes it, by K13 in a record, or by K10 in a verbatim tag.
 """
 
 from __future__ import annotations
@@ -196,7 +196,7 @@ def _finding_path(kb, fid: str = "F-0001") -> Path:
 
 
 def _tag_line(kb, tag: str) -> int:
-    """The file line of a verbatim tag: the line K10, K13 and `challenge uses` report the excerpt at."""
+    """The file line of a verbatim tag: the line K10, K14 and `challenge uses` report the excerpt at."""
     lines = _finding_path(kb).read_text(encoding="utf-8").splitlines()
     return next(i for i, line in enumerate(lines, 1)
                 if line.strip() == f"<!-- verbatim: {tag} -->")
@@ -237,7 +237,7 @@ def _fill(path: Path, **fields) -> None:
 
 
 def _rewrite(path: Path, dotted: str, value) -> None:
-    """Hand-edit a staged record's nested field as an editor would, past the lock (SPEC §5.1.6);
+    """Hand-edit a staged record's nested field as an editor would, past the lock (SPEC §5.2.6);
     `dotted` is "key.subkey" or "key[i].subkey"."""
     data = yaml_rt().load(path.read_bytes().decode("utf-8"))
     head, _, tail = dotted.partition(".")
@@ -248,7 +248,7 @@ def _rewrite(path: Path, dotted: str, value) -> None:
 
 
 def _sc_fields(source_repo) -> dict:
-    """The blank SC fields the author fills before the first put (SPEC §5.1.5)."""
+    """The blank SC fields the author fills before the first put (SPEC §5.2.5)."""
     return {"proposition": "The printed byte equality follows from the printed byte values",
             "scope": ["MX-100 capture transcription"],
             "classification": "contradicted",
@@ -276,8 +276,8 @@ def _ct_fields() -> dict:
             "expected_evidence": ["an evidence/ capture package"]}
 
 
-def _k13_same(repo, *, source: str = TRACE, lines: str = "3-3", ordinal: int = 1) -> str:
-    """The K13 same-bytes diagnostic (SPEC §5.1.4) for excerpt `ordinal` of F-0001 against SC-0001."""
+def _k14_same(repo, *, source: str = TRACE, lines: str = "3-3", ordinal: int = 1) -> str:
+    """The K14 same-bytes diagnostic (SPEC §5.2.4) for excerpt `ordinal` of F-0001 against SC-0001."""
     version = repo.blob(TRACE_PATH)[:12]
     return (f"SC-0001 challenges this quoted assertion at {source}@{version}:{lines}; edit the finding "
             f"or have this use reviewed (kblam use review SC-0001 F-0001 {ordinal} --by NAME --proponent "
@@ -286,7 +286,7 @@ def _k13_same(repo, *, source: str = TRACE, lines: str = "3-3", ordinal: int = 1
 
 # --- traversal, drive-relative, UNC and stream paths ----------------------------------------------
 
-# Every refused spelling and the reason paths.syntax_problem gives it (SPEC §5.1.2 Paths).
+# Every refused spelling and the reason paths.syntax_problem gives it (SPEC §5.2.2 Paths).
 BAD_PATHS = [
     ("/etc/passwd", "absolute path"),
     ("../outside.md", "'..' segment"),
@@ -346,7 +346,7 @@ def test_challenge_new_refuses_a_symlink_into_a_protected_root(kb, source_repo, 
     """Start: F-0001 exists; <alias> is a symlink to <target>. Command: kblam challenge new <spelled>
     --lines 1-1 --by reviewer-a. Exit 1; stderr "<spelled> lies under <root>, which is never a source;
     challenge the document the claim came from". Files changed: none in either tree; validate
-    afterwards exits 0 (F-0001 alone is clean). Acceptance 1. §5.1.2: the exclusion tests the resolved
+    afterwards exits 0 (F-0001 alone is clean). Acceptance 1. §5.2.2: the exclusion tests the resolved
     target, so a symlink in does not escape it."""
     _finding(kb, f"{TRACE}:3")
     _accept(kb, capsys)                                       # F-0001 is fixture setup, not the command
@@ -362,7 +362,7 @@ def test_challenge_new_refuses_a_symlink_into_a_protected_root(kb, source_repo, 
     _validate_clean(source_repo, kb, capsys, ["kblam validate: OK (1 findings)"])
 
 
-# --- the same paths in a record: K12, and put's preconditions --------------------------------------
+# --- the same paths in a record: K13, and put's preconditions --------------------------------------
 
 
 @pytest.mark.parametrize("spelled, reason", [
@@ -370,9 +370,9 @@ def test_challenge_new_refuses_a_symlink_into_a_protected_root(kb, source_repo, 
     ("C:x.md", "drive-relative path"),
     ("notes:x.md", "':' (an alternate data stream)"),
 ])
-def test_a_record_path_spelling_is_a_k12_error(kb, source_repo, capsys, spelled, reason):
+def test_a_record_path_spelling_is_a_k13_error(kb, source_repo, capsys, spelled, reason):
     """Start: SC-0001 confirmed, its source path hand-edited to <spelled> (an editor ignores the lock,
-    §5.1.6). Command: kblam validate. Exit 1; "K12 research-review/challenges/SC-0001.yaml:<line>:
+    §5.2.6). Command: kblam validate. Exit 1; "K13 research-review/challenges/SC-0001.yaml:<line>:
     source.path: <reason>", then the error summary. Files changed: none in either tree. Acceptance 1:
     a record path that is not repo-relative is refused, never read."""
     _install(kb, "SC", _sc(source_repo, path=spelled))
@@ -380,16 +380,16 @@ def test_a_record_path_spelling_is_a_k12_error(kb, source_repo, capsys, spelled,
 
     assert _untouched(source_repo, kb, "validate") == 1
     assert capsys.readouterr().out.splitlines() == [
-        f"K12 {CHALLENGES}/SC-0001.yaml:{_key_line(kb, f'{CHALLENGES}/SC-0001.yaml', 'source')}: "
+        f"K13 {CHALLENGES}/SC-0001.yaml:{_key_line(kb, f'{CHALLENGES}/SC-0001.yaml', 'source')}: "
         f"source.path: {reason}",
         "kblam validate: 1 error(s) in findings/",
     ]
 
 
-def test_a_record_path_through_an_escaping_symlink_is_a_k12_error(kb, source_repo, capsys, tmp_path):
+def test_a_record_path_through_an_escaping_symlink_is_a_k13_error(kb, source_repo, capsys, tmp_path):
     """Start: escape.md is a symlink out of the repository; SC-0001 confirmed with it as its source
     path (no syntax problem — the escape is only visible once it is resolved). Command: kblam validate.
-    Exit 1; "K12 ...SC-0001.yaml:<line>: source: path 'escape.md': resolves outside the repository".
+    Exit 1; "K13 ...SC-0001.yaml:<line>: source: path 'escape.md': resolves outside the repository".
     Files changed: none in either tree. Acceptance 1: the resolver refuses the escape rather than
     reading it."""
     outside = tmp_path / "outside.md"
@@ -400,7 +400,7 @@ def test_a_record_path_through_an_escaping_symlink_is_a_k12_error(kb, source_rep
 
     assert _untouched(source_repo, kb, "validate") == 1
     assert capsys.readouterr().out.splitlines() == [
-        f"K12 {CHALLENGES}/SC-0001.yaml:{_key_line(kb, f'{CHALLENGES}/SC-0001.yaml', 'source')}: "
+        f"K13 {CHALLENGES}/SC-0001.yaml:{_key_line(kb, f'{CHALLENGES}/SC-0001.yaml', 'source')}: "
         f"source: path 'escape.md': resolves outside the repository",
         "kblam validate: 1 error(s) in findings/",
     ]
@@ -409,7 +409,7 @@ def test_a_record_path_through_an_escaping_symlink_is_a_k12_error(kb, source_rep
 def test_put_refuses_a_staged_record_whose_basis_path_traverses(kb, source_repo, capsys):
     """Start: SC-0001 is staged and complete except that a basis entry's path (a free field, so the
     allocation receipt does not bind it) was hand-edited to "../../outside.md" after `challenge new`.
-    Command: kblam put <staged>. Exit 1; the K12 lines for basis[0] at the path the record would be
+    Command: kblam put <staged>. Exit 1; the K13 lines for basis[0] at the path the record would be
     installed at, then "kblam put: rejected SC-0001 (...); research-review/ is unchanged...". Files
     changed: none in either tree — no record, no registry, the staged file stays as the author filled
     it — so validate afterwards exits 0, with no record installed. Acceptance 1."""
@@ -423,8 +423,8 @@ def test_put_refuses_a_staged_record_whose_basis_path_traverses(kb, source_repo,
 
     assert _untouched(source_repo, kb, "put", str(staged)) == 1
     lines = capsys.readouterr().out.splitlines()
-    assert lines[0] in {f"K12 {place}: basis[0].path: '..' segment" for place in where}
-    assert lines[1] in {f"K12 {place}: basis[0].sha256: required" for place in where}
+    assert lines[0] in {f"K13 {place}: basis[0].path: '..' segment" for place in where}
+    assert lines[1] in {f"K13 {place}: basis[0].sha256: required" for place in where}
     assert lines[2] == \
         (f"kblam put: rejected SC-0001 (2 error(s)); {REVIEW}/ is unchanged. Fix the staged file and "
          f"put it again. {SKILL_POINTER}")
@@ -435,7 +435,7 @@ def test_put_refuses_a_staged_record_whose_basis_path_traverses(kb, source_repo,
 
 def test_a_verbatim_tag_with_an_unsafe_path_is_a_k10_error(kb, source_repo, capsys):
     """Start: no records; F-0001 quotes line 3 through a tag whose path leaves the repository. Command:
-    kblam validate. Exit 1; K10 reports the tag and its reason (K13 never sees the excerpt). Files
+    kblam validate. Exit 1; K10 reports the tag and its reason (K14 never sees the excerpt). Files
     changed: none in either tree. Acceptance 1: an excerpt cannot reach a source outside the
     repository."""
     tag = "../../outside.md:3"
@@ -452,7 +452,7 @@ def test_a_verbatim_tag_with_an_unsafe_path_is_a_k10_error(kb, source_repo, caps
 
 # --- one canonical key for every spelling ----------------------------------------------------------
 
-# Spellings of the one source path that must key to the one source (SPEC §5.1.2 Paths).
+# Spellings of the one source path that must key to the one source (SPEC §5.2.2 Paths).
 SPELLINGS = [
     TRACE,
     f"./{TRACE}",
@@ -462,9 +462,9 @@ SPELLINGS = [
 
 
 @pytest.mark.parametrize("spelled", SPELLINGS)
-def test_k13_applies_to_every_spelling_of_the_quoted_source(kb, source_repo, capsys, spelled):
+def test_k14_applies_to_every_spelling_of_the_quoted_source(kb, source_repo, capsys, spelled):
     """Start: SC-0001 confirmed on TRACE lines 3-3; F-0001 quotes that line through <spelled>, which the
-    tag keeps as written. Command: kblam validate. Exit 1 with the K13 same-bytes error naming SC-0001,
+    tag keeps as written. Command: kblam validate. Exit 1 with the K14 same-bytes error naming SC-0001,
     the source as the challenge writes it and the pinned version. Files changed: none in either tree.
     Acceptance 2 through the canonical key: every spelling reaches the one challenge."""
     _install(kb, "SC", _sc(source_repo))
@@ -474,15 +474,15 @@ def test_k13_applies_to_every_spelling_of_the_quoted_source(kb, source_repo, cap
 
     assert _untouched(source_repo, kb, "validate") == 1
     assert capsys.readouterr().out.splitlines() == [
-        f"K13 {FINDING_PATH}:{_tag_line(kb, tag)}: {_k13_same(source_repo)}",
+        f"K14 {FINDING_PATH}:{_tag_line(kb, tag)}: {_k14_same(source_repo)}",
         "kblam validate: 1 error(s) in findings/",
     ]
 
 
-def test_a_symlink_alias_gives_k13_one_canonical_key(kb, source_repo, capsys, tmp_path):
+def test_a_symlink_alias_gives_k14_one_canonical_key(kb, source_repo, capsys, tmp_path):
     """Start: SC-0001 confirmed on TRACE; trace-alias.md is a symlink to it in the repository root;
     F-0001 quotes line 3 through the alias. Command: kblam validate, then kblam challenge uses SC-0001.
-    Exit 1 with the K13 same-bytes error (the diagnostic names the source as the challenge writes it,
+    Exit 1 with the K14 same-bytes error (the diagnostic names the source as the challenge writes it,
     not as the finding spells it); challenge uses names the excerpt and the command to fix it, exit 0.
     Files changed: none in either tree for both commands. Acceptance 2 through the canonical key."""
     _install(kb, "SC", _sc(source_repo))
@@ -494,7 +494,7 @@ def test_a_symlink_alias_gives_k13_one_canonical_key(kb, source_repo, capsys, tm
 
     assert _untouched(source_repo, kb, "validate") == 1
     assert capsys.readouterr().out.splitlines() == [
-        f"K13 {FINDING_PATH}:{line}: {_k13_same(source_repo)}",
+        f"K14 {FINDING_PATH}:{line}: {_k14_same(source_repo)}",
         "kblam validate: 1 error(s) in findings/",
     ]
     assert _untouched(source_repo, kb, "challenge", "uses", "SC-0001") == 0
@@ -506,8 +506,8 @@ def test_a_symlink_alias_gives_k13_one_canonical_key(kb, source_repo, capsys, tm
 def test_a_case_differing_spelling_is_one_key_on_windows_only(kb, source_repo, capsys):
     """Start: SC-0001 confirmed on TRACE lines 3-3; F-0001 quotes line 3 through the upper-cased path.
     Command: kblam validate. The canonical key is case-folded with os.path.normcase on Windows only
-    (§5.1.2), so on Windows the tag keys to the same source and K13 fires with the same-bytes error;
-    on a case-sensitive filesystem the two paths are different keys, K13 relates nothing and K10
+    (§5.2.2), so on Windows the tag keys to the same source and K14 fires with the same-bytes error;
+    on a case-sensitive filesystem the two paths are different keys, K14 relates nothing and K10
     reports the missing source. Exit 1 either way (no silent pass); files changed: none in either tree.
     A case-insensitive volume off Windows (macOS, usually) names the real file under the upper-cased
     spelling, so the test skips there rather than assert a rule that platform does not have.
@@ -522,7 +522,7 @@ def test_a_case_differing_spelling_is_one_key_on_windows_only(kb, source_repo, c
     if os.name != "nt" and (kb.root / TRACE.upper()).is_file():
         pytest.skip("case-insensitive filesystem: case folding is a Windows rule (SPEC 275-276)")
     assert changed == {} and code == 1
-    expected = (f"K13 {FINDING_PATH}:{line}: {_k13_same(source_repo)}" if os.name == "nt" else
+    expected = (f"K14 {FINDING_PATH}:{line}: {_k14_same(source_repo)}" if os.name == "nt" else
                 f"K10 {FINDING_PATH}:{line}: verbatim source {TRACE.upper()} does not exist; cite an "
                 f"existing file relative to the repository root")
     assert capsys.readouterr().out.splitlines() == [expected,
@@ -652,7 +652,7 @@ def test_challenge_edit_stages_a_copy_of_an_open_challenge(kb, source_repo, caps
 
 
 def test_a_whole_review_workflow_leaves_the_source_repository_unchanged(kb, source_repo, capsys):
-    """Start: F-0001 quotes line 3 of the trace; no records. Every §5.1.5 command that reads or relates
+    """Start: F-0001 quotes line 3 of the trace; no records. Every §5.2.5 command that reads or relates
     to the source is run in turn through the CLI, each on its own actor: challenge new (by reviewer-a)
     → put → challenge show → review decide --status confirmed (reviewer-b) → challenge uses → use review
     (reviewer-a) → put → review decide --status approved (reviewer-b) → review rebind (reviewer-b) →

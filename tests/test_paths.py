@@ -1,4 +1,4 @@
-"""M6.10 U1: canonical path keys and refusals (SPEC §5.1.2 Paths)."""
+"""M6.11 U1: canonical path keys and refusals (SPEC §5.2.2 Paths)."""
 
 from __future__ import annotations
 

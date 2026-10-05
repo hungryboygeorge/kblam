@@ -1,4 +1,4 @@
-"""The review index (SPEC §5.1.5): byte-exact, deterministic, offline.
+"""The review index (SPEC §5.2.5): byte-exact, deterministic, offline.
 
 Records are built directly and injected into the view: parsing is records.parse_record's business, and
 the review root's files are a wave-3 concern. Source paths are lower case, so the real
@@ -19,7 +19,7 @@ OTHER = "resources/mx-docs/notes/other-trace.md"
 
 
 def source(path: str, *, sha256: str = ZERO64, occurrence: int = 1, lines=(3, 3)) -> dict:
-    """A `source` mapping naming `path` (SPEC §5.1.3), with the assertion's identity varied."""
+    """A `source` mapping naming `path` (SPEC §5.2.3), with the assertion's identity varied."""
     return {"path": path, "sha256": ZERO64, "repo": None, "commit": None, "blob": None, "snapshot": None,
             "assertion": {"lines": list(lines), "text": "the two bytes are equal", "sha256": sha256,
                           "occurrence": occurrence}}
@@ -141,7 +141,7 @@ def test_review_index_leaves_out_unparsed_and_unnamed(kb):
 
 
 def test_review_index_refused_path_keys_as_written(kb, monkeypatch):
-    """A path canonical_key refuses still groups, under the path as written (SPEC §5.1.5)."""
+    """A path canonical_key refuses still groups, under the path as written (SPEC §5.2.5)."""
     def refuse(cfg, raw: str) -> str:
         if raw.startswith("/"):
             raise paths.PathRefused("absolute path")

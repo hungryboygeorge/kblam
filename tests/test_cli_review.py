@@ -1,4 +1,4 @@
-"""The §5.1.5 commands at the console entry point (SPEC §5.1.5, §5.1.6, §7): subcommands, output and exit
+"""The §5.2.5 commands at the console entry point (SPEC §5.2.5, §5.2.6, §7): subcommands, output and exit
 codes. Records come from the nested Git fixture repository; staging runs through the CLI, so these tests
 cover the whole path from `challenge new` to `validate`. Offline and deterministic: `_today` is pinned and
 the fixtures enable no Jev verdict, so no request leaves the machine."""
@@ -24,7 +24,7 @@ from kblam.treehash import write_tree_hash_v2
 from kblam.view import load_view
 
 from test_concurrency import hold_lock, set_lock_config
-from test_k13 import CLAIM, LINE3, REVIEW, TRACE, add_finding, put as install_record, quoted, sc, use
+from test_k14 import CLAIM, LINE3, REVIEW, TRACE, add_finding, put as install_record, quoted, sc, use
 from test_review_stage import ct
 from test_store import CLAIM_A, fill as fill_finding
 
@@ -86,7 +86,7 @@ def fill(path: Path, **fields) -> None:
 
 
 def sc_fields(source_repo) -> dict:
-    """The blank SC fields the author fills before the first put (SPEC §5.1.5)."""
+    """The blank SC fields the author fills before the first put (SPEC §5.2.5)."""
     return {"proposition": "The printed byte equality follows from the printed byte values",
             "scope": ["MX-100 capture transcription"],
             "classification": "contradicted",
@@ -291,7 +291,7 @@ def test_review_decide_refuses_a_decision_by_the_creator(kb, source_repo, capsys
 
 
 def test_review_decide_refused_by_the_records_own_error_lists_it(kb, source_repo, capsys):
-    """A decision blocks on the errors owned by the record it acts on (SPEC §5.1.4): the confirmation
+    """A decision blocks on the errors owned by the record it acts on (SPEC §5.2.4): the confirmation
     needs primary support, so the write is refused and nothing changes."""
     data = sc(source_repo, status="open")
     data["basis"][0]["provenance"] = "inferred"               # not in [review] primary_provenance
@@ -301,7 +301,7 @@ def test_review_decide_refused_by_the_records_own_error_lists_it(kb, source_repo
                "--reason", "read the source", "--expect", digest_of(kb, "SC-0001")) == 1
     text = capsys.readouterr().out
     assert text.splitlines() == [
-        f"K12 {CHALLENGES}/SC-0001.yaml:24: SC-0001 is confirmed with no primary support; a confirmation "
+        f"K13 {CHALLENGES}/SC-0001.yaml:24: SC-0001 is confirmed with no primary support; a confirmation "
         f"needs a basis entry whose provenance is one of observed, decoded and whose resolved path is "
         f"outside findings/, {REVIEW}/ and the history folders",
         f"kblam review decide: refused SC-0001 (1 error(s)); {REVIEW}/ is unchanged. Fix what is listed "
@@ -339,12 +339,12 @@ def test_review_rebind_rebinds_a_stale_use(kb, source_repo, capsys):
 
     kb.add("F-0001", "ratio", CLAIM, body=quoted(f"{TRACE}:3", LINE3) + "\n\nAnother detail.\n")
     accept_tree(kb, capsys)
-    assert run(kb, "validate") == 1                           # the use no longer holds: K13 fires again
+    assert run(kb, "validate") == 1                           # the use no longer holds: K14 fires again
     assert run(kb, "review", "rebind", "CU-0001", "--by", "reviewer-b", "--reason",
                "rechecked the excerpt in the new revision",
                "--expect", digest_of(kb, "CU-0001")) == 0
     text = capsys.readouterr().out
-    assert "K12 warning research-review/uses/CU-0001.yaml: F-0001's file bytes changed since this use " \
+    assert "K13 warning research-review/uses/CU-0001.yaml: F-0001's file bytes changed since this use " \
            "was bound" in text
     assert text.splitlines()[-1] == \
         (f"kblam review rebind: CU-0001 rebound, now approved "
@@ -381,7 +381,7 @@ def test_a_refused_record_put_writes_nothing(kb, capsys):
     assert run(kb, "put", str(staged)) == 1
     text = capsys.readouterr().out
     first = text.splitlines()[0]
-    where = f"K14 {STAGING}/CT-0001.yaml:"           # the staged file, not the canonical path (D33)
+    where = f"K15 {STAGING}/CT-0001.yaml:"           # the staged file, not the canonical path (D33)
     assert first.startswith(where)
     assert staged.read_text(encoding="utf-8").split("\n")[int(first[len(where):].split(":")[0]) - 1] \
         .startswith("question:")
@@ -415,8 +415,8 @@ def test_a_record_put_lists_errors_owned_by_other_files(kb, source_repo, capsys)
 
 
 def test_editing_a_finding_lists_the_use_it_makes_stale(kb, source_repo, capsys):
-    """SPEC §12 M6.10 group 4: a body-only edit keeps the affected excerpt, so the put succeeds, lists the
-    use it makes stale and the K13 error it keeps, and validate fails until the use is rebound."""
+    """SPEC §12 M6.11 group 4: a body-only edit keeps the affected excerpt, so the put succeeds, lists the
+    use it makes stale and the K14 error it keeps, and validate fails until the use is rebound."""
     install_record(kb, "SC", sc(source_repo))
     add_finding(kb, "3", LINE3)
     install_record(kb, "CU", use(kb))
@@ -432,8 +432,8 @@ def test_editing_a_finding_lists_the_use_it_makes_stale(kb, source_repo, capsys)
     assert ("kblam put: CU-0001 is now stale (this put changed F-0001, which it is bound to); a reviewer "
             "rechecks it and runs kblam review rebind CU-0001 --by NAME --reason TEXT --expect D. kblam "
             "validate fails until then") in text
-    # a put reports its own file at the staged path it read (`view.display`, SPEC §5.1.5)
-    assert "K13 .kblam/staging/F-0001-ratio.md:15: SC-0001 challenges this quoted assertion at " \
+    # a put reports its own file at the staged path it read (`view.display`, SPEC §5.2.5)
+    assert "K14 .kblam/staging/F-0001-ratio.md:15: SC-0001 challenges this quoted assertion at " \
            f"{TRACE}@" in text
     assert text.endswith("kblam put: done, but kblam validate still fails (1 error(s) listed above that "
                          "this put did not refuse)\n")
@@ -441,7 +441,7 @@ def test_editing_a_finding_lists_the_use_it_makes_stale(kb, source_repo, capsys)
 
 
 def test_a_stale_closed_task_is_told_to_rebind_with_evidence(kb, source_repo, capsys):
-    """SPEC §5.1.5: a rebind keeps the record's status and passes that status's closing checks again, so a
+    """SPEC §5.2.5: a rebind keeps the record's status and passes that status's closing checks again, so a
     confirmed task's rebind must cite its primary evidence once more. The line the put prints is runnable
     as printed."""
     EVIDENCE = "observed:evidence/2026-09-22-ratio/README.md:row 0"
@@ -503,15 +503,15 @@ def test_validate_prints_pending_tasks_without_failing(kb, source_repo, capsys):
         "kblam validate: OK (1 findings); 1 pending task(s); recorded .kblam/tree.hash for this tree"
 
 
-def test_a_range_only_k13_warning_passes_validate(kb, source_repo, capsys):
-    """SPEC §12 M6.10 group 3: an excerpt whose cited range overlaps the assertion's lines without
+def test_a_range_only_k14_warning_passes_validate(kb, source_repo, capsys):
+    """SPEC §12 M6.11 group 3: an excerpt whose cited range overlaps the assertion's lines without
     quoting it is a warning, and validate exits 0."""
     install_record(kb, "SC", sc(source_repo))
     add_finding(kb, "3", "Row 102: bytes 0x3A 0x3B")
     accept_tree(kb, capsys)
     assert run(kb, "validate") == 0
     text = capsys.readouterr().out
-    assert re.fullmatch(r"K13 warning findings/calibration/F-0001-ratio\.md:\d+: " + re.escape(RANGE_WARNING),
+    assert re.fullmatch(r"K14 warning findings/calibration/F-0001-ratio\.md:\d+: " + re.escape(RANGE_WARNING),
                         text.splitlines()[0])
     assert text.endswith("kblam validate: OK (1 findings)\n")
 
@@ -534,7 +534,7 @@ def test_validate_record_leaves_a_kb_without_records_without_a_registry(kb, caps
 
 
 def test_forget_missing_drops_the_gone_ids_and_record_alone_does_not(kb, source_repo, capsys):
-    """SPEC §12 M6.10 group 8: `review index` and a plain `validate --record` never forget; only
+    """SPEC §12 M6.11 group 8: `review index` and a plain `validate --record` never forget; only
     --forget-missing does, printing each ID, and the drop stands."""
     install_record(kb, "SC", sc(source_repo, rec_id="SC-0001"))
     install_record(kb, "SC", sc(source_repo, rec_id="SC-0002", lines=(2, 2), text=LINE2))
@@ -552,7 +552,7 @@ def test_forget_missing_drops_the_gone_ids_and_record_alone_does_not(kb, source_
     assert run(kb, "validate", "--record") == 1
     text = capsys.readouterr().out
     assert text.splitlines() == [
-        f"K12 {CHALLENGES}/SC-0002.yaml: SC-0002 is missing from {REVIEW}/; records are never deleted or "
+        f"K13 {CHALLENGES}/SC-0002.yaml: SC-0002 is missing from {REVIEW}/; records are never deleted or "
         f"renamed; restore it from git",
         "kblam validate: 1 error(s) in findings/; tree.hash not recorded",
     ]
@@ -631,7 +631,7 @@ def test_a_locked_kb_reports_a_timeout(kb, capsys):
 
 def test_the_full_cli_round_trip(kb, source_repo, capsys):
     """challenge new → put → decide confirmed → use review → put → decide approved → task new → put →
-    decide confirmed: every §5.1.5 command, then a clean validate and three current records."""
+    decide confirmed: every §5.2.5 command, then a clean validate and three current records."""
     add_finding(kb, "3", LINE3)                               # F-0001 quotes line 3 of the trace
     accept_tree(kb, capsys)
 

@@ -1,13 +1,13 @@
-"""Installing and changing review records (SPEC §5.1.4 "Where each rule blocks", §5.1.5, §5.1.6):
+"""Installing and changing review records (SPEC §5.2.4 "Where each rule blocks", §5.2.5, §5.2.6):
 `kblam put` of an SC-/CT-/CU- file, `review decide`, `review rebind`, `challenge pin` and
 `review index`. Library functions only; cli.py dispatches `kblam put` on the file name (records.
 FILENAME_RE to put_record, anything else to store.put) and maps results to exit codes.
 
 Every function here follows one frame:
-1. Argument checks that need no tree (ID syntax, a §5.1.2 name for --by, a non-empty --reason,
+1. Argument checks that need no tree (ID syntax, a §5.2.2 name for --by, a non-empty --reason,
    --expect syntax, --evidence syntax) raise store.StoreError before the lock.
 2. Under writes.locked(cfg, "<command>", mutating=True): load_view(cfg) and one sources.SourceReader;
-   the command's preconditions (§5.1.5), each refused with store.StoreError and its SPEC message.
+   the command's preconditions (§5.2.5), each refused with store.StoreError and its SPEC message.
 3. The record's new bytes (records.dump of the updated round-trip mapping, so comments survive), then
    the candidate view: the current view with those bytes at `<review root>/<kind folder>/<ID>.yaml` and
    the review index regenerated (review_index.generate_review_index of the candidate).
@@ -32,11 +32,11 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 
-from kblam import (decisions, gitpin, k12, k13, k14, matching, paths, receipts, records,
+from kblam import (decisions, gitpin, k13, k14, k15, matching, paths, receipts, records,
                    review_index, rules, treehash, writes)
 from kblam.config import Config
 from kblam.finding import fingerprint, normalise_newlines, plain_data
-from kblam.k12 import _canonical_kind                      # K12's one rule for a record's canonical path
+from kblam.k13 import _canonical_kind                      # K13's one rule for a record's canonical path
 from kblam.records import Record
 from kblam.rules import Issue
 from kblam.sources import SourceReader, sha256_hex
@@ -46,7 +46,7 @@ from kblam.view import KBView, load_view
 EXPECT_MIN = 12   # --expect takes the subject digest or a prefix of at least 12 hex digits
 
 HEX_RE = re.compile(r"[0-9a-f]+")
-# The messages SPEC §5.1.3 and §5.1.5 quote, byte for byte.
+# The messages SPEC §5.2.3 and §5.2.5 quote, byte for byte.
 MESSAGE_SOURCE_CHANGED = "the source changed since kblam challenge new; run it again"
 MESSAGE_TASK_BOUND = "{finding} changed since kblam task new bound {rec_id} to it; reread it and run " \
                      "kblam task new again"
@@ -67,7 +67,7 @@ class WriteResult:
     warnings: list[Issue] = field(default_factory=list)       # every warning of the candidate validation
     remaining: list[Issue] = field(default_factory=list)      # errors owned by others: validate still fails
     newly_affected: list[str] = field(default_factory=list)   # decide confirmed: finding IDs whose excerpts
-                                                              # the challenge newly affects (K13)
+                                                              # the challenge newly affects (K14)
     recorded: bool = False                                    # tree.hash advanced
 
     @property
@@ -79,7 +79,7 @@ class WriteResult:
 
 
 def match_expect(rec_id: str, digest: str, expect: str) -> None:
-    """--expect (SPEC §5.1.5): `expect` must be lowercase hex of at least EXPECT_MIN digits (else a
+    """--expect (SPEC §5.2.5): `expect` must be lowercase hex of at least EXPECT_MIN digits (else a
     StoreError saying so) and a prefix of `digest`; otherwise StoreError("<ID> changed since you inspected
     it; show it again"), with "show" naming the command: kblam challenge show / task show for SC / CT,
     kblam review list for CU."""
@@ -99,7 +99,7 @@ def parse_evidence(cfg: Config, spec: str) -> dict:
     (name the allowed values); a path paths.syntax_problem or paths.resolve refuses; a directory; a
     missing file. The entry: the path as a record writes it (`\\` to `/`, a leading `./` dropped), sha256 of the working file's raw bytes, repo/commit/blob from
     gitpin.auto_pin(cfg, path, sha256) or all null, snapshot null, locator, provenance. Whether the
-    entry is primary is K14's and K12's to judge on the candidate, not this function's."""
+    entry is primary is K15's and K13's to judge on the candidate, not this function's."""
     parts = spec.split(":", 2)
     if len(parts) < 3:
         raise StoreError(f"--evidence takes PROVENANCE:PATH:LOCATOR, not {spec!r}; the path and the "
@@ -115,7 +115,7 @@ def parse_evidence(cfg: Config, spec: str) -> dict:
     problem = paths.syntax_problem(path)
     if problem:
         raise StoreError(f"--evidence path {path!r}: {problem}")
-    path = _written_path(path)                            # the path as the entry writes it (§5.1.2)
+    path = _written_path(path)                            # the path as the entry writes it (§5.2.2)
     try:
         target = paths.resolve(cfg, path)
     except paths.PathRefused as exc:
@@ -145,7 +145,7 @@ def parse_evidence(cfg: Config, spec: str) -> dict:
 
 
 def put_record(cfg: Config, staged: Path) -> WriteResult:
-    """`kblam put <staged SC-/CT-/CU- file>` (SPEC §5.1.5 "What put accepts").
+    """`kblam put <staged SC-/CT-/CU- file>` (SPEC §5.2.5 "What put accepts").
 
     The staged name must match records.FILENAME_RE; it parses (records.parse_record) or is refused
     with the parse error. The ID comes from the name, and the data's `id` must equal it.
@@ -162,16 +162,16 @@ def put_record(cfg: Config, staged: Path) -> WriteResult:
       lines) and written; a non-null wrong value is refused, as is an assertion that does not match
       exactly once within its lines. Each basis entry with null sha256 gets the working file's sha256
       and, when all three pin keys are null, gitpin.auto_pin's pin; a basis entry whose canonical key
-      is the source's gets source.sha256 and no pin (§5.1.3 Basis); a given sha256 or pin is verified
+      is the source's gets source.sha256 and no pin (§5.2.3 Basis); a given sha256 or pin is verified
       (sources resolve), never replaced.
     - CT: if the finding's fingerprint or file sha256 now differs from the receipt: "<F> changed since
       kblam task new bound <CT> to it; reread it and run kblam task new again".
-    - CU: nothing beyond the receipt (a broken binding is a K12 warning; K13 blocks the finding).
+    - CU: nothing beyond the receipt (a broken binding is a K13 warning; K14 blocks the finding).
     Put over an installed record: an edit-base receipt must exist and equal the sha256 of the installed
     bytes, else "<ID> changed since your edit; run kblam <challenge|task> edit <ID> again"; the
     installed status must be open; every field except the kind's free fields (FREE_FIELDS) must equal
     the installed record's. For an SC, the basis is filled and verified as on a first put (SPEC
-    §5.1.5: a staged basis entry may leave sha256 and the pin null), except that an entry equal to an
+    §5.2.5: a staged basis entry may leave sha256 and the pin null), except that an entry equal to an
     installed one is not read again.
     On either put, a basis entry that is new or changed and has a given sha256 must resolve available
     (sources resolve, an on-source entry read at the source's pin), or the put is refused.
@@ -239,7 +239,7 @@ def _at_staged(result: WriteResult, staged: Record, written: Record, path: str,
 
     def moved(issue: Issue) -> Issue:
         if issue.path != path:
-            return issue                # an issue about another file keeps that file's path (§5.1.4)
+            return issue                # an issue about another file keeps that file's path (§5.2.4)
         return replace(issue, path=shown, line=lines.get(issue.line, issue.line))
 
     result.issues = [moved(issue) for issue in result.issues]
@@ -256,7 +256,7 @@ FREE_FIELDS = {
 
 def _first_put(cfg: Config, rec: Record, rec_id: str, kind: str, view: KBView,
                reader: SourceReader) -> None:
-    """The §5.1.5 checks a first put adds: the allocation receipt, and the kind's computed fields."""
+    """The §5.2.5 checks a first put adds: the allocation receipt, and the kind's computed fields."""
     receipt = receipts.read_allocation(cfg, rec_id)
     if receipt is None:
         raise StoreError(
@@ -277,7 +277,7 @@ def _first_put(cfg: Config, rec: Record, rec_id: str, kind: str, view: KBView,
 
 def _over_put(cfg: Config, rec: Record, rec_id: str, kind: str, installed: Record,
               reader: SourceReader) -> None:
-    """The §5.1.5 checks a put over an installed record adds: a current edit base, an open record, every
+    """The §5.2.5 checks a put over an installed record adds: a current edit base, an open record, every
     field but the kind's free ones equal to the installed record's, and, for a challenge, the basis
     entries a first put would fill in and verify."""
     base = receipts.read_edit_base(cfg, rec_id)
@@ -306,7 +306,7 @@ def _over_put(cfg: Config, rec: Record, rec_id: str, kind: str, installed: Recor
 
 
 def _edit_hint(rec_id: str, kind: str) -> str:
-    """How an author changes a record that is already installed (SPEC §5.1.5): an edit command for a
+    """How an author changes a record that is already installed (SPEC §5.2.5): an edit command for a
     challenge or a task, and a new record for a use, which has no edit command. Written to follow a
     semicolon or "then" in the messages above."""
     if kind == "CU":
@@ -340,7 +340,7 @@ def _match_receipt(rec_id: str, kind: str, data: dict, receipt: dict) -> None:
 
 
 def _same_as_receipt(rec_id: str, key: str, value, expected) -> None:
-    """One field the allocation receipt fixes (SPEC §5.1.5): a receipt is never rewritten."""
+    """One field the allocation receipt fixes (SPEC §5.2.5): a receipt is never rewritten."""
     if value != expected:
         raise StoreError(
             f"{rec_id}: {key} is {value!r}, but its allocation receipt has {expected!r}. The ID, the "
@@ -350,7 +350,7 @@ def _same_as_receipt(rec_id: str, key: str, value, expected) -> None:
 
 def _fill_challenge(cfg: Config, rec: Record, rec_id: str, reader: SourceReader, receipt: dict) -> None:
     """A first put of an SC: the source is still there, the assertion may be narrowed, and the computed
-    assertion values and the basis' null hashes and pins are filled in (SPEC §5.1.3, §5.1.5). The
+    assertion values and the basis' null hashes and pins are filled in (SPEC §5.2.3, §5.2.5). The
     computed values go into the round-trip mapping, which is what records.dump writes."""
     meta = rec.meta
     source = meta.get("source") if isinstance(meta.get("source"), dict) else None
@@ -372,7 +372,7 @@ def _fill_challenge(cfg: Config, rec: Record, rec_id: str, reader: SourceReader,
 
 
 def _source_text(data: bytes) -> str | None:
-    """The source's LF-normalised text, or None for a binary source (as matching and K12 read it)."""
+    """The source's LF-normalised text, or None for a binary source (as matching and K13 read it)."""
     if b"\0" in data:
         return None
     try:
@@ -382,7 +382,7 @@ def _source_text(data: bytes) -> str | None:
 
 
 def _narrowing(rec_id: str, assertion: dict, captured) -> None:
-    """The assertion may be narrowed before the first put, never widened (SPEC §5.1.3 Capture)."""
+    """The assertion may be narrowed before the first put, never widened (SPEC §5.2.3 Capture)."""
     captured = captured if isinstance(captured, dict) else {}
     lines, text = assertion.get("lines"), assertion.get("text")
     recorded_lines, recorded_text = captured.get("lines"), captured.get("text")
@@ -421,7 +421,7 @@ def _locate(rec_id: str, text: str, assertion: dict):
 
 
 def _fill_assertion(rec_id: str, assertion: dict, located) -> None:
-    """The assertion's sha256 and occurrence: computed when null, verified when given (SPEC §5.1.3)."""
+    """The assertion's sha256 and occurrence: computed when null, verified when given (SPEC §5.2.3)."""
     if located is None:
         return
     occurrence, _span = located
@@ -444,9 +444,9 @@ def _fill_assertion(rec_id: str, assertion: dict, located) -> None:
 def _fill_basis(cfg: Config, rec_id: str, meta, source: dict, reader: SourceReader,
                 installed_basis=()) -> None:
     """Every basis entry with a null sha256 gets the working file's sha256, and the pin auto_pin gives,
-    unless the entry is on the source itself, which gets source.sha256 and no pin (SPEC §5.1.3 Basis).
+    unless the entry is on the source itself, which gets source.sha256 and no pin (SPEC §5.2.3 Basis).
 
-    A new or changed entry that gives a sha256 must resolve to those bytes (SPEC §5.1.5: a given value is
+    A new or changed entry that gives a sha256 must resolve to those bytes (SPEC §5.2.5: a given value is
     verified, never replaced). `installed_basis` is the installed record's basis, as plain data: an entry
     put over an installed record exactly as it stands was verified when it was installed, so it is not
     read again, and a basis that only carries over stays valid when another source is unavailable."""
@@ -479,7 +479,7 @@ def _fill_basis(cfg: Config, rec_id: str, meta, source: dict, reader: SourceRead
 
 def _verify_basis(cfg: Config, rec_id: str, index: int, entry: dict, reader: SourceReader,
                   source: dict) -> None:
-    """A basis entry that gives a sha256 resolves to those bytes (SPEC §5.1.5), the way the source's
+    """A basis entry that gives a sha256 resolves to those bytes (SPEC §5.2.5), the way the source's
     reference is resolved: an entry on the source itself is read at the source's pin."""
     resolved = reader.resolve(records.file_ref(entry), pinned_source=records.file_ref(source))
     if resolved.state.available:
@@ -490,7 +490,7 @@ def _verify_basis(cfg: Config, rec_id: str, index: int, entry: dict, reader: Sou
 
 
 def _check_task_fresh(cfg: Config, rec: Record, rec_id: str, view: KBView, receipt: dict) -> None:
-    """A first put of a CT whose finding changed since task new is refused (SPEC §5.1.5)."""
+    """A first put of a CT whose finding changed since task new is refused (SPEC §5.2.5)."""
     finding_id = rec.data.get("finding")
     found = [f for f in view.findings if f.file_id == finding_id]
     if len(found) != 1 or not found[0].ok:
@@ -524,10 +524,10 @@ def decide(cfg: Config, rec_id: str, status: str, by: str, reason: str, expect: 
     decisions.transition_problem(kind, old status, status) is None; when decisions.needs_independence,
     decisions.independence_problem is None. Appends {date, by, status, reason, evidence: [parse_evidence
     of each], bind} and sets `status`. The kind's closing requirements are then the candidate
-    validation's errors owned by the record (K12 SC confirmation, K14 primary evidence). Approving a CU
-    is refused unless k12.use_current holds for it on the candidate (list use_binding_problems).
+    validation's errors owned by the record (K13 SC confirmation, K15 primary evidence). Approving a CU
+    is refused unless k13.use_current holds for it on the candidate (list use_binding_problems).
     For `--status confirmed` of an SC, newly_affected is the finding IDs having a triple with this
-    challenge's ID in k13.affected_triples on the candidate but not on the current view.
+    challenge's ID in k14.affected_triples on the candidate but not on the current view.
     """
     _check_record_id(rec_id)
     _check_name(by)
@@ -577,7 +577,7 @@ def _decide_data(rec: Record, base: dict, status: str, by: str, reason: str,
 def _record_bytes(rec: Record, new_data: dict) -> bytes:
     """records.dump of the round-trip mapping with new_data's changes written into it, so comments survive
     everywhere else. The decision's `bind` is the subject digest after the command's other changes
-    (SPEC §5.1.5), so it is computed before the bytes are."""
+    (SPEC §5.2.5), so it is computed before the bytes are."""
     decision = new_data["decisions"][-1]
     decision["bind"] = decisions.subject_digest(rec.kind, new_data)
     meta = rec.meta
@@ -591,17 +591,17 @@ def _record_bytes(rec: Record, new_data: dict) -> bytes:
 
 
 def _check_approved_cu(cfg: Config, candidate: KBView, written: Record, rec_id: str) -> None:
-    """Approving a use is refused unless it is current once approved (SPEC §5.1.3 "A use is current")."""
+    """Approving a use is refused unless it is current once approved (SPEC §5.2.3 "A use is current")."""
     reader = SourceReader(cfg, candidate)
-    if k12.use_current(candidate, reader, written):
+    if k13.use_current(candidate, reader, written):
         return
-    problems = k12.use_binding_problems(candidate, reader, written)
+    problems = k13.use_binding_problems(candidate, reader, written)
     detail = " ".join(problems) if problems else f"{rec_id} is not approved"
     raise StoreError(f"approving {rec_id} needs it to be current: {detail}")
 
 
 def _newly_affected(cfg: Config, view: KBView, candidate: KBView, rec: Record) -> list[str]:
-    """The findings the confirmation newly makes fail K13 (SPEC §5.1.4, §5.1.5): the IDs having an
+    """The findings the confirmation newly makes fail K14 (SPEC §5.2.4, §5.2.5): the IDs having an
     affected triple with this challenge's ID in the candidate but not in the current view."""
     before = SourceReader(cfg, view)
     after = SourceReader(cfg, candidate)
@@ -610,9 +610,9 @@ def _newly_affected(cfg: Config, view: KBView, candidate: KBView, rec: Record) -
     for finding in candidate.findings:
         if not finding.file_id:
             continue
-        now = {triple for triple in k13.affected_triples(candidate, after, finding.file_id)
+        now = {triple for triple in k14.affected_triples(candidate, after, finding.file_id)
                if triple[0] == rec_id}
-        was = {triple for triple in k13.affected_triples(view, before, finding.file_id)
+        was = {triple for triple in k14.affected_triples(view, before, finding.file_id)
                if triple[0] == rec_id}
         if now - was:
             found.append(finding.file_id)
@@ -626,16 +626,16 @@ def _finding_order(finding_id: str):
 
 
 def _rebind_hint(rec_id: str, status: str | None, reopen: bool = False) -> str:
-    """The rebind command a diagnostic suggests: the complete one (SPEC §5.1.5), since --by alone is a
+    """The rebind command a diagnostic suggests: the complete one (SPEC §5.2.5), since --by alone is a
     usage error. `status` is the record's status as installed and `reopen` whether that command was the
     reopening one. A rebind that does not reopen keeps the record's status and passes that status's
     closing checks again, so a task kept confirmed or not_reproduced cites its primary evidence once
     more; a reopening rebind sets the record open, which closes nothing, so it carries --reopen and
     needs no evidence."""
-    command = k14.REBIND.format(rid=rec_id)
+    command = k15.REBIND.format(rid=rec_id)
     if reopen and status != "open":
         return command + " --reopen"
-    return command + (" --evidence PROVENANCE:PATH:LOCATOR" if status in k14.PRIMARY_EVIDENCE else "")
+    return command + (" --evidence PROVENANCE:PATH:LOCATOR" if status in k15.PRIMARY_EVIDENCE else "")
 
 
 def rebind(cfg: Config, rec_id: str, by: str, reason: str, expect: str, evidence: list[str], *,
@@ -652,7 +652,7 @@ def rebind(cfg: Config, rec_id: str, by: str, reason: str, expect: str, evidence
     and say to stage a new use (kblam use review ...). Then a decision with status open (reopen) or the
     current status, checked as decide checks it (transition, independence; for a CU kept approved,
     current once approved; for a closed CT, its primary evidence given again with --evidence and judged
-    by K14 on the candidate).
+    by K15 on the candidate).
     """
     _check_record_id(rec_id)
     _check_name(by)
@@ -698,7 +698,7 @@ def rebind(cfg: Config, rec_id: str, by: str, reason: str, expect: str, evidence
 
 def _rebind_task(cfg: Config, view: KBView, new_data: dict, rec_id: str, status: str | None,
                  reopen: bool) -> None:
-    """A task's new binding: the installed finding's fingerprint and file sha256 (SPEC §5.1.5)."""
+    """A task's new binding: the installed finding's fingerprint and file sha256 (SPEC §5.2.5)."""
     finding = _one_finding(cfg, view, new_data.get("finding"), rec_id, status, reopen)
     new_data["claim_fingerprint"] = fingerprint(finding)
     new_data["base_file_sha256"] = sha256_hex(finding.raw)
@@ -713,7 +713,7 @@ def _rebind_use(cfg: Config, view: KBView, reader: SourceReader, new_data: dict,
     if challenge is None or challenge.kind != "SC":
         raise StoreError(f"the challenge {challenge_id} is not a record in {cfg.review_dir}/; restore it "
                          f"from git, then run {_rebind_hint(rec_id, status, reopen)}")
-    info = k12.challenge_info(view, reader, challenge)
+    info = k13.challenge_info(view, reader, challenge)
     if not info.confirmed:
         raise StoreError(f"the challenge {challenge_id} is {challenge.status}, not confirmed; a use binds a "
                          f"confirmed challenge with an available source")
@@ -732,7 +732,7 @@ def _rebind_use(cfg: Config, view: KBView, reader: SourceReader, new_data: dict,
 def _rebind_citation(cfg: Config, view: KBView, reader: SourceReader, finding, new_data: dict,
                      rec_id: str) -> dict:
     """The citation a rebind keeps: the excerpt at the cited ordinal if it still carries the cited
-    tag_sha256, else the only excerpt that does (SPEC §5.1.5)."""
+    tag_sha256, else the only excerpt that does (SPEC §5.2.5)."""
     citation = new_data.get("citation") if isinstance(new_data.get("citation"), dict) else {}
     matches = matching.finding_matches(view, reader, finding)
     ordinal, tag = citation.get("ordinal"), citation.get("tag_sha256")
@@ -816,7 +816,7 @@ def challenge_pin(cfg: Config, rec_id: str, expect: str, snapshot: str | None = 
 
 
 def _check_snapshot(cfg: Config, rec_id: str, snapshot: str, digest, source_key: str | None) -> None:
-    """--snapshot: a project-owned copy of the source's bytes (SPEC §5.1.2 "Git pins", §5.1.5): a file
+    """--snapshot: a project-owned copy of the source's bytes (SPEC §5.2.2 "Git pins", §5.2.5): a file
     outside every source repository, outside the roots kblam owns, and outside the source itself, whose
     raw bytes hash to source.sha256."""
     try:
@@ -859,7 +859,7 @@ def _set_pin(rec: Record, values: dict) -> None:
 
 
 def _written_path(raw: str) -> str:
-    """A path as a record writes it (SPEC §5.1.2): `/` separators, no leading `./`."""
+    """A path as a record writes it (SPEC §5.2.2): `/` separators, no leading `./`."""
     path = raw.replace("\\", "/")
     while path.startswith("./"):
         path = path[2:]
@@ -928,8 +928,8 @@ def _candidate(cfg: Config, view: KBView, path: str, new_bytes: bytes) -> KBView
 
 
 def _present(view: KBView) -> set[str]:
-    """The IDs of the records present at their canonical paths, as K12 counts them for the registry."""
-    return k12.present_ids(view)
+    """The IDs of the records present at their canonical paths, as K13 counts them for the registry."""
+    return k13.present_ids(view)
 
 
 def _installed(view: KBView, rec_id) -> Record | None:

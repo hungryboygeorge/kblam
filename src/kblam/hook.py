@@ -11,7 +11,7 @@ kblam.toml, malformed input or any unexpected error it allows the action and pri
 - PreToolUse (Bash, PowerShell): deny a command that visibly writes under findings/ or the review
   root, or writes or removes under .kblam/ outside .kblam/staging/ and .kblam/review-staging/ (best
   effort, §8 items 1-2). Under the review root only a record file, a kind folder or the root itself
-  is denied a removal: removing a stray file there is how a K12 stray-file error is fixed.
+  is denied a removal: removing a stray file there is how a K13 stray-file error is fixed.
 - Stop, SubagentStop: silent while findings/ and the review root are as kblam last wrote them
   (tree.hash); otherwise check and validate, and block with the failures. SubagentStop is silent for
   Claude Code's internal agents (empty agent_type), which cannot fix findings/.
@@ -161,7 +161,7 @@ def _names_a_record(name: str) -> bool:
 
 def _review_removal(raw: str, base: Path, root: Path) -> bool:
     """SPEC §8: removing the review root, a kind folder or a record file (or a glob that could name one
-    of them) is denied. Removing any other file under the root is allowed: that is how a K12
+    of them) is denied. Removing any other file under the root is allowed: that is how a K13
     stray-file error is fixed."""
     segments = _segments(raw, base, root)
     if segments is None:
@@ -471,7 +471,7 @@ def _stop(cfg: Config, event: str, data: dict) -> int:
         return 0
     check_findings(cfg, None, command=f"hook {event}")
     view = load_view(cfg)
-    # Warnings alone never block, so only the errors reach the block (SPEC §5, §5.1.4).
+    # Warnings alone never block, so only the errors reach the block (SPEC §5, §5.2.4).
     lines = ([issue.format(view) for issue in errors(validate(view))]
              + [item.describe() for item in open_items(cfg, view)])
     marker = cfg.state_dir / STOP_BLOCK_NAME

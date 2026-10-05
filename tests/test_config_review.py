@@ -1,4 +1,4 @@
-"""M6.10 wave 0: the [review] config table (SPEC §9), Issue level and owner (SPEC §5, §5.1.4), and the
+"""M6.11 wave 0: the [review] config table (SPEC §9), Issue level and owner (SPEC §5, §5.2.4), and the
 review fixtures."""
 
 from __future__ import annotations
@@ -73,10 +73,10 @@ def test_review_root_containing_kb_root_refused(kb):
 def test_issue_level_owner_and_format(kb):
     view = KBView(cfg=kb.cfg, files={})
     error = Issue("findings/a/F-0001-x.md", 3, "K1", "bad")
-    warning = Issue("research-review/challenges/SC-0001.yaml", 0, "K12", "stale source", "warning", "SC-0001")
+    warning = Issue("research-review/challenges/SC-0001.yaml", 0, "K13", "stale source", "warning", "SC-0001")
     assert (error.level, error.owner) == ("error", "")
     assert error.format(view) == "K1 findings/a/F-0001-x.md:3: bad"
-    assert warning.format(view) == "K12 warning research-review/challenges/SC-0001.yaml: stale source"
+    assert warning.format(view) == "K13 warning research-review/challenges/SC-0001.yaml: stale source"
     assert errors([error, warning]) == [error]
 
 

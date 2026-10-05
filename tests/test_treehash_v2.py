@@ -1,4 +1,4 @@
-"""tree.hash format 2: the digest of both roots, its line, and the rule helpers (SPEC §5.1.6)."""
+"""tree.hash format 2: the digest of both roots, its line, and the rule helpers (SPEC §5.2.6)."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ REVIEW_INDEX = b"# Review\n"
 
 
 def hand_digest(cfg, entries: list[tuple[bytes, bytes]]) -> str:
-    """The format-2 digest over literal bytes, as SPEC §5.1.6 states it: the header, then each
+    """The format-2 digest over literal bytes, as SPEC §5.2.6 states it: the header, then each
     domain-separated name, NUL, the byte length in decimal ASCII, NUL and the bytes."""
     h = hashlib.sha256()
     h.update(b"kblam-tree-v2\0" + cfg.findings_dir.encode("utf-8") + b"\0"

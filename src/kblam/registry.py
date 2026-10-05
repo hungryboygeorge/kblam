@@ -1,5 +1,5 @@
-"""The record-ID registry, `.kblam/review-ids` (SPEC §5.1.6): every review record ID kblam has written or
-accepted, as a sorted JSON list. A registered ID with no record is a K12 error."""
+"""The record-ID registry, `.kblam/review-ids` (SPEC §5.2.6): every review record ID kblam has written or
+accepted, as a sorted JSON list. A registered ID with no record is a K13 error."""
 
 from __future__ import annotations
 

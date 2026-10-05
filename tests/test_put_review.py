@@ -1,9 +1,9 @@
-"""`kblam put` of a finding against the review records (SPEC §5.1.4 "Where each rule blocks",
-§5.1.6; §12 M6.10 test groups 4, 9/10).
+"""`kblam put` of a finding against the review records (SPEC §5.2.4 "Where each rule blocks",
+§5.2.6; §12 M6.11 test groups 4, 9/10).
 
-A finding put blocks on K1-K11 as before, on K13 only for an affected excerpt the installed finding
-did not already have affected, and never on K12 or K14. It reports the tasks and uses it makes stale,
-the K13 errors it keeps and the errors that did not refuse. Confirmed challenges and uses are written
+A finding put blocks on K1-K11 as before, on K14 only for an affected excerpt the installed finding
+did not already have affected, and never on K13 or K15. It reports the tasks and uses it makes stale,
+the K14 errors it keeps and the errors that did not refuse. Confirmed challenges and uses are written
 into the review root as record files (review_write is another unit's) and read back by load_view.
 Offline: the Jev thresholds of the fixtures enable no verdict.
 """
@@ -24,9 +24,9 @@ from kblam.treehash import format_line, read_recorded, tree_digest_v2
 from kblam.view import KBView, load_view
 
 from conftest import ZERO64, finding_text, record_data, record_text
-from test_k13 import (CLAIM, LINE3, TRACE, TRACE_TEXT, add_finding, quoted, same_bytes_message, sc, use)
-from test_k13 import deciding
-from test_k13 import put as put_record
+from test_k14 import (CLAIM, LINE3, TRACE, TRACE_TEXT, add_finding, quoted, same_bytes_message, sc, use)
+from test_k14 import deciding
+from test_k14 import put as put_record
 
 REVIEW = "research-review"
 SC = f"{REVIEW}/challenges/SC-0001.yaml"
@@ -40,7 +40,7 @@ CLAIM_C = "The media tray reports its type through two contact pins read at load
 
 
 def write_review_index(kb) -> None:
-    """The review index kblam would write for the records present (K12 checks it byte for byte)."""
+    """The review index kblam would write for the records present (K13 checks it byte for byte)."""
     kb.write(f"{REVIEW}/INDEX.md", generate_review_index(load_view(kb.cfg)))
 
 
@@ -75,10 +75,10 @@ def codes(issues) -> list[str]:
 # --- where each rule blocks ---------------------------------------------------------------------
 
 
-def test_a_k12_error_and_a_k14_error_elsewhere_do_not_refuse_a_put(kb):
+def test_a_k13_error_and_a_k15_error_elsewhere_do_not_refuse_a_put(kb):
     kb.add("F-0001", "sensor", CLAIM_A)
     put_record(kb, "CT", record_data("CT", "CT-0001"))       # open, bound to F-0001: the sha is wrong
-    kb.write(f"{REVIEW}/challenges/notes.md", "not a record\n")   # a K12 stray file
+    kb.write(f"{REVIEW}/challenges/notes.md", "not a record\n")   # a K13 stray file
     write_review_index(kb)
     staged = stage(kb, "F-0002", "drift", CLAIM_B, topic="motor")
 
@@ -87,9 +87,9 @@ def test_a_k12_error_and_a_k14_error_elsewhere_do_not_refuse_a_put(kb):
     assert result.ok, [i.format(result.view) for i in result.issues]
     assert result.issues == [] and result.kept == []
     assert (kb.findings / "motor" / staged.name).is_file()
-    assert sorted({i.code for i in result.remaining}) == ["K12", "K14"]
-    assert any(i.code == "K12" and "notes.md" in i.path for i in result.remaining)
-    assert any(i.code == "K14" and i.owner == "CT-0001" for i in result.remaining)
+    assert sorted({i.code for i in result.remaining}) == ["K13", "K15"]
+    assert any(i.code == "K13" and "notes.md" in i.path for i in result.remaining)
+    assert any(i.code == "K15" and i.owner == "CT-0001" for i in result.remaining)
 
 
 def test_a_put_that_makes_a_task_and_a_use_stale_succeeds_and_lists_them(kb, source_repo):
@@ -107,7 +107,7 @@ def test_a_put_that_makes_a_task_and_a_use_stale_succeeds_and_lists_them(kb, sou
     assert result.ok, [i.format(result.view) for i in result.issues]
     assert result.stale == ["CT-0001", "CU-0001"]    # in ID order: a task and a use
     assert "within 0.2%" in (kb.findings / "calibration" / "F-0001-ratio.md").read_text(encoding="utf-8")
-    assert {"K13", "K14"} <= set(kb.codes())         # the obligations the put leaves
+    assert {"K14", "K15"} <= set(kb.codes())         # the obligations the put leaves
 
 
 def test_a_new_finding_quoting_a_confirmed_assertion_is_refused(kb, source_repo):
@@ -117,7 +117,7 @@ def test_a_new_finding_quoting_a_confirmed_assertion_is_refused(kb, source_repo)
 
     result = store.put(kb.cfg, staged)
 
-    assert codes(result.issues) == ["K13"]
+    assert codes(result.issues) == ["K14"]
     assert result.issues[0].message == same_bytes_message(source_repo)
     assert result.kept == [] and result.remaining == []
     assert staged.is_file() and not (kb.findings / "calibration" / staged.name).exists()
@@ -134,16 +134,16 @@ def test_an_edit_that_keeps_an_affected_excerpt_succeeds_with_it_in_kept(kb, sou
 
     assert result.ok, [i.format(result.view) for i in result.issues]
     assert result.issues == [] and result.stale == []
-    assert codes(result.kept) == ["K13"]
+    assert codes(result.kept) == ["K14"]
     assert result.kept[0].message == same_bytes_message(source_repo)
-    assert result.remaining == []                    # a kept K13 error is listed, not left unclassified
+    assert result.remaining == []                    # a kept K14 error is listed, not left unclassified
     assert not staged.exists()
-    assert codes(kb.issues()) == ["K13"]            # the excerpt stays an error until a use is reviewed
+    assert codes(kb.issues()) == ["K14"]            # the excerpt stays an error until a use is reviewed
 
 
 def test_a_new_excerpt_a_current_use_covers_is_refused_anyway(kb, source_repo):
-    """An excerpt is affected whether or not a use covers it (SPEC §5.1.4), so a put cannot install one;
-    K13 reports no error for a covered excerpt, so the refusal is synthesised at the same line."""
+    """An excerpt is affected whether or not a use covers it (SPEC §5.2.4), so a put cannot install one;
+    K14 reports no error for a covered excerpt, so the refusal is synthesised at the same line."""
     challenge = sc(source_repo)
     put_record(kb, "SC", challenge)
     staged = stage(kb, "F-0001", "ratio", CLAIM, body=quoted(f"{TRACE}:3", LINE3))
@@ -162,13 +162,13 @@ def test_a_new_excerpt_a_current_use_covers_is_refused_anyway(kb, source_repo):
         citation={"ordinal": match.ordinal, "path": match.path, "range": list(match.range),
                   "tag_sha256": match.tag_sha256})))
     write_review_index(kb)
-    # the approved use covers the excerpt on this tree (F-0001 itself is only staged, so K12 reports the
-    # use's dangling finding link; nothing here is a K13 error, which is what the put has to synthesise)
-    assert "K13" not in codes(kb.issues())
+    # the approved use covers the excerpt on this tree (F-0001 itself is only staged, so K13 reports the
+    # use's dangling finding link; nothing here is a K14 error, which is what the put has to synthesise)
+    assert "K14" not in codes(kb.issues())
 
     result = store.put(kb.cfg, staged)
 
-    assert codes(result.issues) == ["K13"]
+    assert codes(result.issues) == ["K14"]
     assert result.issues[0].owner == "F-0001"
     assert result.issues[0].line == finding.body_start_line + match.start
     assert "SC-0001" in result.issues[0].message
@@ -179,13 +179,13 @@ def test_a_new_excerpt_a_current_use_covers_is_refused_anyway(kb, source_repo):
 
 def test_two_challenges_on_one_tag_are_refused_one_issue_each(kb, source_repo):
     """Each issue names one challenge and the command that would address it: a message naming two has no
-    runnable command behind it (SPEC §5.1.4 "Where each rule blocks"; decisions log D29)."""
+    runnable command behind it (SPEC §5.2.4 "Where each rule blocks"; decisions log D29)."""
     first, second = sc(source_repo), sc(source_repo, rec_id="SC-0002")
     put_record(kb, "SC", first)
     put_record(kb, "SC", second)
     staged = stage(kb, "F-0001", "ratio", CLAIM, body=quoted(f"{TRACE}:3", LINE3))
 
-    # Both challenges' excerpts are covered by an approved use, so K13 reports no error for them and the
+    # Both challenges' excerpts are covered by an approved use, so K14 reports no error for them and the
     # put has to synthesise the refusal from the affected triples (as the test above does for one).
     base = load_view(kb.cfg)
     files = dict(base.files)
@@ -202,11 +202,11 @@ def test_two_challenges_on_one_tag_are_refused_one_issue_each(kb, source_repo):
             citation={"ordinal": match.ordinal, "path": match.path, "range": list(match.range),
                       "tag_sha256": match.tag_sha256})))
     write_review_index(kb)
-    assert "K13" not in codes(kb.issues())           # both excerpts are covered on this tree
+    assert "K14" not in codes(kb.issues())           # both excerpts are covered on this tree
 
     result = store.put(kb.cfg, staged)
 
-    assert codes(result.issues) == ["K13", "K13"]
+    assert codes(result.issues) == ["K14", "K14"]
     assert [i.owner for i in result.issues] == ["F-0001", "F-0001"]
     assert [i.line for i in result.issues] == [finding.body_start_line + match.start] * 2
     for issue, challenge in zip(result.issues, ("SC-0001", "SC-0002")):
@@ -226,15 +226,15 @@ def test_an_edit_that_adds_a_second_affected_excerpt_is_refused(kb, source_repo)
     append_excerpt(staged, f"{TRACE}:@0x{offset:X}", "the two bytes")
     result = store.put(kb.cfg, staged)
 
-    assert codes(result.issues) == ["K13"]          # the newly affected excerpt refuses the edit
-    assert codes(result.kept) == ["K13"]            # the excerpt the installed finding already had
+    assert codes(result.issues) == ["K14"]          # the newly affected excerpt refuses the edit
+    assert codes(result.kept) == ["K14"]            # the excerpt the installed finding already had
     assert result.issues[0].line != result.kept[0].line
     assert staged.is_file()
     assert (kb.findings / "calibration" / "F-0001-ratio.md").is_file()   # findings/ is unchanged
 
 
 def test_k3_on_another_finding_does_not_refuse_a_put(kb):
-    """Blocking uses the issue's owner, never the path it is displayed at (SPEC §5.1.4)."""
+    """Blocking uses the issue's owner, never the path it is displayed at (SPEC §5.2.4)."""
     kb.add("F-0001", "sensor", CLAIM_A)
     dependent = stage(kb, "F-0002", "motor", CLAIM_B, topic="motor",
                       extra="depends_on:\n  F-0001: null\n")
@@ -300,7 +300,7 @@ def test_a_missing_tree_hash_without_records_is_bootstrapped_as_format_2(kb, cap
 
 
 def test_a_multi_file_put_journals_and_then_removes_the_journal(kb, monkeypatch):
-    """SPEC §5.1.6 Interrupted writes: the journal is written before the first change and deleted last."""
+    """SPEC §5.2.6 Interrupted writes: the journal is written before the first change and deleted last."""
     kb.add("F-0001", "sensor", CLAIM_A)
     kb.write(SC, record_text("SC"))
     kb.reindex()                                    # the fixture accepts the tree, as --record would
@@ -329,7 +329,7 @@ def test_a_multi_file_put_journals_and_then_removes_the_journal(kb, monkeypatch)
 
 
 def test_a_body_only_edit_journals_nothing(kb, monkeypatch):
-    """INDEX.md is written only when it changes, so a one-file put writes no journal (SPEC §5.1.6)."""
+    """INDEX.md is written only when it changes, so a one-file put writes no journal (SPEC §5.2.6)."""
     kb.add("F-0001", "sensor", CLAIM_A)
     journals = []
     real_write = atomic_write

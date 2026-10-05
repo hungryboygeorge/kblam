@@ -1,4 +1,4 @@
-"""Staging and reading review records (SPEC §5.1.5): `challenge new/edit/show/uses`, `task
+"""Staging and reading review records (SPEC §5.2.5): `challenge new/edit/show/uses`, `task
 new/edit/show`, `use review` and `review list`. Library functions only; cli.py maps them to commands.
 
 Staging writes only `.kblam/review-staging/<ID>.yaml` and receipts under `.kblam/review-receipts/`
@@ -8,8 +8,8 @@ review_write.py's.
 
 Conventions for every function here:
 - A refusal raises store.StoreError with a message that names what kblam parsed and the command that
-  fixes it (§5.1.5 Diagnostics); cli maps it to exit 1. A bad argument (a malformed ID, a name that is
-  not a §5.1.2 name, `--lines` not `A-B` with 1 <= A <= B) is also a StoreError.
+  fixes it (§5.2.5 Diagnostics); cli maps it to exit 1. A bad argument (a malformed ID, a name that is
+  not a §5.2.2 name, `--lines` not `A-B` with 1 <= A <= B) is also a StoreError.
 - Staging functions run under writes.locked(cfg, "<command>", mutating=False): a journal is recovered,
   a root change is not refused. Read-only functions (show, uses, list) take no lock.
 - Records are serialised with records.dump; field order is records.KEYS[kind]; `created` is today
@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from kblam import (decisions, gitpin, k12, k13, k14, matching, paths, receipts, records, registry,
+from kblam import (decisions, gitpin, k13, k14, k15, matching, paths, receipts, records, registry,
                    writes)
 from kblam.config import Config
 from kblam.finding import ID_RE as FINDING_ID_RE
@@ -156,7 +156,7 @@ def challenge_show(cfg: Config, rec_id: str) -> str:
     rec = _installed(cfg, "SC", rec_id)
     view = load_view(cfg)
     reader = SourceReader(cfg, view)
-    info = k12.challenge_info(view, reader, rec)
+    info = k13.challenge_info(view, reader, rec)
     data = rec.data
     source = _mapping(data.get("source"))
     assertion = _mapping(source.get("assertion"))
@@ -184,7 +184,7 @@ def challenge_show(cfg: Config, rec_id: str) -> str:
 
 
 def challenge_uses(cfg: Config, rec_id: str) -> str:
-    """`kblam challenge uses SC-…`: one line per k13.challenge_relations entry (the text to print, final
+    """`kblam challenge uses SC-…`: one line per k14.challenge_relations entry (the text to print, final
     newline included): the finding ID and path:line, the excerpt ordinal (for an excerpt), the relation
     and level in words (error, warning, or "covered by CU-0003"), and the command. When the challenge
     is not confirmed, one line saying so ("SC-0001 is open; only a confirmed challenge affects
@@ -195,7 +195,7 @@ def challenge_uses(cfg: Config, rec_id: str) -> str:
         return f"{rec_id} is {rec.status}; only a confirmed challenge affects findings\n"
     view = load_view(cfg)
     reader = SourceReader(cfg, view)
-    relations = k13.challenge_relations(view, reader, rec_id)
+    relations = k14.challenge_relations(view, reader, rec_id)
     lines = [_relation_line(relation) for relation in relations]
     if not lines:
         lines = [f"no finding excerpt or reference relates to {rec_id}"]
@@ -250,7 +250,7 @@ def task_edit(cfg: Config, rec_id: str) -> Path:
 
 def task_show(cfg: Config, rec_id: str) -> str:
     """`kblam task show CT-…`: ID, status, "subject digest: <64 hex>", kind, finding, proponent, the
-    binding and whether it still holds (k14.task_binding_problems: each problem printed), question,
+    binding and whether it still holds (k15.task_binding_problems: each problem printed), question,
     method, outcomes, controls, stop, expected evidence, and the decisions as for challenge_show."""
     _check_id(rec_id, "CT")
     rec = _installed(cfg, "CT", rec_id)
@@ -264,7 +264,7 @@ def task_show(cfg: Config, rec_id: str) -> str:
            f"proponent: {_text(data.get('proponent'))}"]
     out.append(f"binding: fingerprint {_text(data.get('claim_fingerprint'))}, file sha256 "
                f"{_text(data.get('base_file_sha256'))}")
-    problems = k14.task_binding_problems(view, rec)
+    problems = k15.task_binding_problems(view, rec)
     if problems:
         out += [f"binding: {problem}" for problem in problems]
     else:
@@ -291,11 +291,11 @@ def use_review(cfg: Config, challenge_id: str, finding_id: str, ordinal: int, by
     return its path.
 
     Preconditions, each refused with its own message: the challenge is installed, parses and is
-    confirmed; its source is available (k12.challenge_info(...).available); the finding is installed
+    confirmed; its source is available (k13.challenge_info(...).available); the finding is installed
     once and parses; an excerpt exists at `ordinal` (matching.finding_matches, 1-based); it is a
     verified text match (ExcerptMatch.verified; a binary-exempt excerpt never qualifies); and the
     challenge affects it: (challenge ID, match.key, match.tag_sha256) is in
-    k13.affected_triples(view, reader, finding_id). One SourceReader for all of it.
+    k14.affected_triples(view, reader, finding_id). One SourceReader for all of it.
 
     Writes `challenge`, `challenge_bind` (the challenge's subject digest), `finding`,
     `finding_fingerprint`, `finding_file_sha256`, `citation` {ordinal, path: match.path, range:
@@ -313,7 +313,7 @@ def use_review(cfg: Config, challenge_id: str, finding_id: str, ordinal: int, by
         view = load_view(cfg)
         reader = SourceReader(cfg, view)
         rec = _installed(cfg, "SC", challenge_id)
-        info = k12.challenge_info(view, reader, rec)
+        info = k13.challenge_info(view, reader, rec)
         if not info.confirmed:
             raise StoreError(
                 f"{challenge_id} is {rec.status}; only a confirmed challenge can be used (kblam review "
@@ -340,7 +340,7 @@ def use_review(cfg: Config, challenge_id: str, finding_id: str, ordinal: int, by
             raise StoreError(f"excerpt {ordinal} of {finding_id} is not a verified text match "
                              f"({match.problem}); fix the excerpt or its citation, then run kblam use "
                              f"review again")
-        if (challenge_id, match.key, match.tag_sha256) not in k13.affected_triples(view, reader, finding_id):
+        if (challenge_id, match.key, match.tag_sha256) not in k14.affected_triples(view, reader, finding_id):
             raise StoreError(f"{challenge_id} does not affect excerpt {ordinal} of {finding_id} "
                              f"({match.path}:{_range_text(match.range)}); kblam challenge uses "
                              f"{challenge_id} lists what it affects")
@@ -381,7 +381,7 @@ class ListedRecord:
 def review_list(cfg: Config, *, only_open: bool = False) -> list[ListedRecord]:
     """`kblam review list [--open]`: every installed, parsed record with a valid ID, in (kind order SC,
     CT, CU; then ID number) order; with only_open, those whose status is open. A record that does not
-    parse is skipped (K12 reports it)."""
+    parse is skipped (K13 reports it)."""
     view = load_view(cfg)
     reader = SourceReader(cfg, view)
     listed = []
@@ -417,7 +417,7 @@ def _id_number(rec_id: str) -> int:
 
 
 def _subject(rec) -> str:
-    """The subject a `review list` line shows (SPEC §5.1.5): what the record is about, from its own
+    """The subject a `review list` line shows (SPEC §5.2.5): what the record is about, from its own
     fields, as best they can be read."""
     data = rec.data
     if rec.kind == "SC":
@@ -435,10 +435,10 @@ def _current(view, reader, rec) -> bool:
     """Whether the record's subject still holds as it was bound: an SC's source is available, a CT's and
     a CU's bindings all hold (the status is shown separately)."""
     if rec.kind == "SC":
-        return k12.challenge_info(view, reader, rec).available
+        return k13.challenge_info(view, reader, rec).available
     if rec.kind == "CT":
-        return not k14.task_binding_problems(view, rec)
-    return not k12.use_binding_problems(view, reader, rec)
+        return not k15.task_binding_problems(view, rec)
+    return not k13.use_binding_problems(view, reader, rec)
 
 
 # --- shared staging, reading and refusal helpers -------------------------------------------------
@@ -495,7 +495,7 @@ def _installed(cfg: Config, kind: str, rec_id: str):
 
 
 def _new_command(kind: str) -> str:
-    """The §5.1.5 command that allocates a record of `kind`."""
+    """The §5.2.5 command that allocates a record of `kind`."""
     return {
         "SC": "kblam challenge new <source-path> --lines A-B --by NAME",
         "CT": "kblam task new <finding> --kind replication|confirmation --by NAME --proponent NAME",
@@ -612,7 +612,7 @@ def _line_range(lines) -> tuple[int, int]:
 
 
 def _as_written(source_path: str) -> str:
-    """The path as a record keeps it: `\\` turned to `/` and a leading `./` dropped (SPEC §5.1.2)."""
+    """The path as a record keeps it: `\\` turned to `/` and a leading `./` dropped (SPEC §5.2.2)."""
     text = source_path.replace("\\", "/")
     while text.startswith("./"):
         text = text[2:]
@@ -702,7 +702,7 @@ def _state_text(resolved) -> str:
 
 def _basis_lines(reader, basis, source: dict) -> list[str]:
     """One line per basis entry: its path, state, locator, role and provenance. A basis entry on the
-    source's canonical key and without a pin of its own is read at the source's pin (SPEC §5.1.3)."""
+    source's canonical key and without a pin of its own is read at the source's pin (SPEC §5.2.3)."""
     if not isinstance(basis, list) or not basis:
         return ["  none"]
     pinned_source = records.file_ref(source) if isinstance(source.get("path"), str) else None
@@ -741,7 +741,7 @@ def _decision_lines(entries) -> list[str]:
     return out
 
 
-def _relation_line(relation: k13.Relation) -> str:
+def _relation_line(relation: k14.Relation) -> str:
     """One `challenge uses` line: the finding and where it is, the excerpt ordinal, the relation and the
     level in words, and the command that addresses it."""
     where = f"{relation.path}:{relation.line}"

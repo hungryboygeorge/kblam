@@ -50,7 +50,7 @@ class Issue:
     code: str
     message: str
     level: str = "error"   # "error" or "warning": a warning never fails, refuses or blocks (SPEC §5)
-    owner: str = ""        # the finding or record ID the issue concerns; blocking uses it (SPEC §5.1.4)
+    owner: str = ""        # the finding or record ID the issue concerns; blocking uses it (SPEC §5.2.4)
 
     @property
     def is_error(self) -> bool:
@@ -678,11 +678,11 @@ def validate(view: KBView, focus: frozenset[str] = frozenset()) -> list[Issue]:
     """Run every rule. `focus` names findings being written, so K3 and K9 address them.
 
     One SourceReader serves the whole validation, so each source is read once however many rules
-    consult it (SPEC §5.1.6).
+    consult it (SPEC §5.2.6).
     """
-    from kblam.k12 import k12  # these import Issue from here
-    from kblam.k13 import k13
+    from kblam.k13 import k13  # these import Issue from here
     from kblam.k14 import k14
+    from kblam.k15 import k15
 
     reader = SourceReader(view.cfg, view)
     issues = (
@@ -697,8 +697,8 @@ def validate(view: KBView, focus: frozenset[str] = frozenset()) -> list[Issue]:
         + k9_duplicates(view, focus)
         + k10_verbatim(view, reader)
         + k11_reported(view)
-        + k12(view, reader)
         + k13(view, reader)
         + k14(view, reader)
+        + k15(view, reader)
     )
     return sorted(set(issues), key=lambda i: (i.path, i.line, int(i.code[1:]), i.message))

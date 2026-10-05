@@ -1,4 +1,4 @@
-"""The tree.hash rule (SPEC §8, §5.1.6): kblam advances tree.hash only across its own writes, and a
+"""The tree.hash rule (SPEC §8, §5.2.6): kblam advances tree.hash only across its own writes, and a
 format-1 file is never advanced."""
 
 from __future__ import annotations
@@ -96,7 +96,7 @@ def test_index_and_ack_warn_about_a_format_1_tree_hash_and_leave_it(kb, capsys):
 
 
 def test_index_names_tree_hash_in_stdout_only_when_it_advanced(kb, capsys):
-    """`kblam index` reports the tree.hash it advanced (SPEC §5.1.6); a format-1 file stays, warned on stderr."""
+    """`kblam index` reports the tree.hash it advanced (SPEC §5.2.6); a format-1 file stays, warned on stderr."""
     kb.add("F-0001", "sensor", CLAIM_A)
     root = ["--root", str(kb.root)]
     capsys.readouterr()

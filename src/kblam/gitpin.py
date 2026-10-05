@@ -1,4 +1,4 @@
-"""Git pins of file references (SPEC §5.1.2 Git pins).
+"""Git pins of file references (SPEC §5.2.2 Git pins).
 
 Read-only: kblam never checks out, writes or stages anything in a source repository. Every git call
 is `subprocess.run(["git", "-C", <dir>, ...], check=False, capture_output=True)`.
@@ -34,10 +34,10 @@ class PinCheck:
     ok: the whole relationship verified; `data` holds the blob's bytes, which hash to sha256.
     absent: the pin may be right but cannot be checked here: the repo directory is missing or is not a
       Git worktree, or the commit or blob object is missing. The reference is then unavailable (SPEC
-      §5.1.2 resolver), not structurally wrong. `message` says what is missing.
+      §5.2.2 resolver), not structurally wrong. `message` says what is missing.
     invalid: the pin is wrong: `repo` is not the file's owning worktree, an object ID has the wrong
       length or is not lowercase hex, the commit object is not a commit, the commit's tree does not
-      hold `blob` at the path, or the blob's bytes do not hash to sha256. A K12 structural error;
+      hold `blob` at the path, or the blob's bytes do not hash to sha256. A K13 structural error;
       `message` says which.
     """
     status: str            # "ok" | "absent" | "invalid"
@@ -46,7 +46,7 @@ class PinCheck:
 
 
 def _git(directory: Path, *args: str) -> subprocess.CompletedProcess:
-    """One git command. Nothing kblam runs through here writes to a repository (SPEC §5.1.2)."""
+    """One git command. Nothing kblam runs through here writes to a repository (SPEC §5.2.2)."""
     return subprocess.run(["git", "-C", str(directory), *args], check=False, capture_output=True)
 
 
@@ -57,13 +57,13 @@ def _out(done: subprocess.CompletedProcess) -> str:
 
 
 def _same(left: Path, right: Path) -> bool:
-    """Path equality, case-folded on Windows (SPEC §5.1.2 Paths)."""
+    """Path equality, case-folded on Windows (SPEC §5.2.2 Paths)."""
     return os.path.normcase(str(left)) == os.path.normcase(str(right))
 
 
 def _under(path: Path, base: Path) -> str | None:
     """`path` relative to `base` as a POSIX path, or None when path is not under base; "" when they are
-    the same directory. Case-folded on Windows (SPEC §5.1.2 Paths)."""
+    the same directory. Case-folded on Windows (SPEC §5.2.2 Paths)."""
     full, root = str(path), str(base)
     folded, prefix = os.path.normcase(full), os.path.normcase(root).rstrip(os.sep) + os.sep
     if folded == os.path.normcase(root):
@@ -100,7 +100,7 @@ def _tree_blob(toplevel: Path, commit: str, rel: str) -> str | None:
     if done.returncode:
         return None
     entry = done.stdout.split(b"\x00", 1)[0]
-    meta, _, _path = entry.partition(b"\t")     # "<mode> <type> <oid>\t<path>" (SPEC §5.1.2)
+    meta, _, _path = entry.partition(b"\t")     # "<mode> <type> <oid>\t<path>" (SPEC §5.2.2)
     fields = meta.split(b" ")
     if len(fields) != 3 or fields[1] != b"blob":
         return None
@@ -130,7 +130,7 @@ def read_blob(toplevel: Path, blob: str) -> bytes | None:
 
 def verify_pin(cfg: Config, raw_path: str, sha256: str, pin: GitPin, *,
                read: Callable[[Path, str], bytes | None] = read_blob) -> PinCheck:
-    """Verify a stored pin (SPEC §5.1.2): cfg.repo_root / pin.repo is the owning worktree of the resolved
+    """Verify a stored pin (SPEC §5.2.2): cfg.repo_root / pin.repo is the owning worktree of the resolved
     path (paths.resolve); both IDs are lowercase hex of oid_length's length; `cat-file -t <commit>` prints
     commit; `ls-tree <commit> -- <path relative to the toplevel>` maps the path to `blob`; and
     `read(toplevel, blob)` hashes to sha256. Callers pass `read` to share a cache
@@ -182,7 +182,7 @@ def auto_pin(cfg: Config, raw_path: str, sha256: str, *,
              read: Callable[[Path, str], bytes | None] = read_blob) -> GitPin | None:
     """The pin to record for a file, or None: the owning worktree's HEAD commit, when HEAD's tree holds a
     blob at the path whose raw bytes hash to `sha256`. `challenge new`, basis entries and `--evidence`
-    pass the working file's sha256 (SPEC §5.1.2: pin automatically only when HEAD's blob has exactly the
+    pass the working file's sha256 (SPEC §5.2.2: pin automatically only when HEAD's blob has exactly the
     working bytes); `challenge pin` passes source.sha256. None when the file is in no worktree, is not in
     HEAD's tree, has other bytes there (a dirty file, or a CRLF checkout of an LF blob), or there is no
     HEAD."""

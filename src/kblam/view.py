@@ -1,5 +1,5 @@
 """An in-memory snapshot of `findings/` and the review root, so rules can run on the tree as it is or as
-it would be (SPEC §5.1.6)."""
+it would be (SPEC §5.2.6)."""
 
 from __future__ import annotations
 
@@ -19,10 +19,10 @@ class KBView:
     cfg: Config
     files: dict[str, bytes]                  # repo-relative POSIX path -> bytes, under cfg.findings_dir
     display: dict[str, str] = field(default_factory=dict)  # path shown in messages, when it differs
-    # The review root's files (SPEC §5.1): repo-relative POSIX path -> bytes, under cfg.review_dir.
+    # The review root's files (SPEC §5.2): repo-relative POSIX path -> bytes, under cfg.review_dir.
     # K1-K11 and K8 see only `files`.
     review_files: dict[str, bytes] = field(default_factory=dict)
-    # Paths under the review root that are symlinks: neither a record nor the index may be one (K12).
+    # Paths under the review root that are symlinks: neither a record nor the index may be one (K13).
     # A flagged path need not be in review_files (a dangling link, or a link to a directory).
     review_symlinks: set[str] = field(default_factory=set)
 
@@ -51,7 +51,7 @@ class KBView:
     def records(self) -> list:
         """Every `<review root>/<kind folder>/<name>.yaml`, parsed (records.Record), in path order.
 
-        Whether the name is a valid ID for that folder is K12's business, not this property's.
+        Whether the name is a valid ID for that folder is K13's business, not this property's.
         """
         from kblam.records import KINDS, parse_record
 
@@ -86,7 +86,7 @@ def load_view(cfg: Config) -> KBView:
 
 
 def _load_review(cfg: Config) -> tuple[dict[str, bytes], set[str]]:
-    """Every file under the review root, at any depth and whatever its name (K12 decides which of them
+    """Every file under the review root, at any depth and whatever its name (K13 decides which of them
     are records). Directory links are not followed; every symlink is reported by path, whether or not
     its bytes are readable, and only a link to a readable file also contributes bytes."""
     files: dict[str, bytes] = {}

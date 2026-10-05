@@ -1,4 +1,4 @@
-"""The M6.10 acceptance-test helpers themselves (m610_helpers): one whole workflow through them, the
+"""The M6.11 acceptance-test helpers themselves (m611_helpers): one whole workflow through them, the
 "files changed" and "subject digest" assertions they exist for, and staging a finding through the CLI.
 Offline and deterministic: the frozen date keeps the record bytes fixed, and the source repository is
 conftest's nested Git fixture."""
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-import m610_helpers as m
+import m611_helpers as m
 
 # The same alias a group file declares: autouse, so every test here runs on the pinned date.
 frozen_today = m.frozen_today
@@ -22,12 +22,12 @@ def test_the_documented_example(kb, source_repo):
 
 
 def test_the_challenge_alone_leaves_validate_failing(kb, source_repo):
-    """Why the example's use is not decoration: without it the quoted excerpt is a K13 error."""
+    """Why the example's use is not decoration: without it the quoted excerpt is a K14 error."""
     m.quoting_finding(kb, "F-0001", source_repo, "3-3")
     m.confirmed_challenge(kb, source_repo, "3-3", by="reviewer-a", decider="reviewer-b")
     failing = m.validate(kb)
     assert failing.code == 1
-    assert "K13 findings/calibration/F-0001-ratio.md:15: SC-0001 challenges this quoted assertion at " \
+    assert "K14 findings/calibration/F-0001-ratio.md:15: SC-0001 challenges this quoted assertion at " \
            f"{m.TRACE}@" in failing.out
 
 

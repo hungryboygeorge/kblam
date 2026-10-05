@@ -1,21 +1,21 @@
-"""SPEC §12 M6.10 acceptance tests, test group 8: deletion (A6).
+"""SPEC §12 M6.11 acceptance tests, test group 8: deletion (A6).
 
-"*Deletion* (A6): a record deleted or renamed (K12 "missing"; `review index` and `validate --record` do
+"*Deletion* (A6): a record deleted or renamed (K13 "missing"; `review index` and `validate --record` do
 not forget it; `validate --record --forget-missing` does, printing each ID); after a fresh clone, the
 registry created from the records present."
 
-Every test drives the real CLI in process (m610_helpers.kblam) and states, in its docstring, the start
+Every test drives the real CLI in process (m611_helpers.kblam) and states, in its docstring, the start
 state, the command and actor, the exit status, the diagnostics, the files changed, the validation result
 afterwards and the acceptance criterion it demonstrates. Every CLI invocation — the setup calls of
 `challenge new`, the author's filling and `put`, `task new`, `review decide`, and every refusal and
-read-only call — runs inside `changes`: the whole KB tree (m610_helpers.tree) and the source repository
+read-only call — runs inside `changes`: the whole KB tree (m611_helpers.tree) and the source repository
 (SourceRepo.snapshot) are compared before and after, as an exact set of changed paths (`set()` for a
 read-only call, and for a record-level refusal apart from the §6 check state `validate --record` writes
 before it validates) and as equal source state. Every Run is asserted in full: exit code, whole stdout,
 and stderr byte for byte (the write commands here carry a tree.hash note on stderr, and a `validate
 --record` over a KB with a finding carries the §6 Jev note). The tests' own fixture edits — deleting or
 renaming a record file, restoring bytes, removing `.kblam/` to stand in for a clone — sit outside those
-windows. No test calls `accept_tree`: this group's subject is K12 (the missing record and the registry)
+windows. No test calls `accept_tree`: this group's subject is K13 (the missing record and the registry)
 and tree.hash behaviour, and `accept_tree` re-records tree.hash unconditionally. Offline and
 deterministic: `frozen_today` pins `created` and a decision's `date` at 2026-09-28, and the fixtures
 enable no Jev verdict.
@@ -27,7 +27,7 @@ import contextlib
 import shutil
 from pathlib import Path
 
-import m610_helpers as m
+import m611_helpers as m
 from conftest import dump_record
 from kblam.finding import fingerprint, yaml_rt
 from kblam.view import load_view
@@ -60,12 +60,12 @@ PENDING = "CT-0001 open replication of F-0001: Does an independent measurement e
 JEV_NOTE = ("kblam validate --record: [jev.thresholds] enables no Jev verdict, so Jev was not asked "
             "(quantities were compared)\n")
 # The index is generated, so deleting or renaming a record leaves it stale until `review index` runs.
-STALE_INDEX = (f"K12 {INDEX}: INDEX.md differs from the generated review index; it is never edited by "
+STALE_INDEX = (f"K13 {INDEX}: INDEX.md differs from the generated review index; it is never edited by "
                f"hand. Run kblam review index to regenerate it")
-# SPEC §5.1.6: the report a registered ID with no record gets; line 0, so no line number is shown.
+# SPEC §5.2.6: the report a registered ID with no record gets; line 0, so no line number is shown.
 MISSING = (f"{{rec_id}} is missing from {REVIEW}/; records are never deleted or renamed; restore it from "
            f"git")
-# SPEC §5.1.6 and §8 item 3: the note a write prints when tree.hash cannot advance.
+# SPEC §5.2.6 and §8 item 3: the note a write prints when tree.hash cannot advance.
 OUT_OF_BAND = (f"kblam review index: findings/ or {REVIEW}/ was changed outside kblam since kblam last "
                f"wrote it; tree.hash not advanced. Run kblam validate --record once the change is "
                f"validated.\n")
@@ -75,7 +75,7 @@ INDEX_WRITTEN = f"kblam review index: wrote {INDEX}\n"
 
 NOTHING: set[str] = set()
 
-# The SC free fields the author fills (SPEC §5.1.3): a claim, a scope, `contradicted`, one basis entry
+# The SC free fields the author fills (SPEC §5.2.3): a claim, a scope, `contradicted`, one basis entry
 # on the source itself, a usable remainder and limits. The basis entry's `sha256` and pin are left null
 # for `put` to fill in.
 SC_FIELDS = {
@@ -155,7 +155,7 @@ def check_line(kb, finding_id: str) -> str:
 
 
 def key_line(path: Path, key: str) -> int:
-    """The 1-based line of a top-level key in a record file: the line K12 reports an issue about it on."""
+    """The 1-based line of a top-level key in a record file: the line K13 reports an issue about it on."""
     lines = path.read_bytes().decode("utf-8").splitlines()
     return next(i for i, line in enumerate(lines, 1) if line.startswith(f"{key}:"))
 
@@ -236,13 +236,13 @@ def forget(kb, source_repo, *, code: int, changed: set[str], err: str = "") -> m
 
 
 def forgot(rec_id: str) -> str:
-    """The line `--forget-missing` prints for one ID (SPEC §5.1.6)."""
+    """The line `--forget-missing` prints for one ID (SPEC §5.2.6)."""
     return f"kblam validate --record: forgot {rec_id} (no record in {REVIEW}/)"
 
 
 def missing(kb, rec_id: str) -> str:
-    """The K12 issue for a registered ID whose record is gone, displayed at its canonical path."""
-    return f"K12 {record_rel(kb, rec_id)}: {MISSING.format(rec_id=rec_id)}"
+    """The K13 issue for a registered ID whose record is gone, displayed at its canonical path."""
+    return f"K13 {record_rel(kb, rec_id)}: {MISSING.format(rec_id=rec_id)}"
 
 
 # --- a record deleted ------------------------------------------------------------------------------
@@ -265,7 +265,7 @@ def test_a_deleted_record_is_missing_and_restoring_it_clears_the_report(kb, sour
     review index, the registry and tree.hash, then the record, the review index and tree.hash, then the
     review index alone (its bytes change to the empty index), then the check pair cache and open-item
     file, and nothing else — all five reads change nothing, in the KB or the source repository.
-    Diagnostics: the K12 issue "INDEX.md differs from the generated review index ..." on
+    Diagnostics: the K13 issue "INDEX.md differs from the generated review index ..." on
     research-review/INDEX.md (line 0), then "SC-0001 is missing from research-review/; records are never
     deleted or renamed; restore it from git" on the canonical path the record should have, then "kblam
     validate: 2 error(s) in findings/"; after `review index` the one missing error and "kblam validate: 1
@@ -329,7 +329,7 @@ def test_a_renamed_record_is_missing_and_the_forget_drop_stands(kb, source_repo)
     its receipt, then the record, the review index, the registry and tree.hash, then the review index
     alone, then the pair cache and open-item file, then the registry alone (the drop), and nothing else —
     the two reads change nothing, in the KB or the source repository. Diagnostics: the stale-index issue,
-    the missing-record issue on research-review/challenges/SC-0001.yaml, and the K12 issue on the renamed
+    the missing-record issue on research-review/challenges/SC-0001.yaml, and the K13 issue on the renamed
     file's `id` line, "id: 'SC-0001' does not match the file name's ID (SC-0002)", then "kblam validate:
     3 error(s) in findings/"; `review index` exits 0 with its one line and the out-of-band note on stderr;
     `validate --record` exits 1, writes no record and still lists SC-0001 in the registry; `validate
@@ -343,7 +343,7 @@ def test_a_renamed_record_is_missing_and_the_forget_drop_stands(kb, source_repo)
     old = kb.root / record_rel(kb, "SC-0001")
     renamed = old.with_name("SC-0002.yaml")               # fixture edit: a rename, in place
     old.rename(renamed)
-    mismatch = (f"K12 {CHALLENGES}/SC-0002.yaml:{key_line(renamed, 'id')}: id: 'SC-0001' does not match "
+    mismatch = (f"K13 {CHALLENGES}/SC-0002.yaml:{key_line(renamed, 'id')}: id: 'SC-0001' does not match "
                 f"the file name's ID (SC-0002)")
 
     read(kb, source_repo, "validate", code=1, out="\n".join([
@@ -419,7 +419,7 @@ def test_a_moved_record_is_reported_as_a_known_record_out_of_place(kb, source_re
 
     read(kb, source_repo, "validate", code=1, out="\n".join([
         STALE_INDEX,
-        f"K12 {REVIEW}/SC-0001.yaml: {known}",
+        f"K13 {REVIEW}/SC-0001.yaml: {known}",
         missing(kb, "SC-0001"),
         "kblam validate: 3 error(s) in findings/",
     ]) + "\n")
@@ -430,7 +430,7 @@ def test_a_moved_record_is_reported_as_a_known_record_out_of_place(kb, source_re
 
     run = cli(kb, source_repo, CHECK_STATE_EMPTY, "validate", "--record")
     exactly(run, "\n".join([
-        f"K12 {REVIEW}/SC-0001.yaml: {known}",
+        f"K13 {REVIEW}/SC-0001.yaml: {known}",
         missing(kb, "SC-0001"),
         f"kblam validate: 2 error(s) in findings/{NOT_RECORDED}",
     ]) + "\n", "validate --record", code=1)
@@ -439,13 +439,13 @@ def test_a_moved_record_is_reported_as_a_known_record_out_of_place(kb, source_re
     run = forget(kb, source_repo, code=1, changed={REGISTRY})
     assert run.out == "\n".join([
         forgot("SC-0001"),
-        f"K12 {REVIEW}/SC-0001.yaml: {unknown}",
+        f"K13 {REVIEW}/SC-0001.yaml: {unknown}",
         f"kblam validate: 1 error(s) in findings/{NOT_RECORDED}",
     ]) + "\n"
     assert m.registry(kb) == []
 
     read(kb, source_repo, "validate", code=1, out="\n".join([
-        f"K12 {REVIEW}/SC-0001.yaml: {unknown}",
+        f"K13 {REVIEW}/SC-0001.yaml: {unknown}",
         "kblam validate: 1 error(s) in findings/",
     ]) + "\n")
     assert moved.is_file()

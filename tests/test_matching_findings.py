@@ -1,4 +1,4 @@
-"""The shared match result of K10 and K13 (SPEC §5.1.4 K13 paragraph 1: matching.finding_matches)."""
+"""The shared match result of K10 and K14 (SPEC §5.2.4 K14 paragraph 1: matching.finding_matches)."""
 
 from __future__ import annotations
 
@@ -100,7 +100,7 @@ def test_a_path_paths_refuses_keeps_k10s_read_and_has_no_key(kb):
     kb.add("F-0001", "sensor", CLAIM, body=quoted(tag, excerpt))
     match = matches_for(kb)[0]
     assert (match.problem, match.verified) == (None, True)
-    assert match.key is None                                  # K13 matches on the key, so it ignores this
+    assert match.key is None                                  # K14 matches on the key, so it ignores this
     at = SOURCE_TEXT.index(excerpt)
     assert match.spans == ((at, at + len(excerpt)),)
 

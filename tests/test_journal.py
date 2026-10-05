@@ -1,4 +1,4 @@
-"""The interrupted-write journal, `.kblam/journal.json` (SPEC §5.1.6 Interrupted writes)."""
+"""The interrupted-write journal, `.kblam/journal.json` (SPEC §5.2.6 Interrupted writes)."""
 
 from __future__ import annotations
 

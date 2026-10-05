@@ -1,4 +1,4 @@
-"""Generate `<review root>/INDEX.md` (SPEC §5.1.5 Review index)."""
+"""Generate `<review root>/INDEX.md` (SPEC §5.2.5 Review index)."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ USE_TABLE = ("| ID | Challenge | Finding | Excerpt | Disposition | Status |", "|
 
 
 def generate_review_index(view) -> bytes:
-    """The review index for view.records, deterministic, as SPEC §5.1.5 says:
+    """The review index for view.records, deterministic, as SPEC §5.2.5 says:
 
     HEADER, then `## Challenges`: one `### <source path>` group per canonical source key
     (paths.canonical_key; a refused path keys as the path as written), groups in key order, each headed
@@ -113,7 +113,7 @@ def _uses(view: KBView) -> list[str]:
 
 
 def _key(view: KBView, path: str) -> str:
-    """A source path's canonical key; a refused path keys as the path as written (SPEC §5.1.5)."""
+    """A source path's canonical key; a refused path keys as the path as written (SPEC §5.2.5)."""
     try:
         return paths.canonical_key(view.cfg, path)
     except paths.PathRefused:
