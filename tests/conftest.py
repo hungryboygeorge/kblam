@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import copy
+import datetime
+import io
+import subprocess
 import textwrap
 import tomllib
 from pathlib import Path
@@ -10,9 +14,10 @@ import pytest
 
 from kblam import jev_prompts
 from kblam.config import Config, load_config
-from kblam.rules import validate
+from kblam.finding import yaml_rt
+from kblam.rules import errors, validate
 from kblam.store import regenerate_index
-from kblam.treehash import current_digest, write_tree_hash
+from kblam.treehash import write_tree_hash_v2
 from kblam.view import load_view
 
 KBLAM_TOML = """\
@@ -118,13 +123,14 @@ class KB:
     def reindex(self) -> None:
         """Fixture setup writes findings/ directly, so it also accepts the tree, as validate --record would."""
         regenerate_index(self.cfg)
-        write_tree_hash(self.cfg, current_digest(self.cfg))
+        write_tree_hash_v2(self.cfg, load_view(self.cfg))
 
     def issues(self):
         return validate(load_view(self.cfg))
 
     def codes(self) -> list[str]:
-        return [issue.code for issue in self.issues()]
+        """The blocking codes: warnings never fail (SPEC §5); `issues()` still returns everything."""
+        return [issue.code for issue in errors(self.issues())]
 
     def snapshot(self) -> dict[str, bytes]:
         return {p.relative_to(self.root).as_posix(): p.read_bytes()
@@ -152,3 +158,165 @@ def kb(tmp_path: Path) -> KB:
     base.write("evidence/2026-09-22-ratio/dump.bin", b"\x00\x01binary\xff")
     base.reindex()
     return base
+
+
+# --- M6.11: review records and a nested source repository (SPEC §5.2, §12 M6.11 tests) ----------------
+
+SOURCE_REPO = "resources/mx-docs"           # the nested source repository, relative to the KB root
+TRACE_PATH = "notes/full-scan-trace.md"     # its committed text file, relative to SOURCE_REPO
+TRACE_TEXT = """\
+# MX-100 full-scan trace (transcribed)
+Row 101: bytes 0x3A 0x3B
+Row 102: bytes 0x3A 0x3B; the two bytes are equal.
+Row 103: bytes 0x40 0x41
+"""
+ZERO64 = "0" * 64
+DROP = object()  # record_text(..., key=DROP) leaves the key out
+
+
+class SourceRepo:
+    """A nested Git repository under the KB root: the read-only source of challenges and excerpts."""
+
+    def __init__(self, kb_root: Path, rel: str = SOURCE_REPO):
+        self.kb_root = kb_root
+        self.rel = rel
+        self.root = kb_root / rel
+
+    def git(self, *args: str, check: bool = True) -> str:
+        done = subprocess.run(["git", "-C", str(self.root), *args], capture_output=True, text=True,
+                              check=False)
+        if check and done.returncode:
+            raise AssertionError(f"git {' '.join(args)} failed: {done.stderr}")
+        return done.stdout.strip()
+
+    def init(self, *extra: str) -> "SourceRepo":
+        self.root.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", "-q", *extra, str(self.root)], check=True, capture_output=True)
+        for key, value in (("user.name", "fixture"), ("user.email", "fixture@example.invalid"),
+                           ("core.autocrlf", "false"), ("commit.gpgsign", "false")):
+            self.git("config", key, value)
+        return self
+
+    def write(self, path: str, data: str | bytes) -> Path:
+        full = self.root / path
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_bytes(data.encode("utf-8") if isinstance(data, str) else data)
+        return full
+
+    def commit(self, path: str, data: str | bytes, message: str = "update") -> str:
+        """Write, add and commit one file; the new HEAD commit ID."""
+        self.write(path, data)
+        self.git("add", "--", path)
+        self.git("commit", "-q", "-m", message)
+        return self.head()
+
+    def head(self) -> str:
+        return self.git("rev-parse", "HEAD")
+
+    def blob(self, path: str, commit: str = "HEAD") -> str:
+        return self.git("rev-parse", f"{commit}:{path}")
+
+    def kb_path(self, path: str = TRACE_PATH) -> str:
+        """The file's path relative to the KB root, as records and verbatim tags write it."""
+        return f"{self.rel}/{path}"
+
+    def snapshot(self) -> dict:
+        """Working bytes, HEAD, index and refs: equal before and after means "the source is unchanged"."""
+        files = {p.relative_to(self.root).as_posix(): p.read_bytes()
+                 for p in sorted(self.root.rglob("*")) if p.is_file() and ".git" not in p.relative_to(self.root).parts}
+        git_dir = Path(self.git("rev-parse", "--absolute-git-dir"))
+        index = git_dir / "index"
+        packed = git_dir / "packed-refs"
+        return {
+            "files": files,
+            "head": self.git("rev-parse", "HEAD", check=False),
+            "symbolic_head": (git_dir / "HEAD").read_bytes(),
+            "index": index.read_bytes() if index.is_file() else None,
+            "refs": self.git("for-each-ref", "--format=%(refname) %(objectname)"),
+            "packed_refs": packed.read_bytes() if packed.is_file() else None,
+            "status": self.git("status", "--porcelain", "--ignored"),
+        }
+
+
+@pytest.fixture
+def source_repo(kb, monkeypatch) -> SourceRepo:
+    """A nested Git repository at <KB>/resources/mx-docs with TRACE_TEXT committed at notes/full-scan-trace.md
+    (LF). System and global Git config are ignored, for the fixture and for kblam's own git calls."""
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(kb.root.parent / "no-global-gitconfig"))
+    config = kb.root / "kblam.toml"
+    kb.write("kblam.toml", config.read_text(encoding="utf-8").replace(
+        '[kb]\n', '[kb]\nevidence_roots = ["evidence", "resources"]\n', 1))
+    repo = SourceRepo(kb.root).init()
+    repo.commit(TRACE_PATH, TRACE_TEXT, "trace")
+    return repo
+
+
+def _ref(path: str, **fields) -> dict:
+    ref = {"path": path, "sha256": ZERO64, "repo": None, "commit": None, "blob": None, "snapshot": None}
+    ref.update(fields)
+    return ref
+
+
+def record_data(kind: str, rec_id: str | None = None, **fields) -> dict:
+    """A structurally valid record of `kind` ("SC", "CT" or "CU") as plain data; `fields` replace top-level
+    keys (DROP removes one). Hashes and bindings are placeholders: set them for semantic checks."""
+    rec_id = rec_id or f"{kind}-0001"
+    common = {"schema": 1, "id": rec_id, "created": datetime.date(2026, 9, 28), "creator": "reviewer-a"}
+    source = f"{SOURCE_REPO}/{TRACE_PATH}"
+    if kind == "SC":
+        data = {**common, "status": "open",
+                "source": {**_ref(source), "assertion": {"lines": [3, 3], "text": "the two bytes are equal",
+                                                         "sha256": ZERO64, "occurrence": 1}},
+                "proposition": "The printed byte equality follows from the printed byte values",
+                "scope": ["MX-100 capture transcription"],
+                "classification": "contradicted",
+                "basis": [{**_ref(source), "locator": "row 102: printed byte values",
+                           "role": "internal-inconsistency", "provenance": "observed"}],
+                "usable": "The printed byte values may be cited as a report.",
+                "limits": "Do not infer the capture bytes from this row.",
+                "linked_findings": [],
+                "decisions": []}
+    elif kind == "CT":
+        data = {**common, "proponent": "researcher-a", "status": "open", "kind": "replication",
+                "finding": "F-0001", "claim_fingerprint": "0badf00d0000", "base_file_sha256": ZERO64,
+                "question": "Does an independent measurement establish the claim?",
+                "method": "Repeat the capture with the documented settings.",
+                "outcomes": {"supports": "The ratio is within 0.1%.", "refutes": "The ratio differs by more.",
+                             "inconclusive": "The capture is too noisy to tell."},
+                "controls": ["same firmware version"],
+                "stop": "Stop after three captures.",
+                "expected_evidence": ["an evidence/ capture package"],
+                "decisions": []}
+    elif kind == "CU":
+        data = {**common, "proponent": "researcher-a", "status": "open", "challenge": "SC-0001",
+                "challenge_bind": ZERO64, "finding": "F-0001", "finding_fingerprint": "0badf00d0000",
+                "finding_file_sha256": ZERO64,
+                "citation": {"ordinal": 1, "path": source, "range": [2, 3], "tag_sha256": ZERO64},
+                "disposition": "unaffected_raw_bytes",
+                "reason": "The excerpt is used only for the printed byte values.",
+                "decisions": []}
+    else:
+        raise ValueError(kind)
+    data = copy.deepcopy(data)
+    for key, value in fields.items():
+        if value is DROP:
+            data.pop(key, None)
+        else:
+            data[key] = value
+    return data
+
+
+def dump_record(data: dict) -> str:
+    """YAML text of a record mapping, block style, as kblam writes records."""
+    yaml = yaml_rt()
+    yaml.default_flow_style = False
+    yaml.width = 4096
+    buffer = io.StringIO()
+    yaml.dump(data, buffer)
+    return buffer.getvalue()
+
+
+def record_text(kind: str, rec_id: str | None = None, **fields) -> str:
+    """record_data(...) as YAML text."""
+    return dump_record(record_data(kind, rec_id, **fields))

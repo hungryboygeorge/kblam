@@ -16,7 +16,8 @@ from kblam.jev import Side
 from kblam.lock import kb_lock
 from kblam.review import ReviewItem, load_items, save_items
 from kblam.store import StoreError, _yaml_scalar, allocate_id, edit_finding, new_finding
-from kblam.treehash import current_digest, read_tree_hash
+from kblam.treehash import read_recorded, tree_digest_v2
+from kblam.view import load_view
 
 from conftest import KBLAM_TOML, NO_EMBEDDINGS, PROMPT_TOML, finding_text
 
@@ -190,7 +191,7 @@ def test_rm_removes_the_file_and_its_folder_regenerates_the_index_and_closes_its
     assert not (kb.findings / "motor").exists()
     assert kb.issues() == []  # INDEX.md regenerated (K7), nothing else disturbed
     assert "F-0002" not in (kb.findings / "INDEX.md").read_text(encoding="utf-8")
-    assert read_tree_hash(kb.cfg) == current_digest(kb.cfg)
+    assert read_recorded(kb.cfg) == (2, kb.cfg.review_dir, tree_digest_v2(load_view(kb.cfg)))
     by_id = {i.id: i for i in load_items(kb.cfg)}
     assert {i.id for i in by_id.values() if i.open} == {"R-0000000d"}
     assert {i.id for i in by_id.values() if i.close_reason == reason} == {"R-0000000a", "R-0000000b", "U-0000000c"}
@@ -212,13 +213,13 @@ def test_rm_leaves_tree_hash_stale_after_a_change_outside_kblam(kb, capsys):
     kb.add("F-0001", "sensor", CLAIM_A)
     kb.add("F-0002", "motor", CLAIM_B, topic="motor")
     kb.write("findings/calibration/notes.txt", "a shell write kblam did not make\n")
-    stale = read_tree_hash(kb.cfg)
+    stale = read_recorded(kb.cfg)
     assert run(kb, "rm", "F-0002", "--merged-into", "F-0001") == 0
     captured = capsys.readouterr()
     assert "kblam rm: regenerated findings/INDEX.md\n" in captured.out
-    assert "kblam rm: findings/ was changed outside kblam since kblam last wrote it; tree.hash not advanced" \
+    assert "kblam rm: findings/ or research-review/ was changed outside kblam since kblam last wrote it; tree.hash not advanced" \
            in captured.err
-    assert read_tree_hash(kb.cfg) == stale != current_digest(kb.cfg)
+    assert read_recorded(kb.cfg) == stale != (2, kb.cfg.review_dir, tree_digest_v2(load_view(kb.cfg)))
     assert kb.codes() == ["K8"]
 
 
@@ -346,7 +347,7 @@ def test_renumber_gives_a_new_id_and_rekeys_the_dependents_that_mean_that_file(k
                                                                    f"F-0010: {_yaml_scalar(new_fp)}".encode())
     assert theirs.read_bytes() == before[theirs] and means_theirs.read_bytes() == before[means_theirs]
     assert [(i.code, i.path) for i in kb.issues()] == [("K3", "findings/pump/F-0008-stale.md")]
-    assert read_tree_hash(kb.cfg) == current_digest(kb.cfg)
+    assert read_recorded(kb.cfg) == (2, kb.cfg.review_dir, tree_digest_v2(load_view(kb.cfg)))
 
 
 def test_renumber_copies_the_resolutions_that_mean_the_renumbered_file(kb, capsys):

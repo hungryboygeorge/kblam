@@ -25,8 +25,8 @@ from kblam.check import CONFLICT, QUANTITY_CONFLICT, REVISION, SAME_FACT, Checke
 from kblam.config import Config
 from kblam.finding import ID_RE, Finding, fingerprint, id_number
 from kblam.jev import CACHE_NAME, PairCache, Side
-from kblam.lock import kb_lock
 from kblam.view import KBView, load_view
+from kblam.writes import locked
 
 REVIEW_NAME = "review.jsonl"
 # §6.4: the Jev verdicts that refuse a write. `quantity_conflict` is code, not Jev, and records nothing.
@@ -333,7 +333,7 @@ def check_findings(cfg: Config, ids: list[str] | None, *, command: str = "check"
             targets = [f for f in by_id.values()
                        if not checker.cache.was_checked(f.file_id, fingerprint(f, cfg.scope_separator))]
         results = [checker.check(view, f, command) for f in targets]  # Jev is asked outside the lock
-    with kb_lock(cfg, command):
+    with locked(cfg, command, mutating=False):
         return record(cfg, load_view(cfg), results, reject_as_review=True)
 
 
@@ -345,7 +345,7 @@ def check_pending(cfg: Config, *, client_factory=None) -> list[Recorded]:
     targets = [by_id[i] for i in dict.fromkeys(pending) if i in by_id]
     with Checker(cfg, client_factory) as checker:
         results = [checker.check(view, f, "check --pending") for f in targets]
-    with kb_lock(cfg, "check --pending"):
+    with locked(cfg, "check --pending", mutating=False):
         return record(cfg, load_view(cfg), results, reject_as_review=True)
 
 
@@ -355,7 +355,7 @@ def audit(cfg: Config, *, client_factory=None) -> list[Recorded]:
     view = load_view(cfg)
     with Checker(cfg, client_factory) as checker:
         results = checker.audit(view)
-    with kb_lock(cfg, "audit"):
+    with locked(cfg, "audit", mutating=False):
         return record(cfg, load_view(cfg), results, reject_as_review=True)
 
 
@@ -382,7 +382,7 @@ def resolve(cfg: Config, item_id: str, reason: str) -> list[ReviewItem]:
     (§6.3). Returns every item it closed: the open review and rejected items on the same (ID, fingerprint)
     sides, quantity conflicts excepted."""
     reason = " ".join(reason.split())
-    with kb_lock(cfg, f"resolve {item_id}"):
+    with locked(cfg, f"resolve {item_id}", mutating=False):
         items = load_items(cfg)
         view = load_view(cfg)
         fps = current_fingerprints(view)

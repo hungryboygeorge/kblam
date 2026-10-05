@@ -8,7 +8,7 @@ from kblam import rules
 from kblam.cli import main
 from kblam.finding import fingerprint, parse_finding
 from kblam.store import StoreError, _yaml_scalar, ack, edit_finding, put, stamp_dependency
-from kblam.treehash import current_digest, read_tree_hash
+from kblam.treehash import read_recorded, tree_digest_v2
 from kblam.view import load_view
 
 from conftest import finding_text
@@ -171,7 +171,7 @@ def test_rewrite_target_reports_suspect_then_ack_restores_validity(kb):
     assert acked.changed and acked.fingerprint == fp_in_kb(kb, "F-0001")
     assert kb.issues() == []
     assert rules.k7_index(load_view(kb.cfg)) == []
-    assert read_tree_hash(kb.cfg) == current_digest(kb.cfg)
+    assert read_recorded(kb.cfg) == (2, kb.cfg.review_dir, tree_digest_v2(load_view(kb.cfg)))
     after = dependent.read_text(encoding="utf-8")
     # ack rewrote the stale stamp in place and touched nothing else (a fingerprint YAML would read
     # as a number is quoted, so the file's length can change)

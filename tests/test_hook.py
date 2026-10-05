@@ -17,7 +17,7 @@ import pytest
 from kblam import check, cli, entry
 from kblam.lock import kb_lock
 from kblam.store import edit_finding
-from kblam.treehash import read_tree_hash
+from kblam.treehash import read_recorded
 
 from conftest import KBLAM_TOML, NO_EMBEDDINGS, PROMPT_TOML, finding_text
 from test_check import E1, N, jkb, quantity, stage  # noqa: F401 (jkb is a fixture)
@@ -359,11 +359,42 @@ def test_shell_write_the_bash_parser_misses_is_caught_at_stop(hkb, monkeypatch, 
 
 def test_stop_after_a_clean_out_of_band_change_is_silent_and_leaves_tree_hash(hkb, monkeypatch, capsys):
     hkb.add("F-0001", "motor", E1)
-    recorded = read_tree_hash(hkb.cfg)
+    recorded = read_recorded(hkb.cfg)
     hkb.write("findings/calibration/F-0001-motor.md",
               finding_text("F-0001", E1, body="More detail, written by a shell command."))
     assert call("Stop", stop(hkb), monkeypatch, capsys) == (0, None, "")
-    assert read_tree_hash(hkb.cfg) == recorded  # only validate --record accepts the change
+    assert read_recorded(hkb.cfg) == recorded  # only validate --record accepts the change
+
+
+def test_stop_validates_when_tree_hash_is_in_the_old_format(hkb, monkeypatch, capsys):
+    """SPEC §5.2.6 Upgrade: a bare hex tree.hash never matches, so the tree counts as changed and Stop runs
+    the rules; the hook leaves the file as it is."""
+    hkb.add("F-0001", "motor", E1)
+    (hkb.findings / "calibration").mkdir(exist_ok=True)
+    (hkb.findings / "calibration" / "notes.md").write_text("scratch\n", encoding="utf-8")
+    hkb.reindex()                                          # the fixture accepts the K8 stray, as --record would
+    assert call("Stop", stop(hkb), monkeypatch, capsys) == (0, None, "")   # format 2 records it: silent
+    hkb.write(".kblam/tree.hash", "a" * 64 + "\n")          # format 1, as an older kblam left it
+
+    code, answer, _ = call("Stop", stop(hkb), monkeypatch, capsys)
+
+    assert code == 0
+    assert "K8" in blocked(answer) and "notes.md" in blocked(answer)
+    assert read_recorded(hkb.cfg) == (1, None, "a" * 64)
+
+
+def test_stop_validates_a_stray_in_the_review_root(hkb, monkeypatch, capsys):
+    """The format-2 digest covers the review root too (SPEC §5.2.6), so an out-of-band file there reaches K13."""
+    hkb.add("F-0001", "motor", E1)
+    assert call("Stop", stop(hkb), monkeypatch, capsys) == (0, None, "")
+    recorded = read_recorded(hkb.cfg)
+    hkb.write("research-review/challenges/notes.md", "not a record\n")
+
+    code, answer, _ = call("Stop", stop(hkb), monkeypatch, capsys)
+
+    assert code == 0
+    assert "K13" in blocked(answer) and "notes.md" in blocked(answer)
+    assert read_recorded(hkb.cfg) == recorded
 
 
 def test_stop_loop_guard(hkb, monkeypatch, capsys):

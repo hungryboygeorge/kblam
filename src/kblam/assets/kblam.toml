@@ -40,6 +40,16 @@ lock_wait_seconds = 30         # how long kblam's writers wait for .kblam/lock (
 lock_stale_seconds = 300       # a lock not refreshed for this long (or whose holder is dead) is broken
 recheck_timeout_seconds = 600  # kblam recheck: a check: command running longer is killed and fails
 
+# The [review] section (SPEC §5.2) names the folder that holds the source challenges, claim tasks and
+# reviewed uses of the knowledge base, and the provenance vocabulary a challenge's basis and a
+# decision's evidence draw on. It is optional: every key below shows its default, and a key left out
+# takes that default. `root` is fixed once kblam records it (SPEC §5.2.6), so choose it before the
+# first record.
+# [review]
+# root = "research-review"                                      # the records' folder; fixed once recorded
+# provenance = ["observed", "decoded", "inferred", "unknown"]   # basis and decision-evidence provenance
+# primary_provenance = ["observed", "decoded"]                  # what may count as primary support
+
 # The [jev] section and its thresholds belong to the model, not the project: keep them as written.
 [jev]
 endpoint = "https://openrouter.ai/api/v1/systemone"

@@ -7,13 +7,20 @@ import hashlib
 import pytest
 
 from kblam.store import StoreError, edit_finding, new_finding, put
-from kblam.treehash import current_digest, read_tree_hash
+from kblam.treehash import read_recorded, tree_digest_v2
+from kblam.view import load_view
 
 from conftest import finding_text
 
 CLAIM_A = ("The two sensor curve types agree to about 0.1% (median ratio 1.0017 on line 0), "
            "so they are not two analog gains.")
 CLAIM_B = "The motor warm-up drift settles within 90 seconds of power-on at 4000 rpm."
+
+
+def recorded_digest(cfg) -> str | None:
+    """The digest `.kblam/tree.hash` records (format 2, SPEC §5.2.6), or None if there is none."""
+    recorded = read_recorded(cfg)
+    return None if recorded is None else recorded[2]
 
 
 def fill(path, claim, *, scope="[MX-200]", evidence="[evidence/2026-09-22-ratio/]", body=""):
@@ -45,7 +52,7 @@ def test_new_fill_put_validate(kb):
     index = (kb.findings / "INDEX.md").read_text(encoding="utf-8")
     assert "[F-0001](calibration/F-0001-sensor-curve-types-are-not-analog-gains.md)" in index
     assert "sensor curve types are not analog gains" in index
-    assert read_tree_hash(kb.cfg) == current_digest(kb.cfg)
+    assert recorded_digest(kb.cfg) == tree_digest_v2(load_view(kb.cfg))
 
 
 def test_new_never_reuses_a_staged_id(kb):
@@ -106,7 +113,7 @@ def test_edit_refuses_second_staging_and_unknown_id(kb):
 def test_put_with_k4_term_leaves_findings_byte_identical(kb):
     kb.add("F-0001", "sensor", CLAIM_A)
     before = kb.snapshot()
-    hash_before = read_tree_hash(kb.cfg)
+    hash_before = read_recorded(kb.cfg)
     staged = new_finding(kb.cfg, "motor", "Motor warm-up")
     fill(staged, "The motor warm-up drift was previously believed to settle within 30 seconds.")
     result = put(kb.cfg, staged)
@@ -115,7 +122,7 @@ def test_put_with_k4_term_leaves_findings_byte_identical(kb):
     formatted = result.issues[0].format(result.view)
     assert formatted.startswith(f"K4 .kblam/staging/{staged.name}:")
     assert kb.snapshot() == before
-    assert read_tree_hash(kb.cfg) == hash_before
+    assert read_recorded(kb.cfg) == hash_before
     assert staged.exists()
 
 
@@ -162,10 +169,14 @@ def test_put_rejects_unusable_topic_before_touching_anything(kb):
         put(kb.cfg, staged)
 
 
-def test_tree_hash_covers_paths_and_bytes(kb):
+def test_tree_hash_covers_paths_and_bytes_of_both_roots(kb):
     kb.add("F-0001", "sensor", CLAIM_A)
-    digest = current_digest(kb.cfg)
-    assert digest == read_tree_hash(kb.cfg)
-    assert len(digest) == len(hashlib.sha256().hexdigest())
+    cfg = kb.cfg
+    digest = tree_digest_v2(load_view(cfg))
+    assert digest == recorded_digest(cfg) and len(digest) == len(hashlib.sha256().hexdigest())
     kb.write("findings/calibration/notes.txt", "x")
-    assert current_digest(kb.cfg) != digest
+    assert tree_digest_v2(load_view(cfg)) != digest
+    kb.reindex()
+    accepted = tree_digest_v2(load_view(cfg))
+    kb.write("research-review/notes.md", "y")  # the review root is in the same digest
+    assert tree_digest_v2(load_view(cfg)) != accepted

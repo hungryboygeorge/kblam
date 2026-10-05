@@ -1,4 +1,9 @@
-"""Writes: ID allocation, staging (`new`, `edit`), `put`, `ack`, `index`, `rm` and `renumber` (SPEC §7)."""
+"""Writes: ID allocation, staging (`new`, `edit`), `put`, `ack`, `index`, `rm` and `renumber` (SPEC §7).
+
+Finding puts use the introduced-only K1-K12 validation and K14's newly affected excerpt scope; K13
+and K15 remain nonblocking (SPEC §5.2.4). Put, ack and index use writes.locked and writes.apply for
+review-root checks and journal recovery. Rm and renumber retain their separate write mechanics.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path, PurePosixPath
 
-from kblam import resolutions, review
+from kblam import k14, k15, matching, resolutions, review, writes
 from kblam.check import Checker, CheckResult, _differ, _format_value, _quantities
 from kblam.config import Config
 from kblam.jev import Side, jev_settings
@@ -33,8 +38,9 @@ from kblam.finding import (
     yaml_rt,
 )
 from kblam.index import generate_index
-from kblam.rules import TOPIC_RE, Issue, dependencies, validate
-from kblam.treehash import as_kblam_left_it, record_after_write, tree_digest
+from kblam.rules import TOPIC_RE, Issue, dependencies, errors, validate
+from kblam.sources import SourceReader, sha256_hex
+from kblam.treehash import clean_before_v2, record_after_write_v2
 from kblam.view import KBView, load_view
 
 
@@ -58,7 +64,7 @@ class GitUnavailable(Exception):
 @dataclass
 class PutResult:
     issues: list[Issue] = field(default_factory=list)               # errors that block the put (SPEC §7)
-    warnings: list[Issue] = field(default_factory=list)             # errors already in the tree: not blocking
+    warnings: list[Issue] = field(default_factory=list)             # existing errors and nonblocking warnings
     view: KBView | None = None
     finding_id: str | None = None
     target: str | None = None
@@ -70,6 +76,10 @@ class PutResult:
     review: list[review.ReviewItem] = field(default_factory=list) # review items open for this write
     unchecked: review.ReviewItem | None = None                    # set when Jev could not answer everything
     rejected_items: list[review.ReviewItem] = field(default_factory=list)  # recorded by a refused put (§6.4)
+    stale: list[str] = field(default_factory=list)                # CT/CU IDs this put makes stale (§5.2.4)
+    kept: list[Issue] = field(default_factory=list)               # K14 errors the put leaves in place
+    remaining: list[Issue] = field(default_factory=list)          # candidate errors that neither refuse nor
+                                                                  # are kept K14 errors
 
     @property
     def rejected(self) -> bool:
@@ -78,6 +88,7 @@ class PutResult:
 
     @property
     def ok(self) -> bool:
+        """`issues` holds the errors only, so warnings never count here (SPEC §5)."""
         return not self.issues and not self.rejected
 
 
@@ -238,7 +249,7 @@ def new_finding(cfg: Config, topic: str, title: str) -> Path:
     title = title.strip()
     if not title or "\n" in title:
         raise StoreError("title must be a non-empty one-line string")
-    with kb_lock(cfg, f"new {topic}"):
+    with writes.locked(cfg, f"new {topic}", mutating=False):
         finding_id = allocate_id(cfg)
         path = cfg.staging_dir / f"{finding_id}-{slugify(title)}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -255,7 +266,7 @@ def edit_base_path(cfg: Config, finding_id: str) -> Path:
 def edit_finding(cfg: Config, finding_id: str) -> Path:
     if not ID_RE.match(finding_id):
         raise StoreError(f"{finding_id!r} is not a finding ID like F-0137")
-    with kb_lock(cfg, f"edit {finding_id}"):
+    with writes.locked(cfg, f"edit {finding_id}", mutating=False):
         staged = [p for n, p in _ids_in(cfg.staging_dir) if format_id(n) == finding_id]
         if staged:
             raise StoreError(
@@ -301,15 +312,15 @@ def _check_edit_base(cfg: Config, finding_id: str, current: KBView, replaced: li
 
 
 def regenerate_index(cfg: Config) -> KBView:
-    """`kblam index`: rewrite INDEX.md from frontmatter and record tree.hash."""
-    with kb_lock(cfg, "index"):
+    """`kblam index`: rewrite INDEX.md from frontmatter and record tree.hash (format 2, SPEC §5.2.6)."""
+    with writes.locked(cfg, "index", mutating=True):
         view = load_view(cfg)
-        clean = as_kblam_left_it(cfg, tree_digest(view))
+        clean = clean_before_v2(cfg, view, bool(view.records))
         generated = generate_index(view)
-        index_file = cfg.repo_root / view.index_path
-        if not index_file.is_file() or index_file.read_bytes() != generated:
-            atomic_write(index_file, generated)
-        record_after_write(cfg, clean, "index")
+        changes = [(view.index_path, generated)] if view.files.get(view.index_path) != generated else []
+        writes.apply(cfg, "index", changes,
+                     registry_ids=writes.registry_after(cfg, _present_record_ids(view), set()),
+                     clean_before=clean)
         return load_view(cfg)
 
 
@@ -419,6 +430,8 @@ def put(cfg: Config, source: Path, *, client_factory=None) -> PutResult:
     left suspect, and validate fails until they are acked.
     Replacing an existing ID needs the record kblam edit wrote, matching the file as it is now.
     A refused write records a rejected item per rejecting verdict (§6.4).
+    K1-K11 refuse as before; K13 and K15 never do, and K14 refuses only for an excerpt the installed
+    finding did not already have affected (§5.2.4).
     Jev is asked before the lock is taken; under the lock the candidates are recomputed against the
     current tree and only pairs it gained meanwhile are asked (SPEC §12 M5). `client_factory`
     builds the JevClient (tests pass one with a fake transport).
@@ -426,7 +439,7 @@ def put(cfg: Config, source: Path, *, client_factory=None) -> PutResult:
     source = Path(source)
     with Checker(cfg, client_factory) as checker:
         _prefetch(cfg, source, checker)
-        with kb_lock(cfg, f"put {source.name}"):
+        with writes.locked(cfg, f"put {source.name}", mutating=True):
             return _put(cfg, source, checker)
 
 
@@ -476,13 +489,25 @@ def _prepare(cfg: Config, source: Path) -> tuple[PutResult, KBView]:
                                    cfg.scope_separator)
     files = {p: b for p, b in current.files.items() if p not in replaced}
     files[target] = staged.raw
-    view = KBView(cfg=cfg, files=files, display={target: display_path(cfg, source)})
+    # K13-K15 read the review records off the view, so the candidate carries the current ones over.
+    view = KBView(cfg=cfg, files=files, display={target: display_path(cfg, source)},
+                  review_files=dict(current.review_files), review_symlinks=set(current.review_symlinks))
     view.files[view.index_path] = generate_index(view)
 
     result = PutResult(view=view, finding_id=finding_id, target=target,
                        removed=[p for p in replaced if p != target], stamped=stamped)
     focus = frozenset({finding_id})
-    result.issues, result.warnings = _blocking(validate(view, focus=focus), current, target, focus)
+    issues = validate(view, focus=focus)
+    found = errors(issues)
+    # GitHub §7 put scopes K1-K12; local §5.2.5 "What put accepts" keeps K13/K15 nonblocking.
+    ordinary = [i for i in found if i.code not in REVIEW_CODES]
+    result.issues, result.warnings = _blocking(ordinary, current, target, focus)
+    readers = SourceReader(cfg, current), SourceReader(cfg, view)
+    result.issues += _newly_affected(result, current, readers, found)
+    result.remaining = [i for i in found if i not in result.issues and i not in result.kept
+                        and i not in result.warnings]
+    result.stale = _made_stale(result, current, readers)
+    result.warnings += [i for i in issues if not i.is_error]
     return result, current
 
 
@@ -509,6 +534,103 @@ def _blocking(after: list[Issue], before: KBView, target: str,
     return blocking, warnings
 
 
+REVIEW_CODES = ("K13", "K14", "K15")  # the rules that refuse through their own scope, not the K1-K11 sweep
+RETIRED_STATUSES = ("stale", "withdrawn")  # a put lists the tasks and uses it makes stale, not those already retired
+
+NEW_EXCERPT_MESSAGE = (
+    "{challenges} challenges this quoted assertion, and the installed finding does not already have it "
+    "affected: a new excerpt cannot quote a confirmed challenge's assertion. Edit the finding to quote the "
+    "usable bytes outside its span, or have this use reviewed ({review}).")
+
+
+def _newly_affected(result: PutResult, current: KBView, readers: tuple[SourceReader, SourceReader],
+                    found: list[Issue]) -> list[Issue]:
+    """The K14 errors that refuse this put (SPEC §5.2.4 "Where each rule blocks"): the excerpts whose
+    (challenge ID, canonical source key, tag_sha256) the installed finding did not already have affected,
+    reported at the tag line of the excerpt as K14 reports them. An excerpt is affected whether or not a
+    use covers it (SPEC §5.2.4), and K14 reports no error for one a current use covers, so the refusal is
+    synthesised from the same wording. The finding's other K14 errors - the excerpts it already had
+    affected - go to result.kept; K14 never refuses for those."""
+    finding_id, view = result.finding_id, result.view
+    reader_installed, reader_candidate = readers
+    installed = k14.affected_triples(current, reader_installed, finding_id)
+    affected = k14.affected_triples(view, reader_candidate, finding_id)
+    errors_here = [i for i in found if i.code == "K14" and i.owner == finding_id]
+    by_tag: dict[tuple[str, str], list[str]] = {}
+    for challenge, key, tag in affected - installed:
+        by_tag.setdefault((key, tag), []).append(challenge)
+    if not by_tag:
+        result.kept = errors_here
+        return []
+    written = _written(result)
+    refused: list[Issue] = []
+    refused_lines: set[int] = set()
+    for match in matching.finding_matches(view, reader_candidate, written):
+        challenges = by_tag.get((match.key, match.tag_sha256))
+        if challenges is None:
+            continue
+        line = written.body_start_line + match.start
+        refused_lines.add(line)
+        at_line = [i for i in errors_here if i.line == line]
+        refused += at_line or [_new_excerpt_issue(written, finding_id, line, challenge, match.ordinal)
+                               for challenge in sorted(challenges)]
+    result.kept = [i for i in errors_here if i.line not in refused_lines]
+    return refused
+
+
+def _new_excerpt_issue(written: Finding, finding_id: str, line: int, challenge: str,
+                       ordinal: int) -> Issue:
+    """K14's refusal for a newly affected excerpt K14 reports no error for (a current use covers it, and a
+    use binds an installed finding, so the put that would install the excerpt is refused, SPEC §5.2.4).
+    One issue per challenge, so the command each names is the one that would address that challenge."""
+    review = k14.USE_REVIEW.format(challenge=challenge, finding=finding_id, ordinal=ordinal)
+    return Issue(written.path, line, "K14", NEW_EXCERPT_MESSAGE.format(challenges=challenge, review=review),
+                 "error", finding_id)
+
+
+def _made_stale(result: PutResult, current: KBView, readers: tuple[SourceReader, SourceReader]) -> list[str]:
+    """The IDs of the CT and CU records this put makes stale (SPEC §5.2.4 "Where each rule blocks"),
+    in ID order: those bound to this finding whose binding held on the current view and no longer holds
+    on the candidate. A task or use already stale or withdrawn is not listed."""
+    reader_installed, reader_candidate = readers
+    stale = []
+    for rec in current.records:
+        if rec.kind not in ("CT", "CU") or not isinstance(rec.id, str) or rec.status in RETIRED_STATUSES:
+            continue
+        data = rec.data if isinstance(rec.data, dict) else {}
+        if data.get("finding") != result.finding_id:
+            continue
+        if rec.kind == "CT":
+            # task_binding_problems returns the reasons the binding is broken, so [] means it holds
+            broke = not k15.task_binding_problems(current, rec) and k15.task_binding_problems(result.view, rec)
+        else:
+            broke = _finding_binding(current, data) and not _finding_binding(result.view, data)
+        if broke:
+            stale.append(rec.id)
+    return sorted(stale, key=_record_order)
+
+
+def _finding_binding(view: KBView, data: dict) -> bool:
+    """Whether a CU's finding binding holds on this view: the finding exists once, and its K3
+    fingerprint and file sha256 are the ones the use bound (SPEC §5.2.3 "A use is current")."""
+    found = [f for f in view.findings if f.file_id == data.get("finding") and isinstance(f.meta, dict)]
+    if len(found) != 1:
+        return False
+    return (data.get("finding_fingerprint") == fingerprint(found[0], view.cfg.scope_separator)
+            and data.get("finding_file_sha256") == sha256_hex(found[0].raw))
+
+
+def _record_order(rec_id: str) -> tuple[int, str]:
+    """Numeric ID order, as k15 and view.findings use it: CT-0009 before CT-00010."""
+    number = rec_id[3:]
+    return (int(number) if number.isdigit() else 0, rec_id)
+
+
+def _present_record_ids(view: KBView) -> set[str]:
+    """The IDs of the records in the review root, as they are now (writes.registry_after's `present`)."""
+    return {rec.id for rec in view.records if isinstance(rec.id, str)}
+
+
 def _put(cfg: Config, source: Path, checker: Checker) -> PutResult:
     result, current = _prepare(cfg, source)
     if result.issues:
@@ -527,17 +649,15 @@ def _put(cfg: Config, source: Path, checker: Checker) -> PutResult:
         result.suspect = [d.dependent for d in dependencies(view)
                           if d.target == finding_id and d.state in ("suspect", "old")]
 
-    clean = as_kblam_left_it(cfg, tree_digest(current))
-    root = cfg.repo_root
-    atomic_write(root / target, view.files[target])
-    for old in result.removed:
-        old_path = root / old
-        old_path.unlink()
-        parent = old_path.parent
-        if parent != cfg.findings_path and not any(parent.iterdir()):
-            parent.rmdir()
-    atomic_write(root / view.index_path, view.files[view.index_path])
-    result.recorded = record_after_write(cfg, clean, "put")
+    clean = clean_before_v2(cfg, current, bool(current.records))
+    # INDEX.md is written only when the put changes it (a body-only edit does not), so the journal lists
+    # the files this put really writes, as regenerate_index does (SPEC §5.2.6 "Interrupted writes").
+    index = ([(view.index_path, view.files[view.index_path])]
+             if current.files.get(view.index_path) != view.files[view.index_path] else [])
+    changes = [(target, view.files[target])] + [(old, None) for old in result.removed] + index
+    result.recorded = writes.apply(cfg, f"put {source.name}", changes,
+                                   registry_ids=writes.registry_after(cfg, _present_record_ids(current), set()),
+                                   clean_before=clean)
     edit_base_path(cfg, finding_id).unlink(missing_ok=True)
     source = source.resolve()
     if source.is_relative_to(cfg.staging_dir.resolve()):
@@ -560,7 +680,7 @@ def ack(cfg: Config, dependent_id: str, target_id: str) -> AckResult:
     for value in (dependent_id, target_id):
         if not ID_RE.match(value):
             raise StoreError(f"{value!r} is not a finding ID like F-0137")
-    with kb_lock(cfg, f"ack {dependent_id} {target_id}"):
+    with writes.locked(cfg, f"ack {dependent_id} {target_id}", mutating=True):
         return _ack(cfg, dependent_id, target_id)
 
 
@@ -605,9 +725,10 @@ def _ack(cfg: Config, dependent_id: str, target_id: str) -> AckResult:
                 result.then_commit, result.claim_then = found
 
     data = stamp_dependency(dependent, target_id, link.current, dependent.path)
-    clean = as_kblam_left_it(cfg, tree_digest(view))
-    atomic_write(cfg.repo_root / dependent.path, data)
-    result.recorded = record_after_write(cfg, clean, "ack")
+    clean = clean_before_v2(cfg, view, bool(view.records))
+    result.recorded = writes.apply(cfg, f"ack {dependent_id} {target_id}", [(dependent.path, data)],
+                                   registry_ids=writes.registry_after(cfg, _present_record_ids(view), set()),
+                                   clean_before=clean)
     return result
 
 
@@ -769,14 +890,14 @@ def _remove(cfg: Config, finding_id: str, target_id: str) -> RemoveResult:
                           index_path=view.index_path,
                           staged=[display_path(cfg, p) for n, p in _ids_in(cfg.staging_dir)
                                   if format_id(n) == finding_id])
-    clean = as_kblam_left_it(cfg, tree_digest(view))
+    clean = clean_before_v2(cfg, view, bool(view.records))
     path = cfg.repo_root / finding.path
     path.unlink()
     if path.parent != cfg.findings_path and not any(path.parent.iterdir()):
         path.parent.rmdir()
         result.folder = PurePosixPath(finding.path).parent.as_posix() + "/"
     _write_index(cfg, load_view(cfg))
-    result.recorded = record_after_write(cfg, clean, "rm")
+    result.recorded = record_after_write_v2(cfg, clean, "rm")
     result.closed = review.close_items_on(cfg, finding_id, f"{finding_id} was removed (merged into {target_id})",
                                           items)
     return result
@@ -874,7 +995,7 @@ def _renumber(cfg: Config, source: Path) -> RenumberResult:
             if _names(text, old_id):
                 mentions.append((shown, f.body_start_line + number, f"the body names {old_id}"))
 
-    clean = as_kblam_left_it(cfg, tree_digest(view))
+    clean = clean_before_v2(cfg, view, bool(view.records))
     atomic_write(cfg.repo_root / new_path, data)
     (cfg.repo_root / finding.path).unlink()
     for dependent, rewritten in rewrites:
@@ -888,7 +1009,7 @@ def _renumber(cfg: Config, source: Path) -> RenumberResult:
         rekeyed=[(d.file_id, d.path) for d, _ in rewrites],
         mentions=[f"{p}:{line}: {what}" for p, line, what in sorted(mentions)],
         index_path=view.index_path,
-        recorded=record_after_write(cfg, clean, "renumber"),
+        recorded=record_after_write_v2(cfg, clean, "renumber"),
         resolutions=len(carried),
     )
 

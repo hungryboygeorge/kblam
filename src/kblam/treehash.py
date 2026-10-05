@@ -4,7 +4,9 @@ bootstrap (SPEC §3, §8)."""
 from __future__ import annotations
 
 import hashlib
+import re
 import sys
+from pathlib import PurePosixPath
 
 from kblam.config import Config
 from kblam.view import KBView, load_view
@@ -20,43 +22,124 @@ def tree_digest(view: KBView) -> str:
     return h.hexdigest()
 
 
-def current_digest(cfg: Config) -> str:
-    return tree_digest(load_view(cfg))
+# --- format 2 (SPEC §5.2.6) ---------------------------------------------------------------------
+
+V2_TAG = "kblam-tree-v2"
+HEX_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
-def write_tree_hash(cfg: Config, digest: str) -> None:
+def tree_digest_v2(view: KBView) -> str:
+    """sha256 over b"kblam-tree-v2\0<findings root>\0<review root>\0", then, for each file of view.files
+    and view.review_files in sorted order of its domain-separated name ("f/<path relative to the findings
+    root>" or "r/<path relative to the review root>"), that name (UTF-8), b"\0", its byte length in
+    decimal ASCII, b"\0" and its bytes."""
+    cfg = view.cfg
+    h = hashlib.sha256()
+    h.update(V2_TAG.encode("utf-8") + b"\0" + cfg.findings_dir.encode("utf-8") + b"\0"
+             + cfg.review_dir.encode("utf-8") + b"\0")
+    named: dict[str, bytes] = {}
+    for path, data in view.files.items():
+        named["f/" + view.rel_to_findings(path).as_posix()] = data
+    for path, data in view.review_files.items():
+        named["r/" + PurePosixPath(path).relative_to(cfg.review_dir).as_posix()] = data
+    for name in sorted(named):
+        data = named[name]
+        h.update(name.encode("utf-8") + b"\0" + str(len(data)).encode("ascii") + b"\0" + data)
+    return h.hexdigest()
+
+
+def format_line(review_root: str, digest: str) -> str:
+    """The format-2 file content: "kblam-tree-v2 <review root> <64 hex>\n"."""
+    return f"{V2_TAG} {review_root} {digest}\n"
+
+
+def parse_line(text: str) -> tuple[int, str | None, str]:
+    """(format, review root or None, hex) of a tree.hash's text (surrounding whitespace ignored): a bare
+    hex line is format 1 with root None; "kblam-tree-v2 <root> <hex>" is format 2. Anything else raises
+    ValueError."""
+    line = text.strip()
+    if HEX_RE.fullmatch(line):
+        return 1, None, line
+    parts = line.split(" ")
+    if len(parts) == 3 and parts[0] == V2_TAG and parts[1] and HEX_RE.fullmatch(parts[2]):
+        return 2, parts[1], parts[2]
+    raise ValueError(f"unrecognized tree.hash line: {line!r}")
+
+
+def read_recorded(cfg: Config) -> tuple[int, str | None, str] | None:
+    """parse_line of .kblam/tree.hash, or None if there is none. Unparseable text counts as format 1 with
+    that text as its digest (it never matches)."""
+    path = cfg.state_dir / "tree.hash"
+    if not path.is_file():
+        return None
+    text = path.read_text(encoding="utf-8", errors="replace")
+    try:
+        return parse_line(text)
+    except ValueError:
+        return 1, None, text.strip()
+
+
+def write_tree_hash_v2(cfg: Config, view: KBView) -> None:
+    """Write format_line(cfg.review_dir, tree_digest_v2(view)) with store.atomic_write."""
     from kblam.store import atomic_write  # avoid an import cycle
 
-    atomic_write(cfg.state_dir / "tree.hash", (digest + "\n").encode("ascii"))
+    line = format_line(cfg.review_dir, tree_digest_v2(view))
+    atomic_write(cfg.state_dir / "tree.hash", line.encode("utf-8"))
 
 
-def read_tree_hash(cfg: Config) -> str | None:
-    path = cfg.state_dir / "tree.hash"
-    return path.read_text(encoding="ascii").strip() if path.is_file() else None
+def _holds_records(cfg: Config, root: str) -> bool:
+    """Whether `<root>/<kind folder>/*.yaml` exists under cfg.repo_root.
 
-
-def as_kblam_left_it(cfg: Config, digest: str) -> bool:
-    """True if `digest` (taken before a write, under the lock) is the tree kblam last recorded.
-
-    With no tree.hash yet (a bootstrap: a new KB, a new clone, or .kblam/ deleted), a KB root that holds
-    no findings counts as kblam's. One that holds findings counts only if it passes the deterministic
-    rules, which the committing machines' pre-commit hooks ran, and its findings are then accepted from
-    the repository (accept_from_repository), so later checks cover what changes after this point. A tree
-    that fails them stays unrecorded until kblam validate --record (SPEC §8, the tree.hash rule and
-    item 3, "A new clone").
+    `root` may come from tree.hash, so anything that is not a plain relative POSIX path holds no records:
+    the check never looks outside the repository for a file kblam did not write there.
     """
-    recorded = read_tree_hash(cfg)
-    if recorded is not None:
-        return recorded == digest
-    view = load_view(cfg)
-    if not view.findings:
-        return True
-    from kblam.rules import validate  # the validator: needed only for a bootstrap
+    from kblam.records import KINDS
 
-    if validate(view):
+    if not root or root.startswith("/") or "\\" in root or ":" in root:
         return False
-    accept_from_repository(cfg, view)
-    return True
+    parts = PurePosixPath(root).parts
+    if ".." in parts or not parts:
+        return False
+    base = cfg.repo_root.joinpath(*parts)
+    return any(any(base.glob(f"{folder}/*.yaml")) for folder in set(KINDS.values()))
+
+
+def root_problem(cfg: Config, registered: set[str] | None) -> str | None:
+    """K13's and every mutating command's root check (SPEC §5.2.6): when tree.hash is format 2 and records
+    a root other than cfg.review_dir, "the review root changed from X to Y in kblam.toml; schema 1 fixes it
+    at init" - unless neither root holds a record file (<root>/<kind folder>/*.yaml) and `registered`
+    (registry.read_ids) is None or empty, in which case None. None for format 1 or no tree.hash."""
+    recorded = read_recorded(cfg)
+    if recorded is None:
+        return None
+    fmt, recorded_root, _digest = recorded
+    if fmt != 2 or recorded_root == cfg.review_dir:
+        return None
+    if not registered and not _holds_records(cfg, recorded_root) and not _holds_records(cfg, cfg.review_dir):
+        return None
+    return (f"the review root changed from {recorded_root} to {cfg.review_dir} in kblam.toml; "
+            f"schema 1 fixes it at init")
+
+
+def clean_before_v2(cfg: Config, view: KBView, has_records: bool) -> bool:
+    """The tree.hash rule before a write (SPEC §8, §5.2.6): True if tree.hash is format 2 with this root
+    and tree_digest_v2(view). With no marker and no records, an empty KB is kblam's; findings bootstrap
+    only when the deterministic rules pass, then are accepted from the repository. A format-1 marker
+    never matches."""
+    recorded = read_recorded(cfg)
+    if recorded is None:
+        if has_records:
+            return False
+        if not view.findings:
+            return True
+        from kblam.rules import validate
+
+        if validate(view):
+            return False
+        accept_from_repository(cfg, view)
+        return True
+    fmt, root, digest = recorded
+    return fmt == 2 and root == cfg.review_dir and digest == tree_digest_v2(view)
 
 
 def accept_from_repository(cfg: Config, view: KBView) -> int:
@@ -66,7 +149,7 @@ def accept_from_repository(cfg: Config, view: KBView) -> int:
     `kblam check` then asks only about what changes after this point; `kblam audit` checks the rest
     (SPEC §8 item 3)."""
     from kblam.finding import fingerprint
-    from kblam.jev import CACHE_NAME, PairCache  # the Jev client's module: loaded only when needed
+    from kblam.jev import CACHE_NAME, PairCache
 
     cache = PairCache(cfg.state_dir / CACHE_NAME)
     accepted = [f for f in view.findings if f.ok]
@@ -75,15 +158,27 @@ def accept_from_repository(cfg: Config, view: KBView) -> int:
     return len(accepted)
 
 
-def record_after_write(cfg: Config, clean_before: bool, command: str) -> bool:
-    """The tree.hash rule (SPEC §8): advance tree.hash only across kblam's own write.
-
-    If findings/ had been changed outside kblam before the write, tree.hash stays stale so the Stop
-    hook still validates that change; `kblam validate --record` is the only way to accept it.
-    """
+def record_after_write_v2(cfg: Config, clean_before: bool, command: str) -> bool:
+    """After a write: if clean_before, write the format-2 tree.hash of the tree as it is now
+    (load_view) and return True. Otherwise leave tree.hash as it is, print a warning to stderr, and return
+    False. The warning names why: a format-1 tree.hash ("kblam <command>: .kblam/tree.hash is in the old
+    format; tree.hash not advanced. Run kblam validate --record once the tree validates."), a missing one
+    while records exist ("... no .kblam/tree.hash, and the review root holds records; run kblam validate
+    --record ..."), or an out-of-band change ("... <findings root>/ or <review root>/ was changed outside
+    kblam since kblam last wrote it; tree.hash not advanced. Run kblam validate --record once the change
+    is validated.")."""
     if clean_before:
-        write_tree_hash(cfg, current_digest(cfg))
+        write_tree_hash_v2(cfg, load_view(cfg))
         return True
-    print(f"kblam {command}: {cfg.findings_dir}/ was changed outside kblam since kblam last wrote it; "
-          f"tree.hash not advanced. Run kblam validate --record once the change is validated.", file=sys.stderr)
+    recorded = read_recorded(cfg)
+    if recorded is None and _holds_records(cfg, cfg.review_dir):
+        print(f"kblam {command}: no .kblam/tree.hash, and the review root holds records; tree.hash not "
+              f"advanced. Run kblam validate --record once the tree validates.", file=sys.stderr)
+    elif recorded is not None and recorded[0] == 1:
+        print(f"kblam {command}: .kblam/tree.hash is in the old format; tree.hash not advanced. "
+              f"Run kblam validate --record once the tree validates.", file=sys.stderr)
+    else:
+        print(f"kblam {command}: {cfg.findings_dir}/ or {cfg.review_dir}/ was changed outside kblam since "
+              f"kblam last wrote it; tree.hash not advanced. Run kblam validate --record once the change "
+              f"is validated.", file=sys.stderr)
     return False

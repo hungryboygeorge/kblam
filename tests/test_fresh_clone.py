@@ -14,7 +14,7 @@ import pytest
 from kblam import cli
 from kblam.finding import fingerprint
 from kblam.jev import CACHE_NAME, PairCache
-from kblam.treehash import current_digest, read_tree_hash
+from kblam.treehash import read_recorded, tree_digest_v2
 from kblam.view import load_view
 
 from conftest import KB, finding_text
@@ -92,7 +92,7 @@ def test_validate_record_on_a_new_clone_accepts_the_findings_without_jev(origin,
             "asked: 2 finding(s) accepted from the repository as checked at their current fingerprints. kblam "
             "audit checks them with Jev") in out
     assert origin.fake.requests == []
-    assert read_tree_hash(clone.cfg) == current_digest(clone.cfg)
+    assert read_recorded(clone.cfg) == (2, clone.cfg.review_dir, tree_digest_v2(load_view(clone.cfg)))
     assert checked(clone, "F-0001") and checked(clone, "F-0002")
 
     code, out = run(clone, capsys, "check")  # later checks cover only what changes after the clone
@@ -120,7 +120,7 @@ def test_a_put_on_a_new_clone_records_the_baseline(origin, clone, capsys):
     code, out = run(clone, capsys, "put", str(staged))
     assert code == 0, out
     assert "changed outside kblam" not in out
-    assert read_tree_hash(clone.cfg) == current_digest(clone.cfg)
+    assert read_recorded(clone.cfg) == (2, clone.cfg.review_dir, tree_digest_v2(load_view(clone.cfg)))
     assert checked(clone, "F-0001") and checked(clone, "F-0002")  # accepted from the repository
     assert checked(clone, "F-0003")                                # checked by its own put
     assert (E1, N) not in origin.fake.relation_pairs() and (N, E1) not in origin.fake.relation_pairs()
@@ -138,9 +138,9 @@ def test_a_new_clone_of_a_failing_tree_is_blocked_and_recorded_only_once_clean(o
     reason = blocked(call("Stop", stop(clone), monkeypatch, capsys)[1])
     assert "K8 findings/calibration/notes.md" in reason and reason.endswith(POINTER)
     code, out = run(clone, capsys, "index")
-    assert code == 0 and "tree.hash not advanced" in out and read_tree_hash(clone.cfg) is None
+    assert code == 0 and "tree.hash not advanced" in out and read_recorded(clone.cfg) is None
     code, out = run(clone, capsys, "validate", "--record")
-    assert code == 1 and "tree.hash not recorded" in out and read_tree_hash(clone.cfg) is None
+    assert code == 1 and "tree.hash not recorded" in out and read_recorded(clone.cfg) is None
     assert not checked(clone, "F-0001")
 
     (clone.findings / "calibration" / "notes.md").unlink()  # the fix K8 asks for (removing a stray file passes)

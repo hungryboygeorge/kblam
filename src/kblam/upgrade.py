@@ -29,14 +29,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from kblam import resolutions, review
+from kblam import registry, resolutions, review
 from kblam.config import Config
 from kblam.finding import FILENAME_RE, Finding, fingerprint, fingerprint_v1, is_v1_fingerprint, parse_finding
 from kblam.jev import CACHE_NAME, JevSettings, PairCache, Side, jev_settings, question_prompt_id
 from kblam.jev_prompts import RELATION_KEY, REVISION_KEY
 from kblam.lock import kb_lock
 from kblam.store import atomic_write, display_path, edit_base_path, stamp_dependency
-from kblam.treehash import as_kblam_left_it, record_after_write, tree_digest
+from kblam.treehash import clean_before_v2, read_recorded, record_after_write_v2, tree_digest
 from kblam.view import load_view
 
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -157,12 +157,18 @@ def _upgrade(cfg: Config, settings: JevSettings) -> UpgradeResult:
             writes.append((finding, data))
             result.restamped += done
     if writes:
-        clean = as_kblam_left_it(cfg, tree_digest(view))
+        clean = clean_before_v2(cfg, view, bool(view.records))
+        recorded = read_recorded(cfg)
+        # Only upgrade may bridge a matching format-1 marker to format 2, and only before records
+        # exist: that old marker cannot vouch for the review root or its registered IDs.
+        if (recorded is not None and recorded[0] == 1 and recorded[2] == tree_digest(view)
+                and not view.records and not registry.read_ids(cfg)):
+            clean = True
         for finding, data in writes:
             atomic_write(cfg.repo_root / finding.path, data)
             if _follow_edit_record(cfg, finding, data):
                 result.edit_records.append(finding.file_id)
-        result.recorded = record_after_write(cfg, clean, "upgrade")
+        result.recorded = record_after_write_v2(cfg, clean, "upgrade")
 
     # 2. staged findings
     staged: dict[str, Finding] = {}

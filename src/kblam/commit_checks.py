@@ -48,7 +48,8 @@ def check_commit(cfg: Config, view: KBView) -> CommitCheck:
     kblam validates. Raises ApprovalError when git cannot answer."""
     prefix = _git(cfg, "rev-parse", "--show-prefix").decode("utf-8", "replace").strip()
     result = CommitCheck(changes_kb=_changes_kb(cfg))
-    for problem in (_unstaged(cfg, prefix), _changed_evidence(cfg), _resolutions_problem(cfg)):
+    for problem in (_unstaged(cfg, prefix), _unstaged(cfg, prefix, cfg.review_dir),
+                    _changed_evidence(cfg), _resolutions_problem(cfg)):
         if problem:
             result.problems.append(problem)
     result.warnings = _untracked_citations(cfg, view)
@@ -93,15 +94,16 @@ def _changes_kb(cfg: Config) -> bool:
     """Whether the commit changes a file under the KB root or kblam.resolutions.jsonl (`git diff --cached
     --name-only`, with both sides of a rename listed): only such a commit is blocked by open items."""
     paths = _paths(_git(cfg, "diff", "--cached", "--name-only", "--no-renames", "--relative", "-z"))
-    return any(p == RESOLUTIONS_NAME or _under(p, [cfg.findings_dir]) for p in paths)
+    return any(p == RESOLUTIONS_NAME or _under(p, [cfg.findings_dir, cfg.review_dir]) for p in paths)
 
 
-def _unstaged(cfg: Config, prefix: str) -> str | None:
+def _unstaged(cfg: Config, prefix: str, root: str | None = None) -> str | None:
     """The files under the KB root that the commit does not hold as they are on disk: `git status
     --porcelain` shows them with a worktree column other than a space, untracked ones (`??`) included.
     Its paths are relative to the top of the work tree, which is `prefix` above the repository root."""
+    root = cfg.findings_dir if root is None else root
     fields = _git(cfg, "--no-optional-locks", "status", "--porcelain", "-z", "--untracked-files=all", "--",
-                  cfg.findings_dir).split(b"\0")
+                  root).split(b"\0")
     found = []
     i = 0
     while i < len(fields):
@@ -123,9 +125,9 @@ def _unstaged(cfg: Config, prefix: str) -> str | None:
         found.append(f"{path.removeprefix(prefix)} ({state})")
     if not found:
         return None
-    return (f"this commit does not hold the files under {cfg.findings_dir}/ as they are on disk: "
+    return (f"this commit does not hold the files under {root}/ as they are on disk: "
             f"{', '.join(found)}. kblam validates the files on disk, so the commit must hold them as they are: "
-            f"stage them (git add {cfg.findings_dir}/) or discard those changes, then commit again")
+            f"stage them (git add {root}/) or discard those changes, then commit again")
 
 
 def _evidence_folders(cfg: Config) -> list[str]:

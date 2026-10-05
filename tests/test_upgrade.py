@@ -19,10 +19,10 @@ from kblam.jev import CACHE_NAME, PairCache, Side, jev_settings
 from kblam.lock import kb_lock
 from kblam.review import ReviewItem, load_items, save_items
 from kblam.store import edit_finding, put
-from kblam.treehash import read_tree_hash, tree_digest
+from kblam.treehash import read_recorded, tree_digest, tree_digest_v2
 from kblam.view import load_view
 
-from conftest import DEFAULT_PROMPT_ID, KBLAM_TOML, NO_EMBEDDINGS, PROMPT_TOML, finding_text
+from conftest import DEFAULT_PROMPT_ID, KBLAM_TOML, NO_EMBEDDINGS, PROMPT_TOML, finding_text, record_text
 from test_check import E1, E2, N, THRESHOLDS, jkb, run, set_config  # noqa: F401 (jkb is a fixture)
 from test_hook import call, stop
 
@@ -132,10 +132,10 @@ def test_upgrade_restamps_current_stamps_byte_for_byte_and_leaves_stale_ones(kb,
     assert three.read_bytes() == before_three
     assert f"kblam upgrade: re-stamped 1 depends_on value(s) in findings/ with v2 fingerprints:\n" \
            f"  findings/motor/F-0002-motor.md: F-0001 {current} -> {new}\n" in out
-    assert f"1 depends_on value(s) stay in the old format, because their target changed since" in out
+    assert "1 depends_on value(s) stay in the old format, because their target changed since" in out
     assert f"  findings/tray/F-0003-tray.md: F-0001 {stale}\n" in out
     assert "kblam upgrade: recorded .kblam/tree.hash for the tree" in out
-    assert read_tree_hash(kb.cfg) == tree_digest(load_view(kb.cfg))
+    assert read_recorded(kb.cfg) == (2, kb.cfg.review_dir, tree_digest_v2(load_view(kb.cfg)))
     assert "commit the re-stamped findings, so every clone has them" in out
     assert [(i.code, i.path.rsplit("/", 1)[-1]) for i in kb.issues()] == [("K1", "F-0003-tray.md")]
 
@@ -144,15 +144,57 @@ def test_upgrade_restamps_current_stamps_byte_for_byte_and_leaves_stale_ones(kb,
     assert "re-stamped" not in out and f"F-0001 {stale}" in out and "nothing to upgrade" not in out
 
 
+@pytest.mark.parametrize("empty_registry", [False, True])
+def test_upgrade_bridges_a_matching_format_1_marker_without_records(kb, capsys, empty_registry):
+    kb.add("F-0001", "sensor", CLAIM_A)
+    kb.add("F-0002", "motor", CLAIM_B, topic="motor",
+           extra=f"depends_on:\n  F-0001: {v1_of(kb, 'F-0001')}\n")
+    kb.write(".kblam/tree.hash", tree_digest(load_view(kb.cfg)) + "\n")
+    if empty_registry:
+        kb.write(".kblam/review-ids", "[]\n")
+    capsys.readouterr()
+
+    assert run(kb, "upgrade") == 0
+
+    captured = capsys.readouterr()
+    assert "recorded .kblam/tree.hash for the tree" in captured.out
+    assert "old format" not in captured.err
+    assert read_recorded(kb.cfg) == (2, kb.cfg.review_dir, tree_digest_v2(load_view(kb.cfg)))
+    assert found(kb, "F-0002").meta["depends_on"]["F-0001"] == v2_of(kb, "F-0001")
+
+
+@pytest.mark.parametrize("reason", ["mismatch", "records", "registry"])
+def test_upgrade_keeps_format_1_marker_when_the_bridge_cannot_vouch_for_the_tree(kb, capsys, reason):
+    kb.add("F-0001", "sensor", CLAIM_A)
+    kb.add("F-0002", "motor", CLAIM_B, topic="motor",
+           extra=f"depends_on:\n  F-0001: {v1_of(kb, 'F-0001')}\n")
+    digest = tree_digest(load_view(kb.cfg)) if reason != "mismatch" else "a" * 64
+    marker = kb.write(".kblam/tree.hash", digest + "\n")
+    if reason == "records":
+        kb.write("research-review/challenges/SC-0001.yaml", record_text("SC"))
+    elif reason == "registry":
+        kb.write(".kblam/review-ids", '["SC-0001"]\n')
+    before = marker.read_bytes()
+    capsys.readouterr()
+
+    assert run(kb, "upgrade") == 0
+
+    captured = capsys.readouterr()
+    assert "left .kblam/tree.hash as it was" in captured.out
+    assert ".kblam/tree.hash is in the old format; tree.hash not advanced" in captured.err
+    assert marker.read_bytes() == before
+    assert found(kb, "F-0002").meta["depends_on"]["F-0001"] == v2_of(kb, "F-0001")
+
+
 def test_upgrade_leaves_tree_hash_stale_after_a_change_outside_kblam(kb, capsys):
     kb.add("F-0001", "sensor", CLAIM_A)
     kb.add("F-0002", "motor", CLAIM_B, topic="motor", extra=f"depends_on:\n  F-0001: {v1_of(kb, 'F-0001')}\n")
-    recorded = read_tree_hash(kb.cfg)
+    recorded = read_recorded(kb.cfg)
     kb.write("findings/motor/notes.txt", "written by hand\n")  # findings/ changed outside kblam
     capsys.readouterr()
     assert run(kb, "upgrade") == 0
     assert "left .kblam/tree.hash as it was" in capsys.readouterr().out
-    assert read_tree_hash(kb.cfg) == recorded
+    assert read_recorded(kb.cfg) == recorded
 
 
 def test_upgrade_restamps_a_staged_copy_and_its_edit_still_puts(kb, capsys):
@@ -312,11 +354,11 @@ def test_an_upgrade_that_refuses_has_written_nothing(kb, capsys, damage, code, m
         with closing(sqlite3.connect(cache_path(kb))) as conn, conn:
             conn.execute("CREATE TABLE answers (expected_model TEXT, prompt_version INTEGER, kind TEXT, "
                          "existing_fp TEXT, new_fp TEXT, answer TEXT)")
-    before, recorded = two.read_bytes(), read_tree_hash(kb.cfg)
+    before, recorded = two.read_bytes(), read_recorded(kb.cfg)
     capsys.readouterr()
     assert run(kb, "upgrade") == code
     assert message in capsys.readouterr().err
-    assert two.read_bytes() == before and read_tree_hash(kb.cfg) == recorded  # the stamp is still v1
+    assert two.read_bytes() == before and read_recorded(kb.cfg) == recorded  # the stamp is still v1
 
 
 def test_another_machine_upgrades_its_own_state_after_pulling_an_upgraded_kb(kb, tmp_path, capsys):

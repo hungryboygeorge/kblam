@@ -61,6 +61,13 @@ DEFAULT_KB = {
 # history_id_terms: K5's own terms; absent = K5 uses history_terms.
 OPTIONAL_KB = ("adjudicators", "history_id_terms")
 
+# SPEC §9 [review] (§5.2): the review root and the provenance vocabularies of basis and decision evidence.
+DEFAULT_REVIEW = {
+    "root": "research-review",
+    "provenance": ["observed", "decoded", "inferred", "unknown"],
+    "primary_provenance": ["observed", "decoded"],
+}
+
 
 class ConfigError(Exception):
     pass
@@ -95,6 +102,9 @@ class Config:
     recheck_timeout_seconds: float = 600.0
     adjudicators: tuple[str, ...] | None = None
     history_id_terms: tuple[str, ...] | None = None
+    review_dir: str = "research-review"
+    provenance: tuple[str, ...] = ("observed", "decoded", "inferred", "unknown")
+    primary_provenance: tuple[str, ...] = ("observed", "decoded")
 
     @property
     def resolutions_path(self) -> Path:
@@ -112,6 +122,30 @@ class Config:
     def findings_path(self) -> Path:
         return self.repo_root / self.findings_dir
 
+    @property
+    def review_path(self) -> Path:
+        return self.repo_root / self.review_dir
+
+    @property
+    def review_staging_dir(self) -> Path:
+        """SC-/CT-/CU- records being written, awaiting put: the author's to edit (SPEC §5.2.5)."""
+        return self.state_dir / "review-staging"
+
+    @property
+    def review_receipts_dir(self) -> Path:
+        """Allocation and edit-base receipts of review records: kblam's state (SPEC §5.2.5)."""
+        return self.state_dir / "review-receipts"
+
+    @property
+    def review_ids_path(self) -> Path:
+        """The record-ID registry (SPEC §5.2.6)."""
+        return self.state_dir / "review-ids"
+
+    @property
+    def journal_path(self) -> Path:
+        """Present only while a multi-file write is in progress (SPEC §5.2.6)."""
+        return self.state_dir / "journal.json"
+
 
 def find_root(start: Path) -> Path:
     """Walk up from `start` to the first directory containing kblam.toml."""
@@ -125,7 +159,7 @@ def find_root(start: Path) -> Path:
     )
 
 
-def _check_type(key: str, value, kind) -> None:
+def _check_type(key: str, value, kind, table: str = "kb") -> None:
     if kind is float:
         ok = isinstance(value, (int, float)) and not isinstance(value, bool)
     elif kind is int:
@@ -136,7 +170,7 @@ def _check_type(key: str, value, kind) -> None:
         ok = isinstance(value, kind)
     if not ok:
         want = "a list of strings" if kind is list else kind.__name__
-        raise ConfigError(f"{CONFIG_NAME}: [kb] {key} must be {want}, got {value!r}")
+        raise ConfigError(f"{CONFIG_NAME}: [{table}] {key} must be {want}, got {value!r}")
 
 
 def load_config(root: Path | None = None, cwd: Path | None = None) -> Config:
@@ -183,6 +217,8 @@ def load_config(root: Path | None = None, cwd: Path | None = None) -> Config:
     if not (math.isfinite(kb["recheck_timeout_seconds"]) and kb["recheck_timeout_seconds"] > 0):
         raise ConfigError(f"{CONFIG_NAME}: [kb] recheck_timeout_seconds must be > 0 (a number of seconds)")
 
+    review = _review(repo_root, raw.get("review", {}), findings_dir.as_posix(), kb)
+
     return Config(
         repo_root=repo_root,
         findings_dir=findings_dir.as_posix(),
@@ -207,4 +243,53 @@ def load_config(root: Path | None = None, cwd: Path | None = None) -> Config:
         adjudicators=tuple(kb_raw["adjudicators"]) if "adjudicators" in kb_raw else None,
         history_id_terms=(tuple(t.lower() for t in kb_raw["history_id_terms"])
                           if "history_id_terms" in kb_raw else None),
+        review_dir=review["root"],
+        provenance=tuple(review["provenance"]),
+        primary_provenance=tuple(review["primary_provenance"]),
     )
+
+
+def _overlaps(a: str, b: str) -> bool:
+    """One POSIX path is, contains or lies under the other (segment-wise)."""
+    pa, pb = a.strip("/").split("/"), b.strip("/").split("/")
+    n = min(len(pa), len(pb))
+    return pa[:n] == pb[:n]
+
+
+def _review(repo_root: Path, table, findings_dir: str, kb: dict) -> dict:
+    """The [review] table (SPEC §9): defaults, unknown keys, the root's rules and the provenance subset."""
+    if not isinstance(table, dict):
+        raise ConfigError(f"{CONFIG_NAME}: [review] must be a table")
+    unknown = sorted(set(table) - set(DEFAULT_REVIEW))
+    if unknown:
+        raise ConfigError(
+            f"{CONFIG_NAME}: unknown [review] key(s) {', '.join(unknown)}; "
+            f"allowed: {', '.join(DEFAULT_REVIEW)}"
+        )
+    review = {**DEFAULT_REVIEW, **table}
+    for key, default in DEFAULT_REVIEW.items():
+        _check_type(key, review[key], type(default), "review")
+
+    root = review["root"]
+    if not ROOT_RE.fullmatch(root) or any(part in (".", "..") for part in root.split("/")):
+        raise ConfigError(f"{CONFIG_NAME}: [review] root must be /-separated segments of letters, digits, '.', "
+                          f"'_' and '-' naming a folder inside the repository, got {root!r}")
+    others = [(findings_dir, "the [kb] root"), (STATE_DIR, f"{STATE_DIR}/")]
+    others += [(d.strip("/"), f"the evidence root {d.strip('/')}") for d in kb["evidence_roots"] if d.strip("/")]
+    others += [(d.strip("/"), f"the history folder {d.strip('/')}") for d in kb["history_dirs"] if d.strip("/")]
+    for other, what in others:
+        if _overlaps(root, other):
+            raise ConfigError(f"{CONFIG_NAME}: [review] root {root!r} must not be, contain or lie under {what}")
+    parts = root.split("/")
+    for i in range(1, len(parts) + 1):
+        if (repo_root.joinpath(*parts[:i]) / ".git").exists():
+            raise ConfigError(f"{CONFIG_NAME}: [review] root {root!r} must not be or lie in a nested Git "
+                              f"repository ({'/'.join(parts[:i])})")
+
+    if not review["provenance"]:
+        raise ConfigError(f"{CONFIG_NAME}: [review] provenance must list at least one value")
+    extra = [p for p in review["primary_provenance"] if p not in review["provenance"]]
+    if extra:
+        raise ConfigError(f"{CONFIG_NAME}: [review] primary_provenance {', '.join(extra)} not in [review] "
+                          f"provenance; primary_provenance must be a subset of it")
+    return review

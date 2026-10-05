@@ -28,6 +28,8 @@ from kblam.finding import (
     normalise_newlines,
 )
 from kblam.index import generate_index
+from kblam.matching import finding_matches
+from kblam.sources import SourceReader
 from kblam.view import KBView
 
 REQUIRED_KEYS = ("id", "title", "topic", "label", "scope", "verified")  # evidence: checked by K2
@@ -54,14 +56,26 @@ class Issue:
     line: int          # 0 when no line applies
     code: str
     message: str
+    level: str = "error"   # "error" or "warning": a warning never fails, refuses or blocks (SPEC §5)
+    owner: str = ""        # the finding or record ID the issue concerns; blocking uses it (SPEC §5.2.4)
+
+    @property
+    def is_error(self) -> bool:
+        return self.level == "error"
 
     def format(self, view: KBView) -> str:
         where = view.show(self.path) + (f":{self.line}" if self.line else "")
-        return f"{self.code} {where}: {self.message}"
+        level = " warning" if self.level == "warning" else ""
+        return f"{self.code}{level} {where}: {self.message}"
+
+
+def errors(issues) -> list[Issue]:
+    """The issues that count: warnings are printed but never fail, refuse or block (SPEC §5)."""
+    return [i for i in issues if i.level == "error"]
 
 
 def _issue(code: str, finding: Finding, line: int | None, message: str) -> Issue:
-    return Issue(finding.path, line or 0, code, message)
+    return Issue(finding.path, line or 0, code, message, owner=finding.file_id or "")
 
 
 def _parsed(view: KBView) -> list[Finding]:
@@ -416,7 +430,7 @@ def k3_suspect(view: KBView, focus: frozenset[str] = frozenset()) -> list[Issue]
                        f"(recorded {d.recorded}, current {d.current}); re-read {d.target}, then {fix}")
         else:
             continue
-        issues.append(Issue(d.path, d.line, "K3", message))
+        issues.append(Issue(d.path, d.line, "K3", message, owner=d.dependent))
     return issues
 
 
@@ -431,20 +445,22 @@ def _term_pattern(term: str) -> re.Pattern:
     return re.compile(r"(?<!\w)" + r"\s+".join(words), re.IGNORECASE)
 
 
-def _prose_segments(view: KBView, f: Finding) -> list[tuple[int, str]]:
+def _prose_segments(view: KBView, f: Finding,
+                    reader: SourceReader | None = None) -> list[tuple[int, str]]:
     """(first file line, text) for the prose K4/K5 read: the title and the body.
 
     Verbatim excerpts that pass K10 are blanked (line count kept): they quote sources, whose
     wording is not the finding's own.
     """
+    reader = reader if reader is not None else SourceReader(view.cfg, view)
     segments = []
     title = f.meta.get("title")
     if isinstance(title, str):
         segments.append((f.key_line("title") or 1, title))
     body = list(f.body_lines)
-    for excerpt in verbatim_excerpts(view, f):
-        if excerpt.verified:
-            body[excerpt.start:excerpt.end] = [""] * (excerpt.end - excerpt.start)
+    for match in finding_matches(view, reader, f):
+        if match.verified:
+            body[match.start:match.end] = [""] * (match.end - match.start)
     segments.append((f.body_start_line, "\n".join(body)))
     return segments
 
@@ -468,20 +484,21 @@ def _history_hits(terms: tuple[str, ...], text: str) -> list[tuple[int, str]]:
 
 
 def _history_segments(view: KBView, f: Finding,
-                      terms: tuple[str, ...]) -> list[tuple[int, str, list[tuple[int, str]]]]:
+                      terms: tuple[str, ...], reader: SourceReader | None = None
+                      ) -> list[tuple[int, str, list[tuple[int, str]]]]:
     """(first file line, text, hits of `terms`) for each of _prose_segments; once per finding and term
     list per view, since K4 and K5 both read them (with one list while [kb] history_id_terms is absent)."""
     memo = view.memo.setdefault("history", {})
     key = (f.path, terms)
     if key not in memo:
-        memo[key] = [(line, text, _history_hits(terms, text)) for line, text in _prose_segments(view, f)]
+        memo[key] = [(line, text, _history_hits(terms, text)) for line, text in _prose_segments(view, f, reader)]
     return memo[key]
 
 
-def k4_history_language(view: KBView) -> list[Issue]:
+def k4_history_language(view: KBView, reader: SourceReader | None = None) -> list[Issue]:
     issues: list[Issue] = []
     for f in _parsed(view):
-        for first_line, text, hits in _history_segments(view, f, view.cfg.history_terms):
+        for first_line, text, hits in _history_segments(view, f, view.cfg.history_terms, reader):
             seen = set()
             for offset, term in hits:
                 line = first_line + text.count("\n", 0, offset)
@@ -497,7 +514,7 @@ def k4_history_language(view: KBView) -> list[Issue]:
     return issues
 
 
-def k5_id_near_history(view: KBView) -> list[Issue]:
+def k5_id_near_history(view: KBView, reader: SourceReader | None = None) -> list[Issue]:
     """Another finding's ID near a term that describes it as wrong or replaced: K5's own [kb]
     history_id_terms, or K4's history_terms while that key is absent (SPEC §5, §9)."""
     cfg = view.cfg
@@ -506,7 +523,7 @@ def k5_id_near_history(view: KBView) -> list[Issue]:
     issues: list[Issue] = []
     for f in _parsed(view):
         seen = set()  # one issue per (ID, term) in the finding, title and body together
-        for first_line, text, hits in _history_segments(view, f, terms):
+        for first_line, text, hits in _history_segments(view, f, terms, reader):
             if not hits:
                 continue
             starts = [m.start() for m in re.finditer(r"\S+", text)]
@@ -722,8 +739,10 @@ def _source_bytes(view: KBView, full: Path) -> bytes | None:
     rel = full.relative_to(view.cfg.repo_root.resolve()).as_posix()
     if rel in view.files:
         return view.files[rel]
-    if rel.startswith(view.cfg.findings_dir + "/"):
-        return None  # a findings/ path absent from the view does not exist in this tree
+    if rel in view.review_files:
+        return view.review_files[rel]
+    if rel.startswith((view.cfg.findings_dir + "/", view.cfg.review_dir + "/")):
+        return None  # a protected-root path absent from the view does not exist in this tree
     return full.read_bytes() if full.is_file() else None
 
 
@@ -855,12 +874,15 @@ def _hex_problem(offset: int, source: str, quoted: bytes, data: bytes) -> str | 
     return f"{problem}; copy the bytes from a hex dump of the source, never retype them"
 
 
-def k10_verbatim(view: KBView) -> list[Issue]:
+def k10_verbatim(view: KBView, reader: SourceReader | None = None) -> list[Issue]:
+    """K10's issues: the failure of each verbatim tag, from the shared match results
+    (matching.finding_matches). The messages are unchanged: matching asks rules for them."""
+    reader = reader if reader is not None else SourceReader(view.cfg, view)
     return [
-        _issue("K10", f, f.body_start_line + e.start, e.problem)
+        _issue("K10", f, f.body_start_line + m.start, m.problem)
         for f in _parsed(view)
-        for e in verbatim_excerpts(view, f)
-        if e.problem
+        for m in finding_matches(view, reader, f)
+        if m.problem
     ]
 
 
@@ -984,21 +1006,34 @@ def k12_blockquotes(view: KBView) -> list[Issue]:
 # --- entry point ----------------------------------------------------------------------------
 
 
-def validate(view: KBView, focus: frozenset[str] = frozenset()) -> list[Issue]:
-    """Run every rule. `focus` names findings being written, so K3 and K9 address them."""
+def validate(view: KBView, focus: frozenset[str] = frozenset(), *, trust_state: bool = True) -> list[Issue]:
+    """Run every rule. `focus` names findings being written, so K3 and K9 address them.
+
+    One SourceReader serves the whole validation, so each source is read once however many rules
+    consult it (SPEC §5.2.6). With `trust_state=False`, record checks read no machine-state registry,
+    tree.hash or allocation receipts; Stop uses this while git tracks `.kblam/`.
+    """
+    from kblam.k13 import k13  # these import Issue from here
+    from kblam.k14 import k14
+    from kblam.k15 import k15
+
+    reader = SourceReader(view.cfg, view, trust_state=trust_state)
     issues = (
         k1_schema(view)
         + k2_references(view)
         + k3_suspect(view, focus)
-        + k4_history_language(view)
-        + k5_id_near_history(view)
+        + k4_history_language(view, reader)
+        + k5_id_near_history(view, reader)
         + k6_length(view)
         + k7_index(view)
         + k8_stray_files(view)
         + k9_duplicates(view, focus)
-        + k10_verbatim(view)
+        + k10_verbatim(view, reader)
         + k11_reported(view)
         + k12_blockquotes(view)
+        + k13(view, reader)
+        + k14(view, reader)
+        + k15(view, reader)
     )
     # by rule number, so K12 sorts after K11 (as a string it would sort before K2)
     return sorted(set(issues), key=lambda i: (i.path, i.line, int(i.code[1:]), i.message))

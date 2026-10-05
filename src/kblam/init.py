@@ -1,11 +1,15 @@
 """`kblam init [--update]`: set up the git repository containing the current directory (SPEC §12 M6.5).
 
-It writes what the project needs and the user commits: kblam.toml (only if absent), the KB root's
-INDEX.md (only if absent), the .gitattributes and .gitignore lines, the reading rule and the write
-skill, kblam's hook entries merged into .claude/settings.json, the CLAUDE.md line (§8.2) and the git
-pre-commit hook. It never commits and never writes outside the repository root. A file kblam owns
-that differs from the installed version is reported and left alone unless --update is given;
-kblam.toml is never overwritten. Finally it runs each hook entry's command once through a shell.
+It writes what the project needs and the user commits: kblam.toml (only if absent), the two indexes and
+the record-ID registry (§5.2.6, §11 step 6: created when missing, from the files present, and never
+replaced), the .gitattributes and .gitignore lines, the reading rule and the write skill, kblam's hook
+entries merged into .claude/settings.json, the CLAUDE.md line (§8.2) and the git pre-commit hook. Those
+indexes are written by init itself, not through writes.apply, so the only tree.hash line and warning is
+its own. Last it writes `.kblam/tree.hash` in format 2 (§5.2.6 "Upgrade"): created, migrated from
+format 1, updated with a changed review root, or kept, with the message saying what to run instead. It
+never commits and never writes outside the repository root. A file kblam owns that differs from the
+installed version is reported and left alone unless --update is given; kblam.toml is never overwritten.
+Finally it runs each hook entry's command once through a shell.
 
 The source files ship in kblam/assets/. Everything is written with LF line endings.
 """
@@ -21,10 +25,15 @@ import sys
 import tomllib
 from pathlib import Path
 
+from kblam import k13, registry, review, rules, treehash, writes
 from kblam.approval import record_approval
 from kblam.config import CONFIG_NAME, RESOLUTIONS_NAME, ConfigError, load_config
+from kblam.gitdir import tracked_state, tracked_state_problem
+from kblam.index import generate_index
 from kblam.lock import LockError
-from kblam.store import atomic_write, regenerate_index
+from kblam.review_index import generate_review_index
+from kblam.store import StoreError, atomic_write
+from kblam.view import load_view
 
 ASSETS = Path(__file__).parent / "assets"
 RULE = ".claude/rules/kblam-findings.md"
@@ -33,6 +42,7 @@ SETTINGS = ".claude/settings.json"
 PRE_COMMIT_MARKER = "# kblam pre-commit hook"  # the asset's second line; identifies an older kblam version
 KBLAM_COMMAND = "kblam hook"                   # kblam's hook entries are the handlers whose command starts so
 KB_ROOT_TOKEN = "{{kb_root}}"                  # the rule, the skill and the hook entries name the KB root so
+REVIEW_ROOT_TOKEN = "{{review_root}}"          # ... and the review root is named the same way
 GUIDANCE_LINE = ("Findings live in `{root}/`, hold current facts only, and are written only via `kblam put` "
                  "(load the `kblam-write` skill); reading guidance loads when you open one.")
 
@@ -48,10 +58,14 @@ class InitError(Exception):
         self.status = status
 
 
-def _asset(rel: str, kb_root: str | None = None) -> bytes:
-    """An asset with LF endings; with `kb_root`, every KB_ROOT_TOKEN replaced by it."""
+def _asset(rel: str, kb_root: str | None = None, review_root: str | None = None) -> bytes:
+    """An asset with LF endings; with `kb_root`, every KB_ROOT_TOKEN replaced by it, and likewise
+    REVIEW_ROOT_TOKEN with `review_root`. An asset that names neither token is returned as it is."""
     data = (ASSETS / rel).read_bytes().replace(b"\r\n", b"\n")
-    return data if kb_root is None else data.replace(KB_ROOT_TOKEN.encode(), kb_root.encode("utf-8"))
+    for token, root in ((KB_ROOT_TOKEN, kb_root), (REVIEW_ROOT_TOKEN, review_root)):
+        if root is not None:
+            data = data.replace(token.encode(), root.encode("utf-8"))
+    return data
 
 
 def _template_prompt(template: bytes):
@@ -59,14 +73,20 @@ def _template_prompt(template: bytes):
     return tomllib.loads(template.decode("utf-8")).get("jev", {}).get("prompt")
 
 
-def _hook_entries(kb_root: str) -> dict:
-    """hooks.json parsed, then KB_ROOT_TOKEN replaced inside its strings (so no root can break the JSON)."""
+def _hook_entries(kb_root: str, review_root: str | None = None) -> dict:
+    """hooks.json parsed, then KB_ROOT_TOKEN and REVIEW_ROOT_TOKEN replaced inside its strings (so no
+    root can break the JSON)."""
     def substitute(value):
         if isinstance(value, dict):
             return {k: substitute(v) for k, v in value.items()}
         if isinstance(value, list):
             return [substitute(v) for v in value]
-        return value.replace(KB_ROOT_TOKEN, kb_root) if isinstance(value, str) else value
+        if not isinstance(value, str):
+            return value
+        for token, root in ((KB_ROOT_TOKEN, kb_root), (REVIEW_ROOT_TOKEN, review_root)):
+            if root is not None:
+                value = value.replace(token, root)
+        return value
     return substitute(json.loads(_asset("hooks.json")))
 
 
@@ -125,6 +145,86 @@ class Init:
         _write(path, new + "".join(f"{line}\n" for line in missing).encode("utf-8"))
         self.report("updated" if existed else "created", rel,
                     "added the kblam line" if paragraph else f"added {' and '.join(missing)}")
+
+    def findings_index(self, cfg) -> None:
+        """The KB root's INDEX.md (SPEC §11 step 6).
+
+        Created from the findings present when it is missing, and a file that is there is never touched.
+        Written here, under the lock, with atomic_write and not through `writes.apply`: an index write
+        that advanced tree.hash would print a tree.hash warning of its own before init's tree.hash line
+        (D32 f). The lock is mutating, so a review root that changed while records exist is refused here
+        (StoreError, exit 1); the recovery of an interrupted write runs in the step before this one.
+        """
+        rel = f"{cfg.findings_dir}/INDEX.md"
+        with writes.locked(cfg, "init", mutating=True):
+            view = load_view(cfg)
+            path = self.repo / rel
+            if path.exists():
+                self.report("unchanged", rel, "exists; not regenerated")
+            else:
+                atomic_write(path, generate_index(view))
+                self.report("created", rel, "kblam index")
+
+    def review_index(self, cfg) -> None:
+        """The review root's INDEX.md and the record-ID registry (SPEC §11 step 6, §5.2.6).
+
+        The index is created from the records present when it is missing, and a file that is there,
+        whatever it holds, is never touched. In the same locked step the registry is created from the IDs
+        of the records present when there is none, and never in a KB with no records (D28 b). The lock is
+        mutating, so a review root that changed while records exist is refused here (StoreError, exit 1).
+        """
+        rel = f"{cfg.review_dir}/INDEX.md"
+        with writes.locked(cfg, "init", mutating=True):
+            view = load_view(cfg)
+            path = self.repo / rel
+            if path.exists() or path.is_symlink():
+                self.report("unchanged", rel, "exists; not regenerated")
+            else:
+                atomic_write(path, generate_review_index(view))
+                self.report("created", rel, "kblam review index")
+            registered = writes.registry_after(cfg, k13.present_ids(view), set())
+            if registered is not None:
+                registry.write_ids(cfg, registered)
+
+    def tree_hash(self, cfg, started, matched: bool) -> None:
+        """The tree.hash line, last (SPEC §12 M6.5 "As built", §5.2.6 "tree.hash, format 2" and "Upgrade").
+
+        `started` is treehash.read_recorded of the file as init found it, before its own writes, and
+        `matched` whether the tree matched it then. Nothing is written unless the rule allows it: the
+        format-2 file covers init's own index writes, a format-1 file is migrated only from a matching
+        tree with a clean validation, and an out-of-band change is left for `kblam validate --record`.
+        Jev state is never rewritten.
+        """
+        rel = ".kblam/tree.hash"
+        with writes.locked(cfg, "init", mutating=True):
+            view = load_view(cfg)
+            if started is None:
+                if view.records:
+                    self.report("kept", rel, "missing, and the review root holds records; run kblam "
+                                             "validate --record")
+                elif treehash.clean_before_v2(cfg, view, False):
+                    _write_tree_hash_v2(cfg, view)
+                    self.report("created", rel)
+                else:
+                    self.report("kept", rel, "run kblam validate --record")
+                return
+            fmt, root, _digest = started
+            if fmt == 1:
+                if matched and _validation_clean(cfg, view):
+                    _write_tree_hash_v2(cfg, view)
+                    self.report("updated", rel, "migrated to format 2")
+                else:
+                    self.report("kept", rel, "run kblam validate --record")
+            elif root != cfg.review_dir:
+                _write_tree_hash_v2(cfg, view)
+                self.report("updated", rel, f"review root {root} -> {cfg.review_dir} recorded")
+            elif not matched:
+                self.report("kept", rel, f"{cfg.findings_dir}/ or {cfg.review_dir}/ changed outside kblam; "
+                                         f"run kblam validate --record")
+            elif _write_tree_hash_v2(cfg, view):
+                self.report("updated", rel, "init's own writes recorded")
+            else:
+                self.report("unchanged", rel)
 
     def prompt(self, project, installed) -> None:
         """Report a project `[jev.prompt]` that differs from the template's default wording (SPEC §6.2,
@@ -346,6 +446,36 @@ def _run_hook(argv: list[str], handler: dict, payload: dict, repo: Path, env: di
     return True, f"answered {json.dumps(answer, ensure_ascii=False)[:300]}"
 
 
+def _started_tree(cfg) -> tuple[tuple[int, str | None, str] | None, bool]:
+    """(treehash.read_recorded as init finds it, whether the tree matches it), read under the lock and
+    before init writes anything: an interrupted write is recovered by then, so `started` is the value
+    recovery restored rather than the one it replaced (SPEC §5.2.6)."""
+    started = treehash.read_recorded(cfg)
+    if started is None:
+        return None, False
+    view = load_view(cfg)
+    fmt, root, digest = started
+    if fmt == 2 and root == cfg.review_dir:
+        return started, treehash.tree_digest_v2(view) == digest
+    return started, fmt == 1 and treehash.tree_digest(view) == digest
+
+
+def _write_tree_hash_v2(cfg, view) -> bool:
+    """Write the format-2 tree.hash of `view` when its bytes differ from the file's; True when it wrote."""
+    path = cfg.state_dir / "tree.hash"
+    line = treehash.format_line(cfg.review_dir, treehash.tree_digest_v2(view)).encode("utf-8")
+    if path.is_file() and path.read_bytes() == line:
+        return False
+    atomic_write(path, line)
+    return True
+
+
+def _validation_clean(cfg, view) -> bool:
+    """Whether the tree `view` passes the full validation (SPEC §5.2.6 "Upgrade"): no errors and no open
+    review or unchecked item. Warnings and pending tasks are fine; nothing here asks Jev or the network."""
+    return not rules.errors(rules.validate(view)) and not review.open_items(cfg, view)
+
+
 def run(update: bool, cwd: Path | None = None) -> int:
     """`kblam init`: returns the exit status (0 done; 1 something was refused or a hook did not answer;
     2 not in a git repository or an invalid kblam.toml; 3 lock timeout, from kblam index)."""
@@ -368,22 +498,27 @@ def run(update: bool, cwd: Path | None = None) -> int:
         else:
             state.report("kept", CONFIG_NAME, "init never overwrites it")
         cfg = load_config(root=repo)
+        tracked = tracked_state(cfg)
+        if tracked:
+            raise StoreError(tracked_state_problem(tracked))
         if config.read_bytes() == template:
             record_approval(cfg, template)  # kblam's own template: its first commit needs no approval (§8 item 4)
         state.prompt(cfg.jev.get("prompt") if isinstance(cfg.jev, dict) else None,
                      _template_prompt(template))
-        index = f"{cfg.findings_dir}/INDEX.md"
-        if (repo / index).exists():
-            state.report("unchanged", index, "exists; not regenerated")
-        else:
-            regenerate_index(cfg)
-            state.report("created", index, "kblam index")
-        # -text: K7 and tree.hash are byte-exact; merge=union: git merges the resolutions line by line (§6.4)
-        state.append_line(".gitattributes", f"{cfg.findings_dir}/** -text", f"{RESOLUTIONS_NAME} merge=union")
+        # The state of tree.hash as init finds it, read under the lock: taking it recovers an interrupted
+        # write first, and recovery restores tree.hash to the journal's value (SPEC §5.2.6). A read before
+        # that would let init record over the restored value and report its own undo as its own writes.
+        with writes.locked(cfg, "init", mutating=False):
+            started, matched = _started_tree(cfg)
+        state.findings_index(cfg)
+        state.review_index(cfg)
+        # -text: indexes and tree.hash are byte-exact; merge=union: resolutions merge line by line (§6.4).
+        state.append_line(".gitattributes", f"{cfg.findings_dir}/** -text", f"{RESOLUTIONS_NAME} merge=union",
+                          f"{cfg.review_dir}/** -text")
         state.append_line(".gitignore", ".kblam/")
-        state.owned_file(RULE, _asset("rules/kblam-findings.md", cfg.findings_dir))
-        state.owned_file(SKILL, _asset("skills/kblam-write/SKILL.md", cfg.findings_dir))
-        installed = _hook_entries(cfg.findings_dir)
+        state.owned_file(RULE, _asset("rules/kblam-findings.md", cfg.findings_dir, cfg.review_dir))
+        state.owned_file(SKILL, _asset("skills/kblam-write/SKILL.md", cfg.findings_dir, cfg.review_dir))
+        installed = _hook_entries(cfg.findings_dir, cfg.review_dir)
         state.settings(settings, installed)
         state.append_line("CLAUDE.md", GUIDANCE_LINE.format(root=cfg.findings_dir), paragraph=True)
         if pre_commit.is_relative_to(repo):
@@ -393,6 +528,7 @@ def run(update: bool, cwd: Path | None = None) -> int:
                                                      "(core.hooksPath, a worktree or a submodule); init writes "
                                                      f"nothing there. Install {ASSETS / 'pre-commit'} by hand")
             state.status = EXIT_REFUSED
+        state.tree_hash(cfg, started, matched)
         state.check_hooks(installed, cfg.findings_dir)
     except InitError as exc:
         print(f"kblam init: {exc}", file=sys.stderr)
@@ -404,6 +540,11 @@ def run(update: bool, cwd: Path | None = None) -> int:
         print(f"kblam init: {exc}", file=sys.stderr)
         return EXIT_LOCKED
     except OSError as exc:
+        print(f"kblam init: {exc}", file=sys.stderr)
+        return EXIT_REFUSED
+    except StoreError as exc:
+        # writes.locked raises StoreError for a failed recovery, and, in the mutating findings index,
+        # review index and tree.hash steps, for a changed review root or an unreadable registry
         print(f"kblam init: {exc}", file=sys.stderr)
         return EXIT_REFUSED
     if state.status == EXIT_OK:

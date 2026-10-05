@@ -9,7 +9,7 @@ import pytest
 
 from kblam import cli
 from kblam.gitdir import tracked_state
-from kblam.treehash import read_tree_hash
+from kblam.treehash import read_recorded
 
 from test_approval import commit, git, gkb  # noqa: F401  (gkb is a fixture)
 from test_hook import blocked, call, stop
@@ -87,7 +87,7 @@ def test_the_stop_hook_blocks_on_tracked_state_and_ignores_its_tree_hash(gkb, mo
     """A tree.hash that a commit brings matches the committed tree, so trusting it would keep the Stop hook
     quiet about findings nobody checked on this machine."""
     monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
-    assert read_tree_hash(gkb.cfg) is not None  # the fixture recorded the tree
+    assert read_recorded(gkb.cfg) is not None  # the fixture recorded the tree
     track(gkb, ".kblam/tree.hash")
     code, answer, _ = call("Stop", stop(gkb), monkeypatch, capsys)
     reason = blocked(answer)

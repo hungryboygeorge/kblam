@@ -8,7 +8,8 @@ import pytest
 
 from kblam.cli import main
 from kblam.store import ack, edit_finding, put
-from kblam.treehash import current_digest, read_tree_hash
+from kblam.treehash import read_recorded, tree_digest_v2
+from kblam.view import load_view
 
 from conftest import finding_text
 from test_rm_renumber import commit_all, fp_of, git, needs_git, no_outer_git  # noqa: F401 (no_outer_git: fixture)
@@ -56,7 +57,7 @@ def test_ack_prints_the_recorded_version_beside_the_current_one(kb, capsys):
     short = git(kb, "rev-parse", "--short", recorded)
     assert out[:2] == [f"F-0001 as recorded (commit {short}): {OLD}", f"F-0001 now: {NEW}"]
     assert out[2].startswith("kblam ack: F-0002 depends_on F-0001 set to ")
-    assert kb.issues() == [] and read_tree_hash(kb.cfg) == current_digest(kb.cfg)
+    assert kb.issues() == [] and read_recorded(kb.cfg) == (2, kb.cfg.review_dir, tree_digest_v2(load_view(kb.cfg)))
 
 
 @needs_git

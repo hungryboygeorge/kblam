@@ -16,7 +16,7 @@ from kblam import hook
 from kblam.finding import FILENAME_RE, fingerprint
 from kblam.jev import CACHE_NAME, PairCache
 from kblam.store import put
-from kblam.treehash import read_tree_hash
+from kblam.treehash import read_recorded
 from kblam.view import load_view
 
 from conftest import KBLAM_TOML, NO_EMBEDDINGS, PROMPT_TOML, finding_text
@@ -320,7 +320,7 @@ def test_stop_without_tree_hash_runs_only_the_rules_and_is_silent_when_clean(hkb
     (hkb.root / ".kblam" / "tree.hash").unlink()  # as in a new clone
     assert call(event, stop_input(hkb, event), monkeypatch, capsys) == (0, None, "")
     assert hkb.fake.requests == []
-    assert read_tree_hash(hkb.cfg) is None        # nothing is recorded: only validate --record accepts the tree
+    assert read_recorded(hkb.cfg) is None        # nothing is recorded: only validate --record accepts the tree
     assert not checked(hkb, "F-0001") and not checked(hkb, "F-0002")
     assert not (hkb.root / ".kblam" / "stop-block").exists()
 
@@ -340,7 +340,7 @@ def test_stop_without_tree_hash_blocks_on_rules_and_open_items(hkb, monkeypatch,
     # the loop guard as with a tree.hash: continuing after that block with nothing changed is let through
     code, answer, _ = call("Stop", stop(hkb, active=True), monkeypatch, capsys)
     assert code == 0 and "unchanged since the last block" in answer["systemMessage"]
-    assert read_tree_hash(hkb.cfg) is None
+    assert read_recorded(hkb.cfg) is None
 
 
 def test_stop_without_tree_hash_or_kb_root_stays_silent(kb, monkeypatch, capsys, no_jev_check):
