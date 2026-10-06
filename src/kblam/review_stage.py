@@ -31,7 +31,7 @@ from kblam.config import Config
 from kblam.finding import ID_RE as FINDING_ID_RE
 from kblam.finding import fingerprint, normalise_newlines
 from kblam.sources import SourceReader, sha256_hex
-from kblam.store import StoreError, display_path
+from kblam.store import StoreError, display_path, history_names
 from kblam.view import load_view
 
 
@@ -43,9 +43,10 @@ def allocate_record_id(cfg: Config, prefix: str) -> str:
     """The next ID of kind `prefix` ("SC", "CT" or "CU"), four digits or more: one above the highest
     number of that prefix among the record files in the review root (any file whose name matches
     records.FILENAME_RE, in any folder under the root), the staged files in `.kblam/review-staging/`,
-    the registry (registry.read_ids; a ValueError becomes StoreError), and the allocation receipts in
-    `.kblam/review-receipts/` (an abandoned draft keeps its receipt, and receipts are never rewritten).
-    Numbering is per prefix: SC-0001 and CT-0001 coexist. Call it under the lock."""
+    the registry (registry.read_ids; a ValueError becomes StoreError), the allocation receipts in
+    `.kblam/review-receipts/` (an abandoned draft keeps its receipt, and receipts are never rewritten),
+    and the record files in the git history of the review root on any ref (store.history_names; without
+    git it adds nothing). Numbering is per prefix: SC-0001 and CT-0001 coexist. Call it under the lock."""
     if prefix not in records.KINDS:
         raise StoreError(f"{prefix!r} is not a record kind (SC, CT or CU)")
     numbers = []
@@ -58,12 +59,17 @@ def allocate_record_id(cfg: Config, prefix: str) -> str:
 
 def _allocated_ids(cfg: Config):
     """Every ID that already holds a number: the record files of the review root, the staged files, the
-    registry's entries and the receipts' file names (an abandoned draft keeps its number)."""
+    registry's entries, the receipts' file names (an abandoned draft keeps its number) and the record
+    files the review root's git history holds (a record that was committed and removed keeps its)."""
     for directory in (cfg.review_path, cfg.review_staging_dir):
         for path in _files(directory):
             match = records.FILENAME_RE.match(path.name)
             if match:
                 yield match.group(1)
+    for name in history_names(cfg, cfg.review_dir):
+        match = records.FILENAME_RE.match(name)
+        if match:
+            yield match.group(1)
     for path in _files(cfg.review_receipts_dir):
         yield path.name.split(".", 1)[0]
     try:

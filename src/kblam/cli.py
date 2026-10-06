@@ -206,6 +206,13 @@ def _rebind_command(rec_id: str, view) -> str:
     return command + (" --evidence PROVENANCE:PATH:LOCATOR" if status in k15.PRIMARY_EVIDENCE else "")
 
 
+def _stale_line(command: str, rec_id: str, finding_id: str, view) -> str:
+    """The line a finding write prints for a CT or CU it made stale by changing `finding_id` (SPEC §5.2.4;
+    `put`, and `renumber` for a dependent it re-keyed), with the rebind command for it."""
+    return (f"kblam {command}: {rec_id} is now stale (this {command} changed {finding_id}, which it is bound "
+            f"to); a reviewer rechecks it and runs {_rebind_command(rec_id, view)}. kblam validate fails until then")
+
+
 def _cmd_put(cfg, args) -> int:
     if records.FILENAME_RE.match(Path(args.file).name):  # an SC-/CT-/CU- file: a record put (§5.2.5)
         return _write_result(cfg, "put", review_write.put_record(cfg, Path(args.file)))
@@ -258,9 +265,7 @@ def _cmd_put(cfg, args) -> int:
         print(f"kblam put: the {len(existing_errors)} warning(s) above were already in {cfg.findings_dir}/ before this "
               f"put, so they did not block it; kblam validate fails until each is fixed")
     for rec_id in result.stale:  # SPEC §5.2.4: the put lists what it makes stale
-        print(f"kblam put: {rec_id} is now stale (this put changed {result.finding_id}, which it is bound "
-              f"to); a reviewer rechecks it and runs {_rebind_command(rec_id, result.view)}. kblam "
-              f"validate fails until then")
+        print(_stale_line("put", rec_id, result.finding_id, result.view))
     for issue in (*result.kept, *result.remaining):
         print(issue.format(result.view))
     if result.stale or result.kept or result.remaining:
@@ -514,6 +519,10 @@ def _cmd_renumber(cfg, args) -> int:
     for dependent, path in result.rekeyed:
         print(f"kblam renumber: {dependent} depends_on {result.old_id} is now {result.new_id}: "
               f"{result.fingerprint} ({path}), since its fingerprint showed it meant {result.old_path}")
+    if result.stale:
+        view = load_view(cfg)  # renumber writes no record, so the statuses the rebind commands depend on hold
+        for rec_id, dependent in result.stale:
+            print(_stale_line("renumber", rec_id, dependent, view))
     if result.resolutions:
         print(f"kblam renumber: copied {result.resolutions} resolution(s) of {result.old_id} to {result.new_id} in "
               f"{cfg.resolutions_path.name}, since their state hash showed they meant {result.old_path}; commit "

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path, PurePosixPath
 
-from kblam import k14, k15, matching, resolutions, review, writes
+from kblam import k14, k15, matching, records, resolutions, review, writes
 from kblam.check import Checker, CheckResult, _differ, _format_value, _quantities
 from kblam.config import Config
 from kblam.jev import Side, jev_settings
@@ -134,6 +134,7 @@ class RenumberResult:
     index_path: str = ""
     recorded: bool = False                      # tree.hash advanced (the tree.hash rule, SPEC §8)
     resolutions: int = 0                        # resolutions copied under the new ID (SPEC §6.4)
+    stale: list[tuple[str, str]] = field(default_factory=list)  # (CT/CU ID, re-keyed finding it was bound to)
 
 
 def atomic_write(path: Path, data: bytes) -> None:
@@ -183,16 +184,23 @@ def _git(cfg: Config, *args: str, stdin: bytes | None = None) -> bytes:
     return done.stdout
 
 
-def _history_ids(cfg: Config) -> list[int]:
-    """The number of every finding file in the git history of the KB root, on every ref (`--all`: local
-    branches, remote-tracking ones and tags). Empty when git cannot answer (SPEC §7 new)."""
+def history_names(cfg: Config, root: str) -> list[str]:
+    """The file name of every file in the git history of `root` (repository-relative), on every ref
+    (`--all`: local branches, remote-tracking ones and tags). Empty when git cannot answer (SPEC §7 new,
+    §5.2.5)."""
     try:
-        out = _git(cfg, "log", "--all", "--no-renames", "--name-only", "--format=", "-z", "--", cfg.findings_dir)
+        out = _git(cfg, "log", "--all", "--no-renames", "--name-only", "--format=", "-z", "--", root)
     except GitUnavailable:
         return []
+    return [name.rsplit("/", 1)[-1] for name in out.decode("utf-8", "replace").replace("\n", "\0").split("\0")
+            if name]
+
+
+def _history_ids(cfg: Config) -> list[int]:
+    """The number of every finding file in the git history of the KB root (SPEC §7 new)."""
     numbers = []
-    for name in out.decode("utf-8", "replace").replace("\n", "\0").split("\0"):
-        match = FILENAME_RE.match(name.rsplit("/", 1)[-1])
+    for name in history_names(cfg, cfg.findings_dir):
+        match = FILENAME_RE.match(name)
         if match:
             numbers.append(id_number(match.group(1)))
     return numbers
@@ -506,7 +514,7 @@ def _prepare(cfg: Config, source: Path) -> tuple[PutResult, KBView]:
     result.issues += _newly_affected(result, current, readers, found)
     result.remaining = [i for i in found if i not in result.issues and i not in result.kept
                         and i not in result.warnings]
-    result.stale = _made_stale(result, current, readers)
+    result.stale = _made_stale(current, view, finding_id)
     result.warnings += [i for i in issues if not i.is_error]
     return result, current
 
@@ -588,23 +596,23 @@ def _new_excerpt_issue(written: Finding, finding_id: str, line: int, challenge: 
                  "error", finding_id)
 
 
-def _made_stale(result: PutResult, current: KBView, readers: tuple[SourceReader, SourceReader]) -> list[str]:
-    """The IDs of the CT and CU records this put makes stale (SPEC §5.2.4 "Where each rule blocks"),
-    in ID order: those bound to this finding whose binding held on the current view and no longer holds
-    on the candidate. A task or use already stale or withdrawn is not listed."""
-    reader_installed, reader_candidate = readers
+def _made_stale(current: KBView, after: KBView, finding_id: str) -> list[str]:
+    """The IDs of the CT and CU records a write that turns `current` into `after` makes stale by changing
+    `finding_id` (SPEC §5.2.4 "Where each rule blocks"; a put, and the dependents renumber re-keys), in ID
+    order: those bound to that finding whose binding held on the current view and no longer holds after.
+    A task or use already stale or withdrawn is not listed."""
     stale = []
     for rec in current.records:
         if rec.kind not in ("CT", "CU") or not isinstance(rec.id, str) or rec.status in RETIRED_STATUSES:
             continue
         data = rec.data if isinstance(rec.data, dict) else {}
-        if data.get("finding") != result.finding_id:
+        if data.get("finding") != finding_id:
             continue
         if rec.kind == "CT":
             # task_binding_problems returns the reasons the binding is broken, so [] means it holds
-            broke = not k15.task_binding_problems(current, rec) and k15.task_binding_problems(result.view, rec)
+            broke = not k15.task_binding_problems(current, rec) and k15.task_binding_problems(after, rec)
         else:
-            broke = _finding_binding(current, data) and not _finding_binding(result.view, data)
+            broke = _finding_binding(current, data) and not _finding_binding(after, data)
         if broke:
             stale.append(rec.id)
     return sorted(stale, key=_record_order)
@@ -858,7 +866,8 @@ def remove_finding(cfg: Config, finding_id: str, target_id: str) -> RemoveResult
     it stated into <target>.
 
     Refused while another finding depends on it, while either ID is not a single readable finding in the KB,
-    or while one of its quantities is missing from <target> with the same value and unit. Under the lock it
+    while one of its quantities is missing from <target> with the same value and unit, or while a review
+    record links it (in any status; the refusal says to merge the other way, _linked_removal). Under the lock it
     removes the file and a topic folder that leaves empty, regenerates INDEX.md, applies the tree.hash rule
     (§8) and closes the finding's open review, rejected and unchecked items. The reason for the removal goes
     in the commit message. Who may run it is the hooks' concern (the adjudicator gate, §8 item 2).
@@ -879,6 +888,9 @@ def _remove(cfg: Config, finding_id: str, target_id: str) -> RemoveResult:
                                                   f"nothing to remove")
     target = _one_finding(cfg, view, target_id, f"{target_id} is not in {cfg.findings_dir}/; --merged-into names "
                                                 f"the finding that now states what {finding_id} stated")
+    linked = _links(view, finding_id)[finding.path]
+    if linked:
+        raise StoreError(_linked_removal(cfg, view, finding, target, linked))
     problems = _removal_problems(cfg, view, finding, target)
     if problems:
         raise StoreError(f"{finding_id} cannot be removed: " + "; ".join(problems)
@@ -903,20 +915,22 @@ def _remove(cfg: Config, finding_id: str, target_id: str) -> RemoveResult:
     return result
 
 
-def _set_id(finding: Finding, new_id: str, shown: str) -> bytes:
-    """The finding's bytes with its `id` value set to `new_id`; no other byte changes."""
-    problem = (f"{shown}: could not set id to {new_id} without changing anything else; renumber the other file "
-               f"with that ID instead, or ask a person to fix this file's id line")
+def _set_id(finding: Finding, new_id: str, shown: str, other) -> bytes:
+    """The finding's bytes with its `id` value set to `new_id`; no other byte changes. `other()` is the
+    path of another file with that ID that kblam can renumber, or None: only then does a refusal offer
+    renumbering it instead (SPEC §7)."""
     try:
         position = finding.meta.lc.key("id")
     except (AttributeError, KeyError):
-        raise StoreError(f"{shown} has no id key, so kblam cannot rewrite it; renumber the other file with its "
-                         f"ID instead") from None
+        raise StoreError(f"{shown} has no id key, so kblam cannot rewrite it"
+                         + ("; renumber the other file with its ID instead" if other() else "")) from None
     data = _rewrite_entry(finding, position, new_id)
     expected = plain_data(finding.meta)
     expected["id"] = new_id
     if data is None or not _changes_only(finding, data, expected):
-        raise StoreError(problem)
+        raise StoreError(f"{shown}: could not set id to {new_id} without changing anything else; "
+                         + ("renumber the other file with that ID instead, or " if other() else "")
+                         + "ask a person to fix this file's id line")
     return data
 
 
@@ -956,14 +970,72 @@ def _renumber(cfg: Config, source: Path) -> RenumberResult:
     if not kept:
         raise StoreError(f"no other file in {cfg.findings_dir}/ uses {old_id}, so there is nothing to renumber: "
                          f"an ID never changes, and kblam renumber only settles an ID two findings share (K1)")
+    links = _links(view, old_id)
+    new_id = allocate_id(cfg)
+    peers: list[tuple[Finding, str | None]] = []
+
+    def unlinked_peers() -> list[tuple[Finding, str | None]]:
+        """Each other file with the ID that no review record links, with the reason kblam cannot renumber
+        it (None when it can: the first case's test, SPEC §7). Worked out once, when a message needs it."""
+        if not peers:
+            peers.extend((k, _renumber_problem(cfg, view, k, new_id)) for k in kept if not links[k.path])
+        return peers
+
+    def other() -> str | None:
+        return next((k.path for k, problem in unlinked_peers() if problem is None), None)
+
+    if links[finding.path]:
+        raise StoreError(_linked_renumber(view, finding, links, unlinked_peers()))
+    plan = _renumber_plan(cfg, view, finding, kept, new_id, other)
+
+    clean = clean_before_v2(cfg, view, bool(view.records))
+    atomic_write(cfg.repo_root / plan.new_path, plan.data)
+    (cfg.repo_root / finding.path).unlink()
+    for dependent, rewritten in plan.rewrites:
+        atomic_write(cfg.repo_root / dependent.path, rewritten)
+    after = load_view(cfg)
+    _write_index(cfg, after)
+    for line in plan.carried:
+        resolutions.append(cfg, line)
+    return RenumberResult(
+        old_id, new_id, finding.path, plan.new_path, plan.new_fp,
+        kept=[f.path for f in kept],
+        rekeyed=[(d.file_id, d.path) for d, _ in plan.rewrites],
+        mentions=[f"{p}:{line}: {what}" for p, line, what in sorted(plan.mentions)],
+        index_path=view.index_path,
+        recorded=record_after_write_v2(cfg, clean, "renumber"),
+        resolutions=len(plan.carried),
+        # A re-keyed dependent's bytes change, so a CT or CU bound to it goes stale (SPEC §7 renumber).
+        stale=[(rec_id, d.file_id) for d, _ in plan.rewrites for rec_id in _made_stale(view, after, d.file_id)],
+    )
+
+
+@dataclass
+class _RenumberPlan:
+    """What renumbering one file writes (SPEC §7 renumber), worked out before anything is written."""
+    new_path: str
+    data: bytes                                  # the file's bytes under the new ID
+    new_fp: str
+    carried: list[resolutions.Resolution]
+    rewrites: list[tuple[Finding, bytes]]        # (dependent, its bytes with the entry re-keyed)
+    mentions: list[tuple[str, int, str]]         # (path, line, what), for a person to check
+
+
+def _renumber_plan(cfg: Config, view: KBView, finding: Finding, kept: list[Finding], new_id: str,
+                   other) -> _RenumberPlan:
+    """Renumber's preconditions for `finding`, and what it would write. A StoreError (or ResolutionError,
+    for a damaged kblam.resolutions.jsonl) is the refusal; `other()` names another file with the ID that
+    kblam can renumber, which only then the refusal offers instead (SPEC §7)."""
+    old_id = finding.file_id
     if not finding.ok:
         line, message = finding.parse_errors[0]
+        alternative = other()
         raise StoreError(f"{finding.path} cannot be read as a finding (" + (f"line {line}: " if line else "")
-                         + f"{message}), so kblam cannot rewrite its id; renumber {kept[0].path} instead, or ask a "
-                         f"person to fix this file")
-    new_id = allocate_id(cfg)
+                         + f"{message}), so kblam cannot rewrite its id; "
+                         + (f"renumber {alternative} instead, or " if alternative else "")
+                         + "ask a person to fix this file")
     new_path = f"{PurePosixPath(finding.path).parent.as_posix()}/{new_id}-{finding.slug}.md"
-    data = _set_id(finding, new_id, finding.path)
+    data = _set_id(finding, new_id, finding.path, other)
     new_fp = fingerprint(parse_finding(new_path, data), cfg.scope_separator)
     carried = _carried_resolutions(cfg, finding, old_id, new_id)  # read first: a damaged file refuses
 
@@ -994,24 +1066,129 @@ def _renumber(cfg: Config, source: Path) -> RenumberResult:
         for number, text in enumerate(f.body_lines):
             if _names(text, old_id):
                 mentions.append((shown, f.body_start_line + number, f"the body names {old_id}"))
+    return _RenumberPlan(new_path, data, new_fp, carried, rewrites, mentions)
 
-    clean = clean_before_v2(cfg, view, bool(view.records))
-    atomic_write(cfg.repo_root / new_path, data)
-    (cfg.repo_root / finding.path).unlink()
-    for dependent, rewritten in rewrites:
-        atomic_write(cfg.repo_root / dependent.path, rewritten)
-    _write_index(cfg, load_view(cfg))
-    for line in carried:
-        resolutions.append(cfg, line)
-    return RenumberResult(
-        old_id, new_id, finding.path, new_path, new_fp,
-        kept=[f.path for f in kept],
-        rekeyed=[(d.file_id, d.path) for d, _ in rewrites],
-        mentions=[f"{p}:{line}: {what}" for p, line, what in sorted(mentions)],
-        index_path=view.index_path,
-        recorded=record_after_write_v2(cfg, clean, "renumber"),
-        resolutions=len(carried),
-    )
+
+def _renumber_problem(cfg: Config, view: KBView, finding: Finding, new_id: str) -> str | None:
+    """The refusal renumbering `finding` would give, without its `kblam renumber:` prefix and without any
+    "renumber the other file instead" alternative; None when renumbering it would pass every precondition."""
+    kept = [f for f in view.findings if f.file_id == finding.file_id and f is not finding]
+    try:
+        _renumber_plan(cfg, view, finding, kept, new_id, lambda: None)
+    except (StoreError, resolutions.ResolutionError) as exc:
+        return str(exc)
+    return None
+
+
+# --- rm and renumber vs review records (SPEC §7 "`rm` and `renumber` vs review records") ----------------
+
+BINDINGS = {"CT": ("claim_fingerprint", "base_file_sha256"),     # a record's finding binding:
+            "CU": ("finding_fingerprint", "finding_file_sha256")}  # (fingerprint v2, full-file sha256)
+
+
+def _kind_order(rec_id: str) -> tuple[int, int, str]:
+    """Records by kind (SC, CT, CU), then in numeric ID order."""
+    return (tuple(records.KINDS).index(rec_id[:2]), *_record_order(rec_id))
+
+
+def _bound(cfg: Config, rec, finding: Finding) -> bool:
+    """Whether a CT's or CU's finding binding identifies this file: fingerprint v2 and file sha256 match."""
+    fingerprint_key, sha_key = BINDINGS[rec.kind]
+    return (rec.data.get(fingerprint_key) == fingerprint(finding, cfg.scope_separator)
+            and rec.data.get(sha_key) == sha256_hex(finding.raw))
+
+
+def _links(view: KBView, finding_id: str) -> dict[str, list]:
+    """The review records that link each file with `finding_id`: {path: [records.Record]}, in `_kind_order`.
+    A CT or CU naming the ID links the file its binding identifies, or, when its binding identifies none,
+    every file with the ID. An SC's `linked_findings` entry is a bare ID and links every file with it. Every
+    status counts: retiring a record does not free a finding's identity. Installed records only."""
+    files = [f for f in view.findings if f.file_id == finding_id]
+    links: dict[str, list] = {f.path: [] for f in files}
+    named = [rec for rec in view.records if isinstance(rec.id, str) and isinstance(rec.data, dict)]
+    for rec in sorted(named, key=lambda rec: _kind_order(rec.id)):
+        if rec.kind == "SC":
+            listed = rec.data.get("linked_findings")
+            linked = files if isinstance(listed, list) and finding_id in listed else []
+        elif rec.kind in BINDINGS and rec.data.get("finding") == finding_id:
+            linked = [f for f in files if _bound(view.cfg, rec, f)] or files
+        else:
+            linked = []
+        for f in linked:
+            links[f.path].append(rec)
+    return links
+
+
+def _review_records(ids: list[str], verb: str = "") -> str:
+    """"review record CT-0003 links" for one and "review records CT-0003, CU-0001 link" for several; with
+    no verb, "review record CT-0003" and "review records CT-0003, CU-0001"."""
+    words = ("review record " if len(ids) == 1 else "review records ") + ", ".join(ids)
+    return words + (f" {verb}s" if len(ids) == 1 else f" {verb}") if verb else words
+
+
+def _linked_removal(cfg: Config, view: KBView, finding: Finding, target: Finding, linked: list) -> str:
+    """rm's refusal of a finding review records link (SPEC §7): merge the other way, unless a record also
+    links the target. The staged copies and the records the edit makes stale are named as SPEC §7 says."""
+    finding_id, target_id = finding.file_id, target.file_id
+    mine = [rec.id for rec in linked]
+    theirs = [rec.id for rec in _links(view, target_id)[target.path]]
+    head = f"{finding_id} cannot be removed: {_review_records(mine, 'link')} it"
+    if theirs:
+        named = sorted(set(mine) | set(theirs), key=_kind_order)
+        return (f"{head}, and {target_id} cannot be removed in its place: {_review_records(theirs, 'link')} it; "
+                f"kblam never removes a finding a review record links. {cfg.findings_dir}/ is unchanged. Leave "
+                f"both as they are and tell the user {_and([finding_id, target_id, *named])}")
+    staged = sorted(display_path(cfg, p) for n, p in _ids_in(cfg.staging_dir) if format_id(n) == finding_id)
+    lacks = f"also state what {target_id} states that {finding_id} does not yet (its detail and quantities"
+    if not staged:
+        how = f"make {finding_id} {lacks}; kblam edit {finding_id})"
+    elif len(staged) == 1:
+        how = f"make your staged copy {staged[0]} {lacks}) and put it"
+    else:
+        how = f"make one of your staged copies {', '.join(staged)} {lacks}) and put it"
+    text = (f"{head}, and kblam never removes a finding a review record links. {cfg.findings_dir}/ is unchanged. "
+            f"Merge the other way: {how}, then kblam rm {target_id} --merged-into {finding_id}")
+    # the records the put of the edited finding lists as made stale (_made_stale): bound to this file, not retired
+    stale = [rec.id for rec in linked
+             if rec.kind in BINDINGS and rec.status not in RETIRED_STATUSES and _bound(cfg, rec, finding)]
+    if stale:
+        each = "it" if len(stale) == 1 else "each"
+        text += (f". The edit makes {', '.join(stale)} stale until a reviewer rechecks and rebinds {each}; kblam "
+                 f"put prints the kblam review rebind command for {each}")
+    return text
+
+
+def _linked_renumber(view: KBView, finding: Finding, links: dict[str, list],
+                     peers: list[tuple[Finding, str | None]]) -> str:
+    """renumber's refusal of a file review records link (SPEC §7): renumber another file with the ID that
+    kblam can renumber, or, when there is none, why not. `peers` are the other files no record links, each
+    with the reason kblam cannot renumber it (None when it can)."""
+    old_id = finding.file_id
+    files = [f for f in view.findings if f.file_id == old_id]
+    mine = [rec.id for rec in links[finding.path]]
+    head = f"{finding.path} holds {old_id}, which {_review_records(mine, 'link')}, so it keeps its ID"
+    ready = [f.path for f, problem in peers if problem is None]
+    if ready:
+        if len(files) == 2:
+            which = "the other finding with that ID"
+        else:
+            which = f"the other finding{'s' if len(ready) > 1 else ''} with that ID that kblam can renumber"
+        return f"{head}. Renumber {which} instead: " + "; ".join(f"kblam renumber {path}" for path in ready)
+    if not peers:
+        ids = sorted({rec.id for f in files for rec in links[f.path]}, key=_kind_order)
+        both, paths = (("both findings", "both paths") if len(files) == 2
+                       else (f"all {len(files)} findings", f"the {len(files)} paths"))
+        return (f"{both} with ID {old_id} ({', '.join(f.path for f in files)}) are linked by {_review_records(ids)}, "
+                f"and kblam renumbers no finding a review record links. K1 fails kblam validate and every commit "
+                f"until a person settles this: tell the user {paths} and {', '.join(ids)}")
+    if len(files) == 2:
+        (peer, problem), = peers
+        why = f"the other finding with that ID, {peer.path}, cannot be renumbered yet: {problem}"
+    else:
+        why = (f"the other finding{'s' if len(peers) > 1 else ''} with that ID that no review record links cannot "
+               f"be renumbered yet: " + "; ".join(f"{f.path}: {problem}" for f, problem in peers))
+    return (f"{head}; {why}. Ask a person to fix that, then run "
+            + "; ".join(f"kblam renumber {f.path}" for f, _ in peers))
 
 
 def _carried_resolutions(cfg: Config, finding: Finding, old_id: str, new_id: str) -> list[resolutions.Resolution]:

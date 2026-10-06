@@ -885,7 +885,7 @@ into place by `kblam put`, which dispatches on the file name (`SC-`, `CT-`, `CU-
 allocated under the lock, per kind, above every ID in the review root, review staging, the
 allocation receipts and the registry (§5.2.6), and above every ID in the git history of the review
 root on any ref (`git log --all`: local branches, remote-tracking ones and tags), as finding IDs
-are (§7) (not yet built, M6.11: today allocation does not read git history). An abandoned staged
+are (§7); without git, or outside a repository, the history adds nothing. An abandoned staged
 draft leaves a gap in the numbering. Two clones allocating before exchanging commits can still
 collide; git reports the add/add conflict. Records are never renamed, and settling that collision
 is open (§13).
@@ -1445,8 +1445,8 @@ Every command but `init` takes `--root <dir>` to name the repository root (§4).
 | `kblam ack <dependent> <target>` | record the target's current fingerprint in the dependent's `depends_on` after re-reading the target (K3). Edits only that value (round-trip YAML), then rewrites `tree.hash` by the tree.hash rule. `--all <target>` is deliberately absent: each dependent is re-read and acked on its own. `ack` first prints the target's claim as it stood at the recorded fingerprint (the version in git history that has it, found for an old-format stamp too) beside its current claim, so the re-reading has something to read. |
 | `kblam deps <id>` | list the finding's dependents and dependencies, with suspect ones marked |
 | `kblam resolve <item-id> --distinct "<reason>"` | close a review or rejected item that Jev misread, and record the resolution (§6.4) |
-| `kblam rm <id> --merged-into <target>` | remove a finding after a merge moved everything it stated into `<target>` (§8.1). Refused while another finding depends on it (edit each dependent to depend on `<target>` first), while `<target>` is not in the KB, or while one of its quantities is missing from `<target>` with the same value and unit. Under the lock it removes the file and a topic folder left empty, regenerates `INDEX.md`, applies the tree.hash rule and closes the finding's open items; the reason for the removal goes in the commit message. Refused also while any review record links the finding, in any status; records never follow a removed finding ("`rm` and `renumber` vs review records" below; not yet built, M6.11). An adjudicator's command (§8 item 2). |
-| `kblam renumber <path>` | give a new ID to one of two findings that share an ID, which K1 reports after the work of two clones is merged: rewrite that file's `id` and filename, re-key each `depends_on` entry whose recorded fingerprint (in either format, §5.1) shows it means that finding, append a copy under the new ID of each resolution whose state hash shows it means that finding (§6.4), so the verdicts it settled are not raised again, and list the other mentions of the old ID for a person to check. Refused when a review record links the selected finding, in any status; records are never edited to follow it ("`rm` and `renumber` vs review records" below; not yet built, M6.11). |
+| `kblam rm <id> --merged-into <target>` | remove a finding after a merge moved everything it stated into `<target>` (§8.1). Refused while another finding depends on it (edit each dependent to depend on `<target>` first), while `<target>` is not in the KB, or while one of its quantities is missing from `<target>` with the same value and unit. Under the lock it removes the file and a topic folder left empty, regenerates `INDEX.md`, applies the tree.hash rule and closes the finding's open items; the reason for the removal goes in the commit message. Refused also while any review record links the finding, in any status; records never follow a removed finding ("`rm` and `renumber` vs review records" below). An adjudicator's command (§8 item 2). |
+| `kblam renumber <path>` | give a new ID to one of two findings that share an ID, which K1 reports after the work of two clones is merged: rewrite that file's `id` and filename, re-key each `depends_on` entry whose recorded fingerprint (in either format, §5.1) shows it means that finding, append a copy under the new ID of each resolution whose state hash shows it means that finding (§6.4), so the verdicts it settled are not raised again, and list the other mentions of the old ID for a person to check. A re-keyed finding's bytes change, so each CT or CU bound to it is made stale, and renumber lists each with the rebind command, as `put` does (§5.2.4). Refused when a review record links the selected finding, in any status; records are never edited to follow it ("`rm` and `renumber` vs review records" below). |
 | `kblam items [--reworded] [--stats]` | list the open review, rejected and unchecked items. `--reworded` lists each rejected item whose finding later went in at a different fingerprint while the other side of the pair stayed as it was: a correction or rewording to pass, for the adjudicator to tell apart (§6.4); `put` records the fingerprint that went in when it closes a rejected item. `--stats` counts, per verdict, the items closed as distinct and those closed otherwise (§10.7) |
 | `kblam recheck [F-…]` | run the `check:` commands (§4) of the named findings, in the order given, or of every finding, in ID order. At an interactive terminal it first shows a person each command that is new, changed, or whose named files changed since its approval, and asks; without one it runs only the approved commands and reports the others as not approved ("`kblam recheck`" below) |
 | `kblam recheck --list` | print each `check:` command with its approval state on this machine; run nothing |
@@ -1475,12 +1475,12 @@ and tags), so an ID that was ever committed, including one `kblam rm` removed, i
 again. Without git, or outside a repository, the history adds nothing. Two clones that allocate
 before they exchange commits can still pick the same ID; K1 reports the duplicate after the merge,
 and `kblam renumber` settles it, unless review records link both findings, or the linked one's
-peer cannot be renumbered (below; not yet built, M6.11). The slug is the title folded to ASCII and
+peer cannot be renumbered (below). The slug is the title folded to ASCII and
 lowercased, each run of other characters turned into one `-`, trimmed of `-` at both ends and cut
 at a `-` to at most 60 characters (`finding` if nothing is left). The skeleton holds every required
 key, today's date in `verified`, and the `**Claim.**` marker.
 
-**`rm` and `renumber` vs review records** (not yet built, M6.11; user, 2026-10-05). A CT or CU
+**`rm` and `renumber` vs review records** (user, 2026-10-05). A CT or CU
 links the file its binding identifies: both the v2 fingerprint and the full-file sha256 match. If a
 binding matches no file with that ID (for example, after the finding was edited), it ambiguously
 links every same-ID file. An SC's `linked_findings` entry is a bare ID and links every file with
@@ -1572,6 +1572,19 @@ unreadable finding, an `id` line it cannot rewrite, no `id` key) offer "renumber
 instead" only when that file can be renumbered by the first case's test; otherwise they keep only
 their ask-a-person advice. Two findings that review records keep from being renumbered are an open
 question (§13), not permission to change records or remove a finding.
+
+A renumber that goes ahead also rewrites each other finding whose `depends_on` entry it re-keys,
+and that changes the finding's bytes: a CT or CU whose binding matched the finding before is stale
+after (user, 2026-10-06). Renumber still succeeds, and for each such record, retired and withdrawn
+ones aside, prints the line a finding `put` prints, with the rebind command (§5.2.4, §5.2.5):
+
+"kblam renumber: CT-0007 is now stale (this renumber changed F-0031, which it is bound to); a
+reviewer rechecks it and runs kblam review rebind CT-0007 --by NAME --reason TEXT --expect D. kblam
+validate fails until then"
+
+A closed task's command adds `--evidence PROVENANCE:PATH:LOCATOR`. `rm` makes no record stale: it
+refuses a finding any record links and one another finding depends on, so besides the removed file
+it rewrites only `INDEX.md`, which no record binds.
 
 **`put`** (M2, M5).
 - It takes a finding file from anywhere outside the KB root, normally a staged one, and refuses
@@ -2762,9 +2775,10 @@ sections above, it points there.
     resolving a `revision` item and `kblam upgrade`; the template carries the M6.10 keys (§9).
 - **M6.11.** Source challenges, claim tasks and reviewed uses (§5.2; user, 2026-09-28;
   reconciled with M6.10 on 2026-10-04). *Status: built (2026-09-28 .. 2026-10-04); reconciled
-  with M6.10 on 2026-10-05. Not yet built: rm/renumber refusals for linked findings, record IDs
-  above git history, new-clone bootstrap with records, and the nested-repository exemption from
-  the untracked-evidence warning (user, 2026-10-05).*
+  with M6.10 on 2026-10-05; rm/renumber refusals for linked findings, record IDs above git history
+  and renumber's list of the records it makes stale built 2026-10-06. Not yet built: new-clone
+  bootstrap with records, and the nested-repository exemption from the untracked-evidence warning
+  (user, 2026-10-05).*
   - `[review]` config (§9); record schemas and parsing (the §5.2.2–5.2.3 field tables); `KBView`
     with the review records. `Issue` gains a `level` (error or warning) and an `owner` (the
     finding or record ID it concerns, separate from its display path). Errors and warnings are
@@ -2944,8 +2958,8 @@ Settled questions move to Appendix A with their answers.
 - **Adjudicator gate for record decisions (§5.2.5), open (user, 2026-10-05).** Record commands
   are not gated now; whether `review decide`, `review rebind` or `challenge pin` should be
   restricted like `resolve` and `rm` is deferred.
-- **Record-ID collisions between clones (§5.2.5), open.** Allocation will consider all local refs
-  (not yet built, M6.11), but two clones allocating before exchanging commits may still collide.
+- **Record-ID collisions between clones (§5.2.5), open.** Allocation considers every local ref,
+  but two clones allocating before exchanging commits may still collide.
   Git reports the add/add conflict; records are never renamed, so its resolution needs a decision.
 - **Same-ID findings that cannot be renumbered (§7), open.** When every file with the ID is
   linked by review records, or the selected file is linked and no other file can be renumbered,
@@ -3082,7 +3096,8 @@ every finding; M6.10 lists what they change in the code).
 - **Keep the upgrade bridge narrow.** Only `upgrade` can treat a matching format-1 marker as clean,
   with no review records and an absent or empty, readable, well-shaped registry (§8).
 
-**2026-10-05** (decided by the user; not yet built, M6.11)
+**2026-10-05** (decided by the user; M6.11: the first two built 2026-10-06, bootstrap and the
+nested-repository exemption not yet built)
 - **Linked findings keep their identity (user).** `rm` and `renumber` refuse a linked finding in
   any record status; records are never rewritten to follow a finding. A refused `rm` says to merge
   the other way (make the linked finding also state what the target states that it does not yet,
@@ -3098,6 +3113,11 @@ every finding; M6.10 lists what they change in the code).
   record decisions is open (§13).
 - **Nested evidence repositories are not outer untracked evidence (user).** Pre-commit exempts
   their paths under an evidence root from that warning (§8 item 4).
+
+**2026-10-06** (decided by the user)
+- **Renumber lists the records it makes stale (user).** Re-keying a dependent's `depends_on` changes
+  its bytes; renumber succeeds and prints the stale line with the rebind command that a finding
+  `put` prints, for each CT or CU bound to that dependent (§7).
 
 ## Appendix B. Evidence and measurements
 
