@@ -640,26 +640,44 @@ def _stop(cfg: Config, event: str, data: dict) -> int:
     if not lines and not tracked:
         return 0
     last = marker.read_text(encoding="ascii").strip() if marker.is_file() else None
+    # The digest covers both roots, so the hook cannot tell which one changed: when the review root folder
+    # exists, the texts name both (SPEC §8 item 3).
+    review = cfg.review_path.is_dir()
     if data.get("stop_hook_active") is True and last == tree_digest_v2(view):
-        what = ("git still tracks files under .kblam/" if tracked
-                else f"{cfg.findings_dir}/ still fails kblam validate ({len(lines)} failure(s))")
-        return _note(event, f"{what} and {cfg.findings_dir}/ is unchanged since the last block, so the stop is not "
-                            f"blocked again")
+        if not review:
+            what = ("git still tracks files under .kblam/" if tracked
+                    else f"{cfg.findings_dir}/ still fails kblam validate ({len(lines)} failure(s))")
+            return _note(event, f"{what} and {cfg.findings_dir}/ is unchanged since the last block, so the stop "
+                                f"is not blocked again")
+        roots = f"neither {cfg.findings_dir}/ nor {cfg.review_dir}/ changed since the last block"
+        if tracked:
+            return _note(event, f"git still tracks files under .kblam/, and {roots}, so the stop is not blocked "
+                                f"again. If you cannot do what the block said, tell the user")
+        return _note(event, f"the knowledge base still fails kblam validate ({len(lines)} failure(s)), and {roots}, "
+                            f"so the stop is not blocked again. If you cannot fix the failures through kblam, leave "
+                            f"{cfg.findings_dir}/ and {cfg.review_dir}/ as they are and tell the user")
     from kblam.store import atomic_write
 
     atomic_write(marker, (tree_digest_v2(view) + "\n").encode("ascii"))
     shown = lines[:MAX_BLOCK_LINES]
     if len(lines) > len(shown):
         shown.append(f"... and {len(lines) - len(shown)} more; run kblam validate for all of them")
-    fix = (f"Fix each failure through kblam (kblam edit <id>, change the staged copy, kblam put it); never write "
-           f"under {cfg.findings_dir}/ directly. Once the tree is clean, kblam validate --record accepts the change.")
+    if review:
+        changed = f"{cfg.findings_dir}/ or {cfg.review_dir}/ was changed outside kblam"
+        fix = (f"Fix each failure through kblam: a finding with kblam edit <id>, a change to the staged copy and "
+               f"kblam put; a record as its failure line says, with the kblam command it names or a staged copy "
+               f"and kblam put. Never write under {cfg.findings_dir}/ or {cfg.review_dir}/ directly. Once the tree "
+               f"is clean, kblam validate --record accepts the change.")
+    else:
+        changed = f"{cfg.findings_dir}/ was changed outside kblam put"
+        fix = (f"Fix each failure through kblam (kblam edit <id>, change the staged copy, kblam put it); never "
+               f"write under {cfg.findings_dir}/ directly. Once the tree is clean, kblam validate --record accepts "
+               f"the change.")
     if tracked:
         return _block(f"kblam: {tracked_state_problem(tracked)}. Until then the knowledge base is checked as on a new "
                       f"clone" + (", and it fails kblam validate:\n" + "\n".join(shown) + "\n" + fix if shown else "."))
-    return _block(
-        f"kblam: {cfg.findings_dir}/ was changed outside kblam put, and the knowledge base fails kblam "
-        f"validate:\n" + "\n".join(shown) + "\n" + fix
-    )
+    return _block(f"kblam: {changed}, and the knowledge base fails kblam validate:\n" + "\n".join(shown) + "\n"
+                  + fix)
 
 
 def run(event: str, root: Path | None = None) -> int:

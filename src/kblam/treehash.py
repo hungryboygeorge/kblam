@@ -121,20 +121,23 @@ def root_problem(cfg: Config, registered: set[str] | None) -> str | None:
             f"schema 1 fixes it at init")
 
 
-def clean_before_v2(cfg: Config, view: KBView, has_records: bool) -> bool:
+def clean_before_v2(cfg: Config, view: KBView, has_records: bool, *, creates_registry: bool = True) -> bool:
     """The tree.hash rule before a write (SPEC §8, §5.2.6): True if tree.hash is format 2 with this root
-    and tree_digest_v2(view). With no marker and no records, an empty KB is kblam's; findings bootstrap
-    only when the deterministic rules pass, then are accepted from the repository. A format-1 marker
-    never matches."""
+    and tree_digest_v2(view). With no marker, an empty KB with no records is kblam's; a populated tree
+    bootstraps only when the full deterministic rules, K13-K15 included, report no error, and its
+    findings are then accepted from the repository. With records present the bootstrap also creates the
+    registry from them, which the caller's write does (writes.registry_after); `rm`, `renumber` and
+    `upgrade` write no registry, so they pass creates_registry=False and do not bootstrap while records
+    exist. A format-1 marker never matches."""
     recorded = read_recorded(cfg)
     if recorded is None:
-        if has_records:
+        if has_records and not creates_registry:
             return False
-        if not view.findings:
+        if not view.findings and not has_records:
             return True
-        from kblam.rules import validate
+        from kblam.rules import errors, validate
 
-        if validate(view):
+        if errors(validate(view)):
             return False
         accept_from_repository(cfg, view)
         return True
@@ -158,23 +161,27 @@ def accept_from_repository(cfg: Config, view: KBView) -> int:
     return len(accepted)
 
 
-def record_after_write_v2(cfg: Config, clean_before: bool, command: str) -> bool:
+def record_after_write_v2(cfg: Config, clean_before: bool, command: str, *, creates_registry: bool = True) -> bool:
     """After a write: if clean_before, write the format-2 tree.hash of the tree as it is now
     (load_view) and return True. Otherwise leave tree.hash as it is, print a warning to stderr, and return
-    False. The warning names why: a format-1 tree.hash ("kblam <command>: .kblam/tree.hash is in the old
-    format; tree.hash not advanced. Run kblam validate --record once the tree validates."), a missing one
-    while records exist ("... no .kblam/tree.hash, and the review root holds records; run kblam validate
-    --record ..."), or an out-of-band change ("... <findings root>/ or <review root>/ was changed outside
-    kblam since kblam last wrote it; tree.hash not advanced. Run kblam validate --record once the change
-    is validated.")."""
+    False. The warning names why: a missing tree.hash while records exist, for a command that writes no
+    registry (creates_registry=False, as clean_before_v2 takes it); a missing one whose tree failed the
+    bootstrap's validation; a format-1 tree.hash; or an out-of-band change."""
     if clean_before:
         write_tree_hash_v2(cfg, load_view(cfg))
         return True
     recorded = read_recorded(cfg)
-    if recorded is None and _holds_records(cfg, cfg.review_dir):
-        print(f"kblam {command}: no .kblam/tree.hash, and the review root holds records; tree.hash not "
-              f"advanced. Run kblam validate --record once the tree validates.", file=sys.stderr)
-    elif recorded is not None and recorded[0] == 1:
+    if recorded is None and not creates_registry and _holds_records(cfg, cfg.review_dir):
+        print(f"kblam {command}: there is no .kblam/tree.hash (a new clone, or .kblam/ was deleted), and kblam "
+              f"{command} does not record one while {cfg.review_dir}/ holds review records; tree.hash not "
+              f"advanced. Run kblam validate, fix anything it lists, then run kblam validate --record.",
+              file=sys.stderr)
+    elif recorded is None:
+        print(f"kblam {command}: there is no .kblam/tree.hash (a new clone, or .kblam/ was deleted), and the "
+              f"tree as it was before this write fails kblam validate, so kblam did not record it; tree.hash "
+              f"not advanced. Run kblam validate, fix anything it lists, then run kblam validate --record.",
+              file=sys.stderr)
+    elif recorded[0] == 1:
         print(f"kblam {command}: .kblam/tree.hash is in the old format; tree.hash not advanced. "
               f"Run kblam validate --record once the tree validates.", file=sys.stderr)
     else:

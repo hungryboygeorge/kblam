@@ -89,15 +89,23 @@ def put_challenge(kb, source_repo, number=1):
 
 
 def validate(kb, source_repo, *, tasks=(), record=False):
+    """`kblam validate`, or with record=True `validate --record`: with no tree.hash that is the
+    bootstrap, which asks Jev nothing (no review.jsonl) and says so."""
     pending = "".join(f"{rec_id} open replication of F-0001: {question}\n"
                       for rec_id, question in tasks)
     count = 1 if tasks else 0
     summary = f"kblam validate: OK ({count} findings)"
     if tasks:
         summary += f"; {len(tasks)} pending task(s)"
+    baseline = record and not (kb.root / HASH).exists()
     if record:
         summary += "; recorded .kblam/tree.hash for this tree"
+    if baseline:
+        summary += ("\nkblam validate: there was no .kblam/tree.hash (a new clone, or .kblam/ was deleted), so "
+                    f"Jev was not asked: {count} finding(s) accepted from the repository as checked at their "
+                    "current fingerprints. kblam audit checks them with Jev")
     run(kb, source_repo, ["validate", *(["--record"] if record else [])],
+        {HASH, ".kblam/pairs.sqlite"} if baseline else
         {HASH, ".kblam/pairs.sqlite", ".kblam/review.jsonl"} if record else set(),
         out=pending + summary + "\n")
 
@@ -308,7 +316,9 @@ def test_each_partial_record_write_recovers_without_accepting_tree(kb, source_re
     interrupted before registry, .kblam/tree.hash iff interrupted after tree.hash
     (restore previous bytes, or remove when absent). findings/INDEX.md is regenerated identically.
     Validate exits 0, OK (0 findings); changes none. validate --record exits 0,
-    'recorded .kblam/tree.hash for this tree'; changes tree.hash, .kblam/pairs.sqlite and .kblam/review.jsonl. Recovery registers
+    'recorded .kblam/tree.hash for this tree'; changes tree.hash, .kblam/pairs.sqlite and .kblam/review.jsonl
+    (with tree.hash missing, it is the bootstrap: it asks Jev nothing, says so, and changes tree.hash and
+    .kblam/pairs.sqlite). Recovery registers
     only the existing SC-0001, invents no record, preserves its open status and all
     draft bytes, and leaves the source unchanged around every CLI invocation.
     """

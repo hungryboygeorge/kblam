@@ -125,11 +125,12 @@ def _validate(cfg, args, *, baseline: bool = False) -> int:
 def _cmd_validate(cfg, args) -> int:
     if not args.record:
         return _validate(cfg, args)
-    if read_recorded(cfg) is None and not load_view(cfg).records:
-        # A findings-only new clone, or .kblam/ deleted (SPEC §8 item 3): record without asking Jev.
-        # Records keep the explicit --record path; decide again under the lock in case the tree changed.
+    if read_recorded(cfg) is None:
+        # A new clone, or .kblam/ deleted (SPEC §8 item 3): record without asking Jev, creating the registry
+        # from any review records present. Decide again under the lock in case another command recorded the
+        # tree meanwhile.
         with writes.locked(cfg, "validate --record", mutating=True):
-            if read_recorded(cfg) is None and not load_view(cfg).records:
+            if read_recorded(cfg) is None:
                 return _validate(cfg, args, baseline=True)
     _print_checks("validate --record", check_findings(cfg, None, command="validate --record",
                                                      client_factory=JevClient))

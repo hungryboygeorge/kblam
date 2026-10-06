@@ -30,6 +30,8 @@ from pathlib import Path
 import m611_helpers as m
 from conftest import dump_record
 from kblam.finding import fingerprint, yaml_rt
+from kblam.jev import CACHE_NAME, PairCache
+from kblam.treehash import read_recorded, tree_digest_v2
 from kblam.view import load_view
 
 # The same alias a group file declares: autouse, so every test in this module runs on the pinned date.
@@ -69,8 +71,10 @@ MISSING = (f"{{rec_id}} is missing from {REVIEW}/; records are never deleted or 
 OUT_OF_BAND = (f"kblam review index: findings/ or {REVIEW}/ was changed outside kblam since kblam last "
                f"wrote it; tree.hash not advanced. Run kblam validate --record once the change is "
                f"validated.\n")
-NO_TREE_HASH = ("kblam review index: no .kblam/tree.hash, and the review root holds records; tree.hash "
-                "not advanced. Run kblam validate --record once the tree validates.\n")
+# SPEC §8 item 3: what `validate --record` adds when it bootstraps a clone's one finding.
+BASELINE = ("kblam validate: there was no .kblam/tree.hash (a new clone, or .kblam/ was deleted), so Jev was "
+            "not asked: 1 finding(s) accepted from the repository as checked at their current fingerprints. "
+            "kblam audit checks them with Jev")
 INDEX_WRITTEN = f"kblam review index: wrote {INDEX}\n"
 
 NOTHING: set[str] = set()
@@ -152,6 +156,18 @@ def check_line(kb, finding_id: str) -> str:
     count. The fingerprint is derived through the library, never hard-coded."""
     finding = next(f for f in load_view(kb.cfg).findings if f.file_id == finding_id)
     return f"kblam validate --record: {finding_id} ({fingerprint(finding, kb.cfg.scope_separator)}): 0 candidate(s)"
+
+
+def recorded(kb) -> bool:
+    """Whether tree.hash is the format-2 line of the tree as it is now."""
+    return read_recorded(kb.cfg) == (2, REVIEW, tree_digest_v2(load_view(kb.cfg)))
+
+
+def accepted(kb, finding_id: str) -> bool:
+    """Whether the finding is marked checked at its current fingerprint (a bootstrap accepts it so)."""
+    finding = next(f for f in load_view(kb.cfg).findings if f.file_id == finding_id)
+    return PairCache(kb.cfg.state_dir / CACHE_NAME).was_checked(finding_id,
+                                                                fingerprint(finding, kb.cfg.scope_separator))
 
 
 def key_line(path: Path, key: str) -> int:
@@ -541,20 +557,19 @@ def test_a_fresh_clone_creates_the_registry_from_the_records_present(kb, source_
     staged file gone). Fixture edit: `.kblam/` is removed entirely — the state a fresh clone of the
     project leaves, since `kblam init` puts `.kblam/` in `.gitignore` while the records and the review
     index are committed and stay. Commands after it, each bracketed: `kblam validate` (a read: exit 0),
-    `kblam review index` (writes the registry from the records present, and nothing else), `kblam
-    validate --record` (writes the §6 check state and tree.hash), `kblam review list` (a read). Files
-    changed: the two staged records and their receipts, then each record with the review index, registry
-    and tree.hash, then the registry alone (the clone's first write creates it), then `.kblam/checks.jsonl`,
-    `.kblam/pairs.sqlite`, `.kblam/review.jsonl` and tree.hash (the clone's clean recording); neither read
-    changes anything, in the KB or the source repository. Diagnostics: the clone leaves records and no
-    registry, so `review index` exits 0 with "kblam review index: wrote research-review/INDEX.md" and the
-    stderr note "no .kblam/tree.hash, and the review root holds records; tree.hash not advanced. Run kblam
-    validate --record once the tree validates."; the registry it writes holds both records present, in ID
-    order, and is not narrowed afterwards; `validate --record` then exits 0, printing the check line
-    "kblam validate --record: F-0001 (<fingerprint>): 0 candidate(s)", the pending-task line, and "kblam
-    validate: OK (1 findings); 1 pending task(s); recorded .kblam/tree.hash for this tree", with the §6
-    Jev note on stderr, leaving the registry as it is. Acceptance 6: the registry is created from the
-    records present, so a clone loses no registration."""
+    `kblam review index` (the clone's first write: the tree validates cleanly, so it bootstraps, writing
+    the registry from the records present, tree.hash and the accepted-from-the-repository mark in
+    `.kblam/pairs.sqlite`, asking Jev nothing), then, after `.kblam/` is removed again (a fixture edit),
+    `kblam validate --record` (the same bootstrap by the explicit path), `kblam review list` (a read).
+    Files changed: the two staged records and their receipts, then each record with the review index,
+    registry and tree.hash, then the registry, tree.hash and `.kblam/pairs.sqlite` (each bootstrap);
+    neither read changes anything, in the KB or the source repository. Diagnostics: `review index` exits
+    0 with "kblam review index: wrote research-review/INDEX.md and .kblam/tree.hash" and nothing on
+    stderr; the registry it writes holds both records present, in ID order; `validate --record` exits 0,
+    printing the pending-task line, "kblam validate: OK (1 findings); 1 pending task(s); recorded
+    .kblam/tree.hash for this tree" and the note that Jev was not asked and 1 finding was accepted from
+    the repository, writing the same registry. Acceptance 6: the registry is created from the records
+    present, so a clone loses no registration."""
     kb.add("F-0001", "ratio", m.CLAIM)                    # fixture edit: the finding the task binds
     challenge(kb, source_repo, "SC-0001", "3-3")
     confirm(kb, source_repo, "SC-0001")
@@ -567,17 +582,20 @@ def test_a_fresh_clone_creates_the_registry_from_the_records_present(kb, source_
 
     read(kb, source_repo, "validate", out=f"{PENDING}\n{OK_ONE}; 1 pending task(s)\n")
 
-    run = cli(kb, source_repo, {REGISTRY}, "review", "index")
-    exactly(run, INDEX_WRITTEN, "review index", err=NO_TREE_HASH)
+    run = cli(kb, source_repo, {REGISTRY, TREE_HASH, PAIRS}, "review", "index")
+    exactly(run, f"kblam review index: wrote {INDEX} and .kblam/tree.hash\n", "review index")
     assert m.registry(kb) == ["CT-0001", "SC-0001"]       # from the records present, not from nothing
+    assert recorded(kb) and accepted(kb, "F-0001")
 
-    run = cli(kb, source_repo, CHECK_STATE | {TREE_HASH}, "validate", "--record")
+    shutil.rmtree(kb.root / ".kblam")                     # fixture edit: a clone again
+    run = cli(kb, source_repo, {REGISTRY, TREE_HASH, PAIRS}, "validate", "--record")
     exactly(run, "\n".join([
-        check_line(kb, "F-0001"),
         PENDING,
         f"{OK_ONE}; 1 pending task(s){RECORDED}",
-    ]) + "\n", "validate --record", err=JEV_NOTE)
+        BASELINE,
+    ]) + "\n", "validate --record")
     assert m.registry(kb) == ["CT-0001", "SC-0001"]
+    assert recorded(kb) and accepted(kb, "F-0001")
 
     read(kb, source_repo, "review", "list", out="\n".join([
         f"SC-0001 challenge confirmed {m.expect(kb, 'SC-0001')[:12]} {m.TRACE}:3-3 current",

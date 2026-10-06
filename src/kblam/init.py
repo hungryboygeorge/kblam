@@ -191,22 +191,21 @@ class Init:
 
         `started` is treehash.read_recorded of the file as init found it, before its own writes, and
         `matched` whether the tree matched it then. Nothing is written unless the rule allows it: the
-        format-2 file covers init's own index writes, a format-1 file is migrated only from a matching
-        tree with a clean validation, and an out-of-band change is left for `kblam validate --record`.
-        Jev state is never rewritten.
+        format-2 file covers init's own index writes, a missing one is bootstrapped (with any review records:
+        the review_index step created the registry) only from a tree the full deterministic validation
+        passes, a format-1 file is migrated only from a matching tree with a clean validation, and an
+        out-of-band change is left for `kblam validate --record`. Jev state is never rewritten.
         """
         rel = ".kblam/tree.hash"
         with writes.locked(cfg, "init", mutating=True):
             view = load_view(cfg)
             if started is None:
-                if view.records:
-                    self.report("kept", rel, "missing, and the review root holds records; run kblam "
-                                             "validate --record")
-                elif treehash.clean_before_v2(cfg, view, False):
+                if treehash.clean_before_v2(cfg, view, bool(view.records)):
                     _write_tree_hash_v2(cfg, view)
                     self.report("created", rel)
                 else:
-                    self.report("kept", rel, "run kblam validate --record")
+                    self.report("kept", rel, "missing, and the tree fails kblam validate; fix what it lists, "
+                                             "then run kblam validate --record")
                 return
             fmt, root, _digest = started
             if fmt == 1:

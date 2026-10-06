@@ -902,14 +902,14 @@ def _remove(cfg: Config, finding_id: str, target_id: str) -> RemoveResult:
                           index_path=view.index_path,
                           staged=[display_path(cfg, p) for n, p in _ids_in(cfg.staging_dir)
                                   if format_id(n) == finding_id])
-    clean = clean_before_v2(cfg, view, bool(view.records))
+    clean = clean_before_v2(cfg, view, bool(view.records), creates_registry=False)
     path = cfg.repo_root / finding.path
     path.unlink()
     if path.parent != cfg.findings_path and not any(path.parent.iterdir()):
         path.parent.rmdir()
         result.folder = PurePosixPath(finding.path).parent.as_posix() + "/"
     _write_index(cfg, load_view(cfg))
-    result.recorded = record_after_write_v2(cfg, clean, "rm")
+    result.recorded = record_after_write_v2(cfg, clean, "rm", creates_registry=False)
     result.closed = review.close_items_on(cfg, finding_id, f"{finding_id} was removed (merged into {target_id})",
                                           items)
     return result
@@ -997,7 +997,7 @@ def _renumber(cfg: Config, source: Path) -> RenumberResult:
         raise StoreError(_linked_renumber(view, finding, links, unlinked_peers()))
     plan = _renumber_plan(cfg, view, finding, kept, new_id, other)
 
-    clean = clean_before_v2(cfg, view, bool(view.records))
+    clean = clean_before_v2(cfg, view, bool(view.records), creates_registry=False)
     atomic_write(cfg.repo_root / plan.new_path, plan.data)
     (cfg.repo_root / finding.path).unlink()
     for dependent, rewritten in plan.rewrites:
@@ -1012,7 +1012,7 @@ def _renumber(cfg: Config, source: Path) -> RenumberResult:
         rekeyed=[(d.file_id, d.path) for d, _ in plan.rewrites],
         mentions=[f"{p}:{line}: {what}" for p, line, what in sorted(plan.mentions)],
         index_path=view.index_path,
-        recorded=record_after_write_v2(cfg, clean, "renumber"),
+        recorded=record_after_write_v2(cfg, clean, "renumber", creates_registry=False),
         resolutions=len(plan.carried),
         # A re-keyed dependent's bytes change, so a CT or CU bound to it goes stale (SPEC §7 renumber).
         stale=[(rec_id, d.file_id) for d, _ in plan.rewrites for rec_id in _made_stale(view, after, d.file_id)],

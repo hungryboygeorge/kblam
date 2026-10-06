@@ -350,8 +350,10 @@ def test_an_open_review_item_blocks_the_format_1_migration(repo, capsys, no_hook
     assert (repo / TREE_HASH).read_bytes() == legacy
 
 
-def test_a_missing_tree_hash_with_records_present_is_not_bootstrapped(repo, capsys, no_hook_check):
-    """SPEC §8, §5.2.6: a missing tree.hash is bootstrapped only while the review root holds no records."""
+def test_a_missing_tree_hash_with_a_failing_record_is_kept(repo, capsys, no_hook_check):
+    """SPEC §8, §5.2.6: a missing tree.hash is bootstrapped only from a tree the full deterministic
+    validation passes; this record fails K13 (its source is missing), so init keeps tree.hash missing
+    and says what to do. The exit status is unaffected."""
     assert kblam_init(capsys)[0] == 0
     ensure_kb(repo)
     add_record(repo, "SC")
@@ -362,7 +364,7 @@ def test_a_missing_tree_hash_with_records_present_is_not_bootstrapped(repo, caps
     assert (code, err) == (0, ""), out + err
     assert actions(out)[TREE_HASH] == "kept"
     assert note(out, TREE_HASH) == \
-        ["missing, and the review root holds records; run kblam validate --record"]
+        ["missing, and the tree fails kblam validate; fix what it lists, then run kblam validate --record"]
     assert not (repo / TREE_HASH).exists()
 
 

@@ -95,15 +95,11 @@ def new_challenge(kb, source_repo, rec_id="SC-0001"):
     return path
 
 
-def put_challenge(kb, source_repo, path, rec_id="SC-0001", *, missing_hash=False):
+def put_challenge(kb, source_repo, path, rec_id="SC-0001"):
     target = f"research-review/challenges/{rec_id}.yaml"
-    paths = {target, REVIEW_INDEX, REGISTRY, path.relative_to(kb.root).as_posix()}
-    if not missing_hash:
-        paths.add(TREE_HASH)
-    call(kb, source_repo, ["put", path], changed=paths,
-         out=f"kblam put: {rec_id} -> {target}\n",
-         err=(f"kblam put {rec_id}: no .kblam/tree.hash, and the review root holds records; tree.hash not "
-              "advanced. Run kblam validate --record once the tree validates.\n" if missing_hash else ""))
+    call(kb, source_repo, ["put", path], changed={target, REVIEW_INDEX, REGISTRY, TREE_HASH,
+                                                  path.relative_to(kb.root).as_posix()},
+         out=f"kblam put: {rec_id} -> {target}\n")
 
 
 def set_root(kb):
@@ -491,7 +487,7 @@ def test_validate_record_explicitly_migrates_a_clean_legacy_hash(kb, source_repo
     validate(kb, source_repo)
 
 
-def test_missing_hash_with_records_is_not_bootstrapped_by_writes(fresh_repo):
+def test_missing_hash_with_records_is_bootstrapped_by_every_write(fresh_repo):
     """Acceptance 7: fresh init (no actor), exit 0/created, changes kblam.toml,
     findings/INDEX.md, research-review/INDEX.md, .gitattributes, .gitignore,
     .claude/rules/kblam-findings.md, .claude/skills/kblam-write/SKILL.md, .claude/settings.json,
@@ -499,42 +495,46 @@ def test_missing_hash_with_records_is_not_bootstrapped_by_writes(fresh_repo):
     0/path, changes .kblam/review-staging/SC-0001.yaml, .kblam/review-receipts/SC-0001.json;
     put exits 0/destination, changes research-review/challenges/SC-0001.yaml,
     research-review/INDEX.md, .kblam/review-ids, .kblam/tree.hash and staged removal. With
-    open SC-0001/current source and tree.hash removed, init --update exits 0/kept missing
-    tree.hash with records; changes none. index and review index exit 0/wrote index and warn
-    no .kblam/tree.hash, review root holds records; neither changes bytes. challenge new
-    --by reviewer-a exits 0/path, changes .kblam/review-staging/SC-0002.yaml,
-    .kblam/review-receipts/SC-0002.json; put exits 0/destination and warns missing hash,
-    changes research-review/challenges/SC-0002.yaml, research-review/INDEX.md,
-    .kblam/review-ids and staged removal, but not tree.hash. validate after init --update,
-    each index command, SC-0002's put and validate --record exits 0/OK (0 findings), changes
-    none. validate --record exits 0/OK recorded,
-    changes .kblam/tree.hash, .kblam/pairs.sqlite and .kblam/review.jsonl (empty Jev check
-    state); final validate is clean/read-only. Actors omitted where
-    commands have no --by. Source unchanged per call; only explicit validation accepts the tree.
+    open SC-0001/current source the full deterministic validation is clean, so each time
+    tree.hash is removed the next write records it again, asking Jev nothing: init --update
+    exits 0/created tree.hash and changes it and .kblam/pairs.sqlite (the accepted-from-the-
+    repository marks, none here); index and review index exit 0/wrote the index and
+    .kblam/tree.hash, with no warning, and change only tree.hash; challenge new --by reviewer-a exits 0/path for SC-0002 and its
+    put exits 0/destination, changing research-review/challenges/SC-0002.yaml,
+    research-review/INDEX.md, .kblam/review-ids, .kblam/tree.hash and staged removal;
+    validate --record exits 0/OK recorded and says Jev was not asked, changing only tree.hash.
+    Each recorded tree.hash is format 2 for the tree as it is, the registry holds exactly the
+    records present, and validate after each step is clean/read-only. Actors omitted where
+    commands have no --by. Source unchanged per call.
     """
     kb, source_repo = fresh_repo
     initialize(kb, source_repo)
     put_challenge(kb, source_repo, new_challenge(kb, source_repo))
-    (kb.root / TREE_HASH).unlink()
-    call(kb, source_repo, ["init", "--update"], out=init_output(
-        kb, hash_action="kept",
-        hash_note="missing, and the review root holds records; run kblam validate --record"))
-    validate(kb, source_repo)
-    for argv, command, out in (
-        (["index"], "index", "kblam index: wrote findings/INDEX.md (0 findings)\n"),
-        (["review", "index"], "review index", "kblam review index: wrote research-review/INDEX.md\n"),
-    ):
-        call(kb, source_repo, argv, out=out, err=(
-            f"kblam {command}: no .kblam/tree.hash, and the review root holds records; tree.hash not "
-            "advanced. Run kblam validate --record once the tree validates.\n"))
-        assert not (kb.root / TREE_HASH).exists()
+
+    def recorded():
+        assert treehash.read_recorded(kb.cfg) == (2, "research-review", treehash.tree_digest_v2(load_view(kb.cfg)))
         validate(kb, source_repo)
+
+    (kb.root / TREE_HASH).unlink()
+    call(kb, source_repo, ["init", "--update"], changed={TREE_HASH, ".kblam/pairs.sqlite"},
+         out=init_output(kb, hash_action="created"))
+    recorded()
+    for argv, out in (
+        (["index"], "kblam index: wrote findings/INDEX.md (0 findings) and .kblam/tree.hash\n"),
+        (["review", "index"], "kblam review index: wrote research-review/INDEX.md and .kblam/tree.hash\n"),
+    ):
+        (kb.root / TREE_HASH).unlink()
+        call(kb, source_repo, argv, changed={TREE_HASH}, out=out)
+        recorded()
     path = new_challenge(kb, source_repo, "SC-0002")
-    put_challenge(kb, source_repo, path, "SC-0002", missing_hash=True)
-    assert not (kb.root / TREE_HASH).exists()
-    validate(kb, source_repo)
-    call(kb, source_repo, ["validate", "--record"],
-         changed={TREE_HASH, ".kblam/pairs.sqlite", ".kblam/review.jsonl"},
-         out="kblam validate: OK (0 findings); recorded .kblam/tree.hash for this tree\n")
-    assert treehash.read_recorded(kb.cfg) == (2, "research-review", treehash.tree_digest_v2(load_view(kb.cfg)))
-    validate(kb, source_repo)
+    (kb.root / TREE_HASH).unlink()
+    put_challenge(kb, source_repo, path, "SC-0002")
+    recorded()
+    assert m.registry(kb) == ["SC-0001", "SC-0002"]
+    (kb.root / TREE_HASH).unlink()
+    call(kb, source_repo, ["validate", "--record"], changed={TREE_HASH},
+         out="kblam validate: OK (0 findings); recorded .kblam/tree.hash for this tree\n"
+             "kblam validate: there was no .kblam/tree.hash (a new clone, or .kblam/ was deleted), so Jev was "
+             "not asked: 0 finding(s) accepted from the repository as checked at their current fingerprints. "
+             "kblam audit checks them with Jev\n")
+    recorded()

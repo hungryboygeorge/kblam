@@ -10,7 +10,8 @@ and a person's approval of kblam.toml (approval.py), it checks the commit itself
 - Committed evidence is immutable (P3): a commit may add files under an [kb] evidence_roots or history_dirs
   folder, but not modify, delete, move away or change the type of a file the last commit holds there.
 - An evidence path or verbatim source that git does not track gets a warning: its finding passes K2 or
-  K10 here and fails it on every clone.
+  K10 here and fails it on every clone. A path inside a nested Git repository under an evidence root is
+  that repository's, and is exempt.
 - The kblam.resolutions.jsonl the commit holds must parse.
 
 git runs from the repository root with the hook's environment, so it sees the index the commit is made
@@ -130,10 +131,11 @@ def _unstaged(cfg: Config, prefix: str, root: str | None = None) -> str | None:
             f"stage them (git add {root}/) or discard those changes, then commit again")
 
 
-def _evidence_folders(cfg: Config) -> list[str]:
-    """[kb] evidence_roots and history_dirs as repository-relative POSIX folders ("./x/" is "x")."""
+def _evidence_folders(cfg: Config, *, history: bool = True) -> list[str]:
+    """[kb] evidence_roots and (unless `history` is False) history_dirs as repository-relative POSIX folders
+    ("./x/" is "x")."""
     folders = []
-    for raw in (*cfg.evidence_roots, *cfg.history_dirs):
+    for raw in (*cfg.evidence_roots, *(cfg.history_dirs if history else ())):
         folder = posixpath.normpath(raw.replace("\\", "/")) if raw else "."
         if folder not in (".", "..") and not folder.startswith(("../", "/")):
             folders.append(folder)
@@ -218,7 +220,8 @@ def _untracked_citations(cfg: Config, view: KBView) -> list[str]:
     """A warning for each path a finding cites, as evidence (K2) or as a verbatim source (K10), that exists
     here but that git does not track, so that `git ls-files -- <path>` would print nothing: the finding
     passes the rule here and fails it on every clone. One `git ls-files` lists the tracked files under the
-    cited paths' top folders."""
+    cited paths' top folders. A path inside a nested Git repository under an evidence root is not warned
+    about: that repository holds it, not this one (_in_nested_repository)."""
     cited: dict[str, tuple[list[str], set[str]]] = {}  # path -> (IDs of the findings citing it, rule codes)
     for f in view.findings:
         if not isinstance(f.meta, dict):
@@ -241,9 +244,10 @@ def _untracked_citations(cfg: Config, view: KBView) -> list[str]:
     for path in _paths(_git(cfg, "--literal-pathspecs", "ls-files", "-z", "--", *tops)):
         parts = path.split("/")
         tracked.update("/".join(parts[:n]) for n in range(1, len(parts) + 1))  # the file and its folders
+    roots = _evidence_folders(cfg, history=False)
     warnings = []
     for rel, (ids, rules) in cited.items():
-        if rel in tracked:
+        if rel in tracked or _in_nested_repository(cfg, rel, roots):
             continue
         one = len(ids) == 1
         codes = " and ".join(sorted(rules, key=lambda code: int(code[1:])))
@@ -252,3 +256,18 @@ def _untracked_citations(cfg: Config, view: KBView) -> list[str]:
                         f"{what}, pass{'es' if one else ''} {codes} here and fail{'s' if one else ''} on every "
                         f"clone. Commit it (git add {rel}), or cite a file that is committed")
     return warnings
+
+
+def _in_nested_repository(cfg: Config, rel: str, roots: list[str]) -> bool:
+    """Whether the cited path `rel` lies inside a nested Git repository under one of the evidence roots
+    `roots` (SPEC §8 item 4): a folder from the evidence root down to `rel` itself that holds its own
+    `.git`, a directory or the file a worktree or submodule has. Nothing above the evidence root is looked
+    at, so the outer repository's own `.git` never counts."""
+    parts = rel.split("/")
+    for root in roots:
+        if rel != root and not rel.startswith(root + "/"):
+            continue
+        for depth in range(len(root.split("/")), len(parts) + 1):
+            if (cfg.repo_root.joinpath(*parts[:depth]) / ".git").exists():
+                return True
+    return False

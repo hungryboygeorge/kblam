@@ -19,6 +19,9 @@ CLAIM_C = "The media tray reports its type through two contact pins read at load
 CLAIM_D = "The fan controller holds its duty cycle at 40% until the case reaches 50 degrees."
 WARNING = ("findings/ or research-review/ was changed outside kblam since kblam last wrote it; "
            "tree.hash not advanced. Run kblam validate --record once the change is validated.")
+MISSING = ("there is no .kblam/tree.hash (a new clone, or .kblam/ was deleted), and the tree as it was before "
+           "this write fails kblam validate, so kblam did not record it; tree.hash not advanced. Run kblam "
+           "validate, fix anything it lists, then run kblam validate --record.")
 OLD_FORMAT = (".kblam/tree.hash is in the old format; tree.hash not advanced. "
               "Run kblam validate --record once the tree validates.")
 
@@ -155,13 +158,13 @@ def test_bootstrap_refuses_a_tree_that_fails_the_rules(kb, capsys):
     regenerate_index(kb.cfg)
     assert "F-0002" in (kb.findings / "INDEX.md").read_text(encoding="utf-8")  # the index write still happens
     assert read_recorded(kb.cfg) is None
-    assert f"kblam index: {WARNING}" in capsys.readouterr().err
+    assert f"kblam index: {MISSING}" in capsys.readouterr().err
     assert not checked(kb, "F-0001") and not checked(kb, "F-0002")
 
     kb.write("findings/tray/F-0003-tray.md", finding_text("F-0003", CLAIM_C, topic="tray"))  # K7 again
     result = put(kb.cfg, kb.write(".kblam/staging/F-0004-fan.md", finding_text("F-0004", CLAIM_D, topic="fan")))
     assert result.ok and not result.recorded and read_recorded(kb.cfg) is None
-    assert f"kblam put F-0004-fan.md: {WARNING}" in capsys.readouterr().err
+    assert f"kblam put F-0004-fan.md: {MISSING}" in capsys.readouterr().err
     assert not checked(kb, "F-0001")
 
     assert main(["--root", str(kb.root), "validate", "--record"]) == 0  # the baseline, without Jev
@@ -169,14 +172,16 @@ def test_bootstrap_refuses_a_tree_that_fails_the_rules(kb, capsys):
     assert all(checked(kb, i) for i in ("F-0001", "F-0002", "F-0003", "F-0004"))
 
 
-def test_a_missing_tree_hash_with_records_present_is_not_bootstrapped(kb, capsys):
+def test_a_missing_tree_hash_with_a_failing_record_is_not_bootstrapped(kb, capsys):
+    """Records take part in the bootstrap's validation: this one fails K13 (its source and the review
+    index are missing), so the index write leaves tree.hash missing and says why."""
     kb.write("research-review/challenges/SC-0001.yaml", record_text("SC"))
     (kb.root / ".kblam" / "tree.hash").unlink()
     kb.write("findings/calibration/F-0001-sensor.md", finding_text("F-0001", CLAIM_A))
+    capsys.readouterr()
     regenerate_index(kb.cfg)
     assert read_recorded(kb.cfg) is None
-    assert "kblam index: no .kblam/tree.hash, and the review root holds records; tree.hash not advanced." \
-        in capsys.readouterr().err
+    assert capsys.readouterr().err == f"kblam index: {MISSING}\n"
 
 
 def test_validate_record_advances_only_on_a_clean_result(kb, capsys):

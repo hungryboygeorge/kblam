@@ -157,7 +157,7 @@ def _upgrade(cfg: Config, settings: JevSettings) -> UpgradeResult:
             writes.append((finding, data))
             result.restamped += done
     if writes:
-        clean = clean_before_v2(cfg, view, bool(view.records))
+        clean = clean_before_v2(cfg, view, bool(view.records), creates_registry=False)
         recorded = read_recorded(cfg)
         # Only upgrade may bridge a matching format-1 marker to format 2, and only before records
         # exist: that old marker cannot vouch for the review root or its registered IDs.
@@ -175,7 +175,7 @@ def _upgrade(cfg: Config, settings: JevSettings) -> UpgradeResult:
             atomic_write(cfg.repo_root / finding.path, data)
             if _follow_edit_record(cfg, finding, data):
                 result.edit_records.append(finding.file_id)
-        result.recorded = record_after_write_v2(cfg, clean, "upgrade")
+        result.recorded = record_after_write_v2(cfg, clean, "upgrade", creates_registry=False)
 
     # 2. staged findings
     staged: dict[str, Finding] = {}

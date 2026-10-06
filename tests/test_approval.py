@@ -59,7 +59,7 @@ def edit_config(kb, old: str = SCOPES, new: str = MORE_SCOPES) -> None:
     path = kb.root / "kblam.toml"
     text = path.read_text(encoding="utf-8")
     assert old in text
-    path.write_text(text.replace(old, new), encoding="utf-8")
+    path.write_text(text.replace(old, new), encoding="utf-8", newline="")  # LF on every platform, as written
 
 
 def approve(kb, capsys, monkeypatch, answer: str = "y") -> tuple[int, str, str]:

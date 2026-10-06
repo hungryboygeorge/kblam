@@ -273,7 +273,8 @@ def test_source_change_outside_both_roots_fails_validate_and_pre_commit_but_not_
     .kblam/tree.hash, .kblam/review-staging/SC-0001.yaml}; decide confirmed --by reviewer-b
     (0, confirmed): {research-review/challenges/SC-0001.yaml, research-review/INDEX.md,
     .kblam/tree.hash}; validate before source change (no --by, 0, OK): none;
-    real pre-commit before source change (no --by, 0, untracked-citation warnings and OK, empty stderr): none.
+    real pre-commit before source change (no --by, 0, the untracked-evidence warning for
+    evidence/ only, since the trace lies in the nested source repository, and OK, empty stderr): none.
     Fixture changes source line 2 outside both roots; hook Stop (no --by, 0, silent): none.
     validate (no --by, 1, K10 excerpt does not occur and 1 error): none; real pre-commit
     script (no --by, 1, same K10 plus warnings; stderr commit refused, validate exit 1 and skill pointer):
@@ -293,10 +294,9 @@ def test_source_change_outside_both_roots_fails_validate_and_pre_commit_but_not_
     warnings = (
         "kblam validate: warning: evidence/2026-09-22-ratio is not tracked by git, so F-0001, which "
         "cites it as evidence, passes K2 here and fails on every clone. Commit it "
-        "(git add evidence/2026-09-22-ratio), or cite a file that is committed\n"
-        f"kblam validate: warning: {m.TRACE} is not tracked by git, so F-0001, which cites it as a "
-        f"verbatim source, passes K10 here and fails on every clone. Commit it (git add {m.TRACE}), "
-        "or cite a file that is committed\n")
+        "(git add evidence/2026-09-22-ratio), or cite a file that is committed\n")
+    # Only that one: the verbatim source lies in the nested source repository under an evidence root,
+    # which holds it, so it gets no untracked warning (the pre-commit output below is compared whole).
     u23k_run(kb, source_repo, ("validate",), out="kblam validate: OK (1 findings)\n")
     with u23k_changes(kb, source_repo, set()):
         done = u23k_pre_commit(kb)

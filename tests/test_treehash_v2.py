@@ -227,11 +227,24 @@ def test_root_problem_never_looks_outside_the_repository(kb, root):
 
 # --- clean_before_v2 ----------------------------------------------------------------------------
 
-def test_clean_before_v2_bootstraps_only_while_there_are_no_records(kb):
+def test_clean_before_v2_bootstraps_a_clean_tree_unless_the_write_creates_no_registry(kb):
+    """With no tree.hash, a tree that validates bootstraps whether or not records exist, since the write
+    creates the registry from them; rm, renumber and upgrade write no registry, so with records they
+    do not bootstrap."""
     cfg, view = kb.cfg, load_view(kb.cfg)
     (kb.root / ".kblam" / "tree.hash").unlink()
     assert clean_before_v2(cfg, view, has_records=False) is True
+    assert clean_before_v2(cfg, view, has_records=True) is True
+    assert clean_before_v2(cfg, view, has_records=False, creates_registry=False) is True
+    assert clean_before_v2(cfg, view, has_records=True, creates_registry=False) is False
+
+
+def test_clean_before_v2_does_not_bootstrap_a_tree_that_fails_the_rules(kb):
+    kb.write("research-review/challenges/SC-0001.yaml", RECORD)     # K13: not a valid record
+    (kb.root / ".kblam" / "tree.hash").unlink()
+    cfg, view = kb.cfg, load_view(kb.cfg)
     assert clean_before_v2(cfg, view, has_records=True) is False
+    assert read_recorded(cfg) is None
 
 
 def test_clean_before_v2_never_matches_a_format_1_line(kb):
@@ -301,16 +314,41 @@ def test_record_after_write_v2_warns_about_a_format_1_file_and_leaves_it(kb, cap
         "Run kblam validate --record once the tree validates.\n")
 
 
-def test_record_after_write_v2_warns_when_the_file_is_missing(kb, capsys):
+MISSING_FAILED = ("there is no .kblam/tree.hash (a new clone, or .kblam/ was deleted), and the tree as it was "
+                  "before this write fails kblam validate, so kblam did not record it; tree.hash not advanced. "
+                  "Run kblam validate, fix anything it lists, then run kblam validate --record.\n")
+
+
+@pytest.mark.parametrize("record", [True, False], ids=["records", "no-records"])
+def test_record_after_write_v2_warns_when_the_bootstrap_failed(kb, capsys, record):
+    if record:
+        kb.write("research-review/challenges/SC-0001.yaml", RECORD)
+    cfg = kb.cfg
+    path = kb.root / ".kblam" / "tree.hash"
+    path.unlink()
+    capsys.readouterr()
+    assert record_after_write_v2(cfg, clean_before=False, command="put") is False
+    assert not path.exists()
+    assert capsys.readouterr().err == f"kblam put: {MISSING_FAILED}"
+
+
+def test_record_after_write_v2_warns_when_a_registry_free_write_meets_records(kb, capsys):
+    """rm, renumber and upgrade write no registry, so with records present they never bootstrap; the
+    warning says so and names the command that does."""
     kb.write("research-review/challenges/SC-0001.yaml", RECORD)
     cfg = kb.cfg
     path = kb.root / ".kblam" / "tree.hash"
     path.unlink()
-    assert record_after_write_v2(cfg, clean_before=False, command="put") is False
+    capsys.readouterr()
+    assert record_after_write_v2(cfg, clean_before=False, command="rm", creates_registry=False) is False
     assert not path.exists()
     assert capsys.readouterr().err == (
-        "kblam put: no .kblam/tree.hash, and the review root holds records; tree.hash not advanced. "
-        "Run kblam validate --record once the tree validates.\n")
+        "kblam rm: there is no .kblam/tree.hash (a new clone, or .kblam/ was deleted), and kblam rm does not "
+        "record one while research-review/ holds review records; tree.hash not advanced. Run kblam validate, "
+        "fix anything it lists, then run kblam validate --record.\n")
+    (kb.root / "research-review/challenges/SC-0001.yaml").unlink()    # no records: the ordinary text
+    assert record_after_write_v2(cfg, clean_before=False, command="rm", creates_registry=False) is False
+    assert capsys.readouterr().err == f"kblam rm: {MISSING_FAILED}"
 
 
 def test_record_after_write_v2_warns_about_an_out_of_band_change(kb, capsys):

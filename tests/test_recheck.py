@@ -234,8 +234,11 @@ def test_the_prompt_shows_a_hostile_command_escaped(kb, capsys, monkeypatch):
     add_check(kb, "F-0001", f"{PY} -c pass \x1b[2K\rbenign \u202etxt.exe")
     code, out, _ = run(kb, capsys, monkeypatch, answers=["n"])
     assert code == 1 and "\x1b" not in out and "\u202e" not in out and ran(kb) == []
-    assert ("\\x1b[2K\\rbenign \\u202etxt.exe'  (shown escaped: it holds characters other than printable ASCII; "
-            "the argv is what runs)\n") in out
+    # shown() is ascii(), which closes with ' unless the text holds a ' and no ": on Windows PY is the
+    # interpreter's path, which shlex.quote wraps in ' (a backslash is not shell-safe), so there it closes with ".
+    end = '"' if "'" in PY else "'"
+    assert (f"\\x1b[2K\\rbenign \\u202etxt.exe{end}  (shown escaped: it holds characters other than printable "
+            f"ASCII; the argv is what runs)\n") in out
     assert '"-c", "pass", "\\u001b[2K", "benign", "\\u202etxt.exe"]\n' in out
 
 

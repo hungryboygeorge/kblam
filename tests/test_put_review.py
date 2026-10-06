@@ -272,19 +272,23 @@ def test_a_root_change_refuses_put_ack_and_index(kb):
     assert kb.snapshot() == before and staged.is_file()
 
 
-def test_a_missing_tree_hash_with_records_present_leaves_a_put_unrecorded(kb, capsys):
+def test_a_missing_tree_hash_with_a_failing_record_leaves_a_put_unrecorded(kb, capsys):
+    """With no tree.hash, a put bootstraps only a tree the full deterministic validation passes; this
+    record fails K13 (its source and the review index are missing), so the put is not recorded."""
     kb.add("F-0001", "sensor", CLAIM_A)
     kb.write(SC, record_text("SC"))
     (kb.cfg.state_dir / "tree.hash").unlink()
     staged = stage(kb, "F-0002", "motor", CLAIM_B, topic="motor")
+    capsys.readouterr()
 
     result = store.put(kb.cfg, staged)
 
     assert result.ok and not result.recorded
     assert read_recorded(kb.cfg) is None
-    assert ("kblam put F-0002-motor.md: no .kblam/tree.hash, and the review root holds records; "
-            "tree.hash not advanced. Run kblam validate --record once the tree validates.") \
-        in capsys.readouterr().err
+    assert capsys.readouterr().err == (
+        "kblam put F-0002-motor.md: there is no .kblam/tree.hash (a new clone, or .kblam/ was deleted), and the "
+        "tree as it was before this write fails kblam validate, so kblam did not record it; tree.hash not "
+        "advanced. Run kblam validate, fix anything it lists, then run kblam validate --record.\n")
 
 
 def test_a_missing_tree_hash_without_records_is_bootstrapped_as_format_2(kb, capsys):
