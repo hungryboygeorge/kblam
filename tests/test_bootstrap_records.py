@@ -22,7 +22,10 @@ from kblam.jev import CACHE_NAME, PairCache
 from kblam.treehash import read_recorded, tree_digest_v2
 from kblam.view import load_view
 
-from test_check import E2, jkb  # noqa: F401 (jkb is a fixture)
+from conftest import KB
+from test_check import E2, jkb  # noqa: F401 (jkb is a fixture, and hkb is built on it)
+from test_fresh_clone import git
+from test_hook import call, hkb, stop  # noqa: F401 (hkb is a fixture)
 from test_m611_group4 import excerpt_line, line_with, same_bytes_message
 
 REVIEW = "research-review"
@@ -298,3 +301,74 @@ def test_a_put_on_a_clone_that_fails_says_what_to_do_and_doing_it_bootstraps(jkb
     bootstraps_as_named(jkb, PENDING, 3)
     bootstrapped(jkb, registry=["CT-0001", "CU-0001", "SC-0001"])
     assert accepted(jkb, "F-0003")
+
+
+# --- a real git clone ------------------------------------------------------------------------------
+
+
+LOG = "evidence/2026-09-22-ratio/log.txt"       # a plain file the KB's own repository commits
+
+
+class CommittedLog:
+    """Stands in for conftest's SourceRepo where m611_helpers reads a source: the evidence log the outer
+    repository commits, so a clone has it (a nested source repository would not be cloned)."""
+
+    def __init__(self, kb):
+        self.kb_root = kb.root
+
+    def kb_path(self, path: str = LOG) -> str:
+        return path
+
+
+@pytest.fixture
+def origin(hkb, monkeypatch):
+    """reviewed() on the evidence log, committed with .kblam/ ignored as `kblam init` leaves it; system and
+    global git config are ignored. `hkb` puts the fake Jev behind the Stop hook's own check too, so a Jev
+    call from the hook would be recorded rather than reach the network."""
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(hkb.root.parent / "no-global-gitconfig"))
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(hkb.root.parent))
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    hkb.write(".gitignore", ".kblam/\n")
+    git(hkb.root, "init", "-q")
+    git(hkb.root, "add", "-A")
+    git(hkb.root, "commit", "-q", "--no-verify", "-m", "evidence")
+    reviewed(hkb, CommittedLog(hkb))
+    git(hkb.root, "add", "-A")
+    git(hkb.root, "commit", "-q", "--no-verify", "-m", "two findings and their review records")
+    hkb.fake.requests.clear()
+    return hkb
+
+
+def clone_of(origin, name: str) -> KB:
+    git(origin.root.parent, "clone", "-q", str(origin.root), name)
+    return KB(origin.root.parent / name)
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
+def test_a_git_clone_with_review_records_bootstraps(origin, monkeypatch, capsys, no_jev_check):
+    """A clone has the findings and records but no .kblam/: the Stop hook runs only the deterministic
+    rules, which pass, and records nothing. validate --record bootstraps one clone and the put of a task
+    another; afterwards validate passes and the Stop hook is silent. Jev is never asked about F-0001 or
+    F-0002."""
+    first = clone_of(origin, "clone")
+    assert (first.root / LOG).is_file() and not (first.root / ".kblam").exists()
+    assert present(first) == ["CT-0001", "CU-0001", "SC-0001"]
+
+    assert call("Stop", stop(first), monkeypatch, capsys) == (0, None, "")
+    assert not (first.root / ".kblam").exists()
+    assert m.validate(first, "--record") == m.Run(0, f"{PENDING}\nkblam validate: OK (2 findings); 1 pending "
+                                                     f"task(s); recorded .kblam/tree.hash for this tree\n"
+                                                     f"{BASELINE}\n", "")
+    bootstrapped(first, registry=["CT-0001", "CU-0001", "SC-0001"])
+    assert m.validate(first) == m.Run(0, f"{PENDING}\nkblam validate: OK (2 findings); 1 pending task(s)\n", "")
+    assert call("Stop", stop(first), monkeypatch, capsys) == (0, None, "")
+
+    second = clone_of(origin, "second")
+    staged = m.stage_task(second, "F-0001", by="researcher-a", proponent="researcher-a")
+    assert m.put(second, staged) == m.Run(0, f"kblam put: CT-0002 -> {REVIEW}/tasks/CT-0002.yaml\n", "")
+    bootstrapped(second, registry=["CT-0001", "CT-0002", "CU-0001", "SC-0001"])
+    pending = f"{PENDING}\nCT-0002 open replication of F-0001: {QUESTION}"
+    assert m.validate(second) == m.Run(0, f"{pending}\nkblam validate: OK (2 findings); 2 pending task(s)\n", "")
+    assert call("Stop", stop(second), monkeypatch, capsys) == (0, None, "")
+    assert origin.fake.requests == []

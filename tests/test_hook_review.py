@@ -15,11 +15,14 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
-from conftest import KBLAM_TOML, NO_EMBEDDINGS, PROMPT_TOML, record_text
+import m611_helpers as m
+from conftest import KBLAM_TOML, NO_EMBEDDINGS, PROMPT_TOML, finding_text, record_text
 from test_check import E1, jkb  # noqa: F401 (jkb is a fixture, and hkb is built on it)
+from test_fresh_clone import git
 from test_hook import POINTER, STATE_TAIL, blocked, call, denied, hkb, stop, tool  # noqa: F401 (hkb too)
 
 REVIEW = "research-review"
@@ -369,8 +372,9 @@ def test_pre_tool_use_on_a_review_path_imports_only_the_hook_code(kb):
 
 
 STOP_FIX = ("Fix each failure through kblam: a finding with kblam edit <id>, a change to the staged copy and "
-            "kblam put; a record as its failure line says, with the kblam command it names or a staged copy and "
-            f"kblam put. Never write under findings/ or {REVIEW}/ directly. Once the tree is clean, kblam "
+            "kblam put; a record as its failure line says, with the kblam command it names, a change to a free "
+            "field through kblam challenge edit or kblam task edit and kblam put, or a restore of the record's "
+            f"file from git. Never write under findings/ or {REVIEW}/ directly. Once the tree is clean, kblam "
             "validate --record accepts the change.")
 
 
@@ -440,3 +444,102 @@ def test_stop_is_silent_while_a_format_2_tree_hash_matches_the_review_root(revie
 
     assert call("Stop", stop(review_kb), monkeypatch, capsys) == (0, None, "")
     assert review_kb.fake.requests == []
+
+
+# --- D49: the routes the fix sentence gives --------------------------------------------------------
+
+
+@pytest.fixture
+def git_review_kb(review_kb, monkeypatch):
+    """review_kb as a git repository with the knowledge base committed and .kblam/ ignored, as `kblam init`
+    leaves it: a record a hand edit broke can be restored from git, the route the fix sentence gives for a
+    record failure whose line names no kblam command. System and global git config are ignored."""
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(review_kb.root.parent / "no-global-gitconfig"))
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(review_kb.root.parent))
+    review_kb.write(".gitignore", ".kblam/\n")
+    git(review_kb.root, "init", "-q")
+    git(review_kb.root, "add", "-A")
+    git(review_kb.root, "commit", "-q", "--no-verify", "-m", "the knowledge base")
+    return review_kb
+
+
+def blocked_parts(kb, monkeypatch, capsys) -> tuple[list[str], str, str]:
+    """The failure lines, the fix sentence and the skill pointer of the block the Stop hook gives now."""
+    _first, *failures, fix, pointer = blocked(call("Stop", stop(kb), monkeypatch, capsys)[1]).split("\n")
+    return failures, fix, pointer
+
+
+def test_the_fix_sentence_names_kblam_review_index_for_a_deleted_review_index(review_kb, monkeypatch, capsys):
+    """D49 for the fix sentence's "run the kblam command its failure line names": the review root's
+    INDEX.md deleted out of band blocks the stop with a K13 line that names kblam review index; running
+    that, then kblam validate --record, leaves the hook silent."""
+    kb = review_kb
+    kb.add("F-0001", "motor", E1)
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    m.accept_tree(kb)                                    # fixture setup: the tree kblam left, plus INDEX.md
+    assert call("Stop", stop(kb), monkeypatch, capsys) == (0, None, "")
+    (kb.root / REVIEW / "INDEX.md").unlink()             # the hand edit the hook catches
+
+    failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
+
+    assert failures == [f"K13 {REVIEW}/INDEX.md: INDEX.md is missing; run kblam review index"]
+    assert (fix, pointer) == (STOP_FIX, POINTER)
+    assert m.kblam(kb, "review", "index").code == 0      # the command the failure line names
+    assert m.validate(kb, "--record").code == 0
+    assert call("Stop", stop(kb), monkeypatch, capsys) == (0, None, "")
+
+
+def test_the_fix_sentence_names_kblam_edit_and_put_for_a_hand_edited_finding(review_kb, monkeypatch, capsys):
+    """D49 for the fix sentence's finding half: a hand edit leaving an installed finding with a label
+    outside the vocabulary fails K1, and kblam edit, a change to the staged copy and kblam put is what
+    fixes it; kblam validate --record then leaves the hook silent."""
+    kb = review_kb
+    kb.add("F-0001", "motor", E1)
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    m.accept_tree(kb)                                    # the tree kblam left, review root included
+    kb.write("findings/calibration/F-0001-motor.md",
+             finding_text("F-0001", E1).replace("label: observed", "label: bogus"))
+
+    failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
+
+    assert any(line.startswith("K1 findings/calibration/F-0001-motor.md")
+               and "label 'bogus' is not in the vocabulary" in line for line in failures), failures
+    assert (fix, pointer) == (STOP_FIX, POINTER)
+
+    staged = Path(m.kblam(kb, "edit", "F-0001").out.strip())
+    staged.write_bytes(finding_text("F-0001", E1).encode())   # the change to the staged copy
+    assert m.kblam(kb, "put", str(staged)).code == 0
+    assert m.validate(kb, "--record").code == 0
+    assert call("Stop", stop(kb), monkeypatch, capsys) == (0, None, "")
+
+
+def test_the_fix_sentence_names_a_restore_from_git_for_a_record_line_that_names_no_command(
+        git_review_kb, monkeypatch, capsys):
+    """D49 for a K13 record line that names no kblam command, the id/file-name mismatch: kblam put
+    refuses a staged copy whose ID was put back (the ID is not a free field, so the old sentence's "a
+    staged copy and kblam put" cannot fix it), and restoring the record's file from git is what does;
+    kblam validate --record then leaves the hook silent."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0009"))   # the hand edit
+
+    failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
+
+    assert failures == [f"K13 {REVIEW}/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file "
+                        f"name's ID (SC-0001)"]
+    assert (fix, pointer) == (STOP_FIX, POINTER)
+
+    # the route the old sentence offered instead: a staged copy and kblam put cannot fix this line
+    staged = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())
+    staged.write_bytes(record_text("SC", "SC-0001").encode())
+    refused = m.kblam(kb, "put", str(staged))
+    assert refused.code != 0 and "id is not a free field" in refused.out + refused.err
+
+    git(kb.root, "restore", f"{REVIEW}/challenges/SC-0001.yaml")   # the restore the sentence names
+    assert m.validate(kb, "--record").code == 0
+    assert call("Stop", stop(kb), monkeypatch, capsys) == (0, None, "")

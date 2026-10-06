@@ -368,7 +368,8 @@ def test_renumber_says_why_the_unlinked_file_cannot_be_renumbered_yet(kb, at_roo
 
 def test_renumber_says_when_a_dependent_of_the_unlinked_file_cannot_be_rekeyed(kb, at_root):
     """Case C, fifth reason: a depends_on entry meaning the other file that kblam cannot re-key without
-    changing anything else (its value on a line of its own); once a person rewrites the entry, the command the message names succeeds."""
+    changing anything else (its value on a line of its own); once a person rewrites the entry, the
+    command the message names succeeds."""
     same_id(kb)
     ct(kb, "CT-0003", MINE)
     theirs_fp = binding(kb, THEIRS)[0]
@@ -400,8 +401,7 @@ def test_renumber_with_three_files_names_each_unlinked_file_and_its_reason(kb):
         f"{MINE} holds F-0012, which review record CT-0003 links, so it keeps its ID; the other findings with "
         f"that ID that no review record links cannot be renumbered yet: {THEIRS}: {unreadable}; {THIRD}: "
         f"{THIRD} has no id key, so kblam cannot rewrite it; ask a person to add its id line (id: F-0012). Ask a "
-        f"person to fix that, then run kblam renumber "
-        f"{THEIRS}; kblam renumber {THIRD}."))
+        f"person to fix that, then run kblam renumber {THEIRS}; kblam renumber {THIRD}."))
 
 
 def peer_state(kb, peer: str) -> None:

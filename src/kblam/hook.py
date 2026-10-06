@@ -665,9 +665,10 @@ def _stop(cfg: Config, event: str, data: dict) -> int:
     if review:
         changed = f"{cfg.findings_dir}/ or {cfg.review_dir}/ was changed outside kblam"
         fix = (f"Fix each failure through kblam: a finding with kblam edit <id>, a change to the staged copy and "
-               f"kblam put; a record as its failure line says, with the kblam command it names or a staged copy "
-               f"and kblam put. Never write under {cfg.findings_dir}/ or {cfg.review_dir}/ directly. Once the tree "
-               f"is clean, kblam validate --record accepts the change.")
+               f"kblam put; a record as its failure line says, with the kblam command it names, a change to a "
+               f"free field through kblam challenge edit or kblam task edit and kblam put, or a restore of the "
+               f"record's file from git. Never write under {cfg.findings_dir}/ or {cfg.review_dir}/ directly. "
+               f"Once the tree is clean, kblam validate --record accepts the change.")
     else:
         changed = f"{cfg.findings_dir}/ was changed outside kblam put"
         fix = (f"Fix each failure through kblam (kblam edit <id>, change the staged copy, kblam put it); never "
