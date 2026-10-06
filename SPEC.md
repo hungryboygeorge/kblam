@@ -14,10 +14,11 @@ a config file in the consuming repository.
 **Status.** The design is settled with the user except where §13 lists an open question. Draft 2
 resolves every finding of a review of draft 1, on the user's instruction to fix them all
 (2026-09-25); Appendix A records the decisions that review needed and the reason for each. M6.10
-(§12), the changes that review called for, is built (2026-09-28), except `kblam calibrate`. Behaviour
-that is specified here but not built yet is marked "(not yet built)" where it is described.
-Everything else describes kblam as built, and each milestone's "Status" line says what is
-implemented.
+(§12), the changes that review called for, is built (2026-09-28), except `kblam calibrate`. M6.11
+(§12), source challenges, claim tasks and reviewed uses, is built (2026-10-04) except as its Status
+says. Behaviour that is specified here but not built yet is marked "(not yet built)" where it is
+described. Everything else describes kblam as built, and each milestone's "Status" line says what
+is implemented.
 
 **Conventions.** §3–§12 say what kblam does. A paragraph headed "As built" records an
 implementation detail that tests rely on (CONTRIBUTING.md). A decision the user made or delegated
@@ -146,7 +147,6 @@ Research behind this design (the sources are listed under "About this document")
 - **P5. Nothing agents read is maintained by hand.** Indexes and catalogs are generated.
 - **P6. One fact, one place.** A finding that restates another is rejected; the agent edits the
   existing one.
-
 - **P7. Doubt about evidence is recorded as data about evidence, not as a finding** (§5.2). A
   challenge to one assertion in one version of a source, or a pending replication of a finding,
   lives in `research-review/`, outside `findings/`. Neither edits the source, neither changes a
@@ -278,7 +278,6 @@ Rules:
   reproducing it in an `evidence/` package and editing it: new label, the package's output as its
   excerpt. K11 enforces the mechanics; the label name and the history folders are configurable
   (§9).
-
 - A finding carries no replication, challenge or review state (§5.2). Pending work is a `CT-`
   record, not a frontmatter key, a label or a `verified` value: `verified` stays a date, and
   `reported` keeps the meaning above. Adding a frontmatter field for citation uses (§13) would
@@ -307,7 +306,6 @@ as warnings (§7), but those remain errors in `validate`. Rule codes:
 | K10 | Every excerpt marked as verbatim occurs exactly in its cited source. Syntax: a fenced block or blockquote on the line directly after `<!-- verbatim: <repo-relative path>:<line>[-<line>] -->` or `<!-- verbatim: <path>:@0x<offset> -->`. With lines, the excerpt, with blockquote `> ` markers stripped and line endings normalised, must occur within the cited lines; with an offset, its bytes (with LF or CRLF line endings) must start at that byte offset. A binary source (one containing a NUL byte or not valid UTF-8) is not checked; its excerpts are checked by `check:` commands, or quoted as hex. Catches paraphrased "quotes". A tag ending in ` hex` (`<!-- verbatim: path:@0x1F0 hex -->`) quotes bytes instead, as a fenced block of hex byte pairs (whitespace ignored) that must equal the source's bytes at that offset, so an excerpt of a binary source is checked too. |
 | K11 | **Reported claims** (§4). A finding labelled `reported_label` has at least one verbatim tag whose source is under a `history_dirs` folder (K10 checks the excerpt itself). A finding with any other label lists no path under a `history_dirs` folder in `evidence` (prose and verbatim excerpts may still cite one), and has no `depends_on` entry naming a reported finding. A history path matches by whole leading path segments, with or without a leading `./`. When `reported_label` is `""` or not in `labels`, only the evidence check applies. |
 | K12 | With `[kb] verbatim_blockquotes = true`, every blockquote in a finding's body is a verbatim excerpt: it carries a K10 tag. A quotation that cannot be tagged is paraphrase, and belongs in prose. Off while the key is absent, so a KB set up earlier keeps validating; `kblam init` writes it on for a new project. |
-
 | K13 | **Review record integrity** (§5.2.4): every file under the review root is a record at its canonical path or the generated `INDEX.md`; the review root is the one `tree.hash` records; each record parses against its strict versioned schema; IDs are unique and every registered ID is present; paths are safe and Git pins verified; a source challenge's source, assertion and basis are checked at its pinned version; decisions follow the transition table, the bind rule and independence. Availability and currency are graded by status (§5.2.4): an open record's stale or unavailable reference is a warning, an effective record's an error. Also: the review `INDEX.md` is byte-identical to what `kblam review index` generates. |
 | K14 | **Affected uses** (§5.2.4): a verbatim excerpt (K10) whose match intersects a *confirmed* challenge's assertion in the same source version, with no current `CU-` record for that excerpt, is an error. So is an excerpt of another version of the file that contains the assertion text or is contained in it ("version unproved"). A cited range that overlaps the assertion's lines without quoting it, and a path-only or prose reference to a challenged source, are warnings. K14 never waives K10. |
 | K15 | **Claim task bindings** (§5.2.4): a `CT-` record names an existing finding; its fingerprint and full-file sha256 match that finding (else stale); its fields are complete; a closing decision is independent and its primary evidence stays available. A stale or malformed task is an error unless retired; an open, well-formed task is listed as pending and fails nothing. |
@@ -318,7 +316,8 @@ as warnings (§7), but those remain errors in `validate`. Rule codes:
 ### 5.1 Fingerprint
 
 A finding's fingerprint identifies what it asserts. `depends_on` records it (K3), review items
-carry it (§6.4) and review records bind it (§5.2), and a finding counts as checked at a fingerprint (§6.5, §8).
+carry it (§6.4) and review records bind it (§5.2), and a finding counts as checked at a
+fingerprint (§6.5, §8).
 
 **Fingerprint v2** (M6.10). The first 12 hex digits of the sha256 of the canonical JSON (keys
 sorted, no spaces, UTF-8) of `{id, claim, label, scope, quantities, evidence}`. The claim has its
@@ -789,15 +788,15 @@ output, in the same order.
 **K14, affected uses.** K10 and K14 share one match result per verbatim excerpt. It holds the
 quoted text, the canonical key of the cited source, the raw source identity (the sha256 of the
 bytes matched against), and every half-open span, in the source's LF-normalised text, at which
-the excerpt matches within the cited range. An offset tag (`:@0x`) is matched in the raw bytes, and the
-match is mapped to the normalised text. K10 and K14 read each cited source once per validation
-and judge the same bytes, so a source changing during a run cannot make them disagree. A ` hex`
-tag is checked by K10 but provides no assertion spans to K14: schema 1 cannot challenge a binary
-source. K10's accept/reject behaviour and messages are unchanged.
+the excerpt matches within the cited range. An offset tag (`:@0x`) is matched in the raw bytes,
+and the match is mapped to the normalised text. K10 and K14 read each cited source once per
+validation and judge the same bytes, so a source changing during a run cannot make them disagree.
+A ` hex` tag is checked by K10 but provides no assertion spans to K14: schema 1 cannot challenge a
+binary source. K10's accept/reject behaviour and messages are unchanged.
 
 kblam indexes the confirmed challenges by their source's canonical key. It then takes each excerpt
-that K10 verified as text (not a failure, not binary-exempt, not a hex byte rendering), and checks it against each confirmed
-challenge whose key matches its source's:
+that K10 verified as text (not a failure, not binary-exempt, not a hex byte rendering), and checks
+it against each confirmed challenge whose key matches its source's:
 - **Same bytes** (the current source hashes to the challenge's `source.sha256`). If any span of the
   excerpt intersects the assertion's span, it is an **error**, unless a current use covers this
   challenge, finding and excerpt:
@@ -883,11 +882,13 @@ edit; the challenge alone changes no finding.
 
 Records are written like findings: staged under `.kblam/review-staging/`, edited there, and moved
 into place by `kblam put`, which dispatches on the file name (`SC-`, `CT-`, `CU-`). New IDs are
-allocated under the lock, above every ID in the review root, review staging, the registry
-(§5.2.6) and the git history of the review root on any ref (`git log --all`: local branches,
-remote-tracking ones and tags), as finding IDs are (§7). An abandoned staged draft leaves a gap
-in the numbering. Two clones allocating before exchanging commits can still collide; git reports
-the add/add conflict. Records are never renamed, and settling that collision is open (§13).
+allocated under the lock, per kind, above every ID in the review root, review staging, the
+allocation receipts and the registry (§5.2.6), and above every ID in the git history of the review
+root on any ref (`git log --all`: local branches, remote-tracking ones and tags), as finding IDs
+are (§7) (not yet built, M6.11: today allocation does not read git history). An abandoned staged
+draft leaves a gap in the numbering. Two clones allocating before exchanging commits can still
+collide; git reports the add/add conflict. Records are never renamed, and settling that collision
+is open (§13).
 
 **Receipts.** `challenge new`, `task new` and `use review` write an allocation receipt,
 `.kblam/review-receipts/<ID>.json`, which kblam never rewrites. It holds the ID, `created`,
@@ -1004,10 +1005,11 @@ A section with no records reads `None.`. Cells are escaped as in the findings in
   or accepted. A registered ID with no record in the review root is a K13 error: "SC-0001 is
   missing from research-review/; records are never deleted or renamed; restore it from git".
   kblam creates the registry from the records present at its first write or `validate --record`
-  after a clone, and on `init --update`; a clean new-clone bootstrap also creates it (§8). No
-  registry file is created while there is no record and none has ever been registered. `kblam validate --record --forget-missing` drops the
-  missing IDs from it and prints each one; the write skill reserves it for the coordinator or the
-  user. IDs are not required to be contiguous, since an abandoned draft leaves a gap.
+  after a clone, and on `init --update`; a clean new-clone bootstrap also creates it (§8; not yet
+  built, M6.11). No registry file is created while there is no record and none has ever been
+  registered. `kblam validate --record --forget-missing` drops the missing IDs from it and prints
+  each one; the write skill reserves it for the coordinator or the user. IDs are not required to
+  be contiguous, since an abandoned draft leaves a gap.
 - **tree.hash, format 2.** `tree.hash` holds `kblam-tree-v2 <review root> <64 hex>`. The digest is
   sha256 over, first, `kblam-tree-v2\0<findings root>\0<review root>\0`, then, for each file of
   `findings/` and the review root in sorted order of its domain-separated name (`f/<path relative
@@ -1015,9 +1017,14 @@ A section with no records reads `None.`. Cells are escaped as in the findings in
   decimal, `\0` and its bytes. The review root is stored in the clear because the digest cannot
   give it back. If `kblam.toml` names another root, K13 reports "the review root changed from X to
   Y in kblam.toml; schema 1 fixes it at init", and every mutating command refuses. The one
-  exception: while neither root holds a record and the registry is empty, `validate --record` and
-  `init --update` record the new root. Mutating here means writing either root, the registry or
-  `tree.hash`; staging commands are not mutating and do not refuse a root change.
+  exception: while neither root holds a record and the registry is empty, nothing refuses, and
+  `validate --record` and `init --update` record the new root. A mutating command is one that
+  writes either root, the registry or `tree.hash` through the write frame ("Interrupted writes",
+  below): `put`, `ack`, `index`, `validate --record`, `init` and the record commands (`review
+  decide`, `review rebind`, `challenge pin`, `review index`). Staging commands are not mutating
+  and do not refuse a root change. `rm`, `renumber` and `upgrade` take the lock without this
+  frame: they do not recover a journal or refuse a changed review root; under a changed root
+  their write leaves `tree.hash` stale with the out-of-band warning (§8).
 - **Upgrade.** A bare hex `tree.hash` (format 1) never matches. `put`, `ack` and `index` leave it
   and warn that it is in the old format (the §8 rule), and the Stop hook validates.
   `validate --record` writes format 2 after a clean validation. `init --update` writes format 2
@@ -1028,17 +1035,25 @@ A section with no records reads `None.`. Cells are escaped as in the findings in
   holds no record, and the registry is absent or empty and readable with the expected shape. A
   damaged or unreadable registry refuses that bridge and leaves the normal old-format warning.
   A missing `tree.hash` bootstraps when the full deterministic validation, including K13–K15,
-  is clean; with review records, it also creates the registry from the records present (§8). No
-  Jev is asked. Jev state is never rewritten for a format-2 migration; `kblam upgrade` separately
-  migrates the older Jev state as §7 describes.
+  is clean (§8). No Jev is asked. With review records present, the bootstrap also creates the
+  registry from the records present (not yet built, M6.11: today a missing `tree.hash` with
+  records present is not bootstrapped; a write leaves it missing and warns "no .kblam/tree.hash,
+  and the review root holds records; tree.hash not advanced. Run kblam validate --record once the
+  tree validates.", and `validate --record` records it as it accepts an out-of-band change, asking
+  Jev about the findings not yet checked). Jev state is never rewritten for a format-2 migration;
+  `kblam upgrade` separately migrates the older Jev state as §7 describes.
 - **Interrupted writes.** A write that changes more than one file among the two roots and the
   registry first writes `.kblam/journal.json`: the command, the paths it will change and the
   `tree.hash` it found. It then writes each file by temp + fsync + replace (records and findings,
-  then indexes, then the registry), then `tree.hash`, then deletes the journal. A command that
-  takes the lock and finds a journal recovers first. It regenerates both indexes from the files
-  present, registers any journal-listed record that exists, restores `tree.hash` to the value the
-  journal recorded (removing it if there was none), deletes the journal, and reports "the
-  interrupted <command> may be partial: run kblam validate, fix what it reports, then kblam
+  then indexes, then the registry), then `tree.hash`, then deletes the journal. The **write frame**
+  is the lock, then the recovery of a journal it finds, then, for a mutating command, the root
+  check above. The mutating commands, the staging commands, and `check`, `check --pending`,
+  `audit` and `resolve` for their recording step take the lock through it; `rm`, `renumber`,
+  `upgrade`, `approve-config` and `recheck` take the lock without it, and so do not recover a
+  journal. Recovery regenerates both indexes from the files present, registers any journal-listed
+  record that exists, restores `tree.hash` to the value the journal recorded (removing it if there
+  was none), deletes the journal, and reports
+  "the interrupted <command> may be partial: run kblam validate, fix what it reports, then kblam
   validate --record". Recovery never invents file contents and never accepts an unrelated change.
   If recovery fails, the journal stays. A refusal changes nothing; an I/O failure part-way through
   a write is what the journal reports.
@@ -1420,7 +1435,7 @@ Every command but `init` takes `--root <dir>` to name the repository root (§4).
 | `kblam edit <id>` | copy an existing finding to staging for rewriting in place (P1), record its edit base (below) and print the path; refused while a copy of that ID is staged |
 | `kblam put <file>` | **the only way into `findings/` and the review root**; an `SC-`/`CT-`/`CU-` file is a record put (§5.2.5). For a finding: validate the KB as it would be after the move + Jev check + move into place + regenerate the index and `tree.hash` (below). A staged file with an existing ID replaces that finding in place (the old file is removed if the slug or topic changed). Any refusal leaves `findings/` unchanged; an I/O failure part-way through is reported by the journal (§5.2.6). |
 | `kblam validate` | all deterministic rules (§5, K13–K15 included) plus open review and unchecked items (open rejected items do not count); prints warnings and pending `CT-` tasks without failing; no network; non-zero exit on failure |
-| `kblam validate --record` | check (as `kblam check` with no IDs, so this form may ask Jev) the findings not yet checked at their current fingerprint, then, on a clean result, write `tree.hash` for the current tree: the explicit way to accept a legitimate out-of-band change such as `git pull` or `git checkout`. With no `tree.hash` yet, as on a fresh clone, it asks Jev nothing: it runs the full deterministic validation, records a clean tree, marks every finding as accepted from the repository and creates the registry from any review records present (§8 item 3). `--forget-missing` also drops review record IDs whose records are gone from the registry, printing each (§5.2.6). |
+| `kblam validate --record` | check (as `kblam check` with no IDs, so this form may ask Jev) the findings not yet checked at their current fingerprint, then, on a clean result, write `tree.hash` for the current tree: the explicit way to accept a legitimate out-of-band change such as `git pull` or `git checkout`. With no `tree.hash` yet, as on a fresh clone, it asks Jev nothing: it runs the full deterministic validation, records a clean tree, marks every finding as accepted from the repository and creates the registry from any review records present (§8 item 3; with review records present, not yet built, M6.11: today it checks and records such a tree as it accepts an out-of-band change, and creates the registry). `--forget-missing` also drops review record IDs whose records are gone from the registry, printing each (§5.2.6). |
 | `kblam validate --commit` | as `kblam validate`, for the commit being made, with the checks of §8 item 4; what the pre-commit hook runs |
 | `kblam approve-config` | show how `kblam.toml` differs from the last commit (from the template `kblam init` writes when no commit holds it), check it loads, and on an interactive terminal ask a person to approve it for commits on this machine; with no terminal, approve nothing and exit 1 |
 | `kblam check [F-…]` | §6 check of the named findings, or of every finding with no complete check at its current fingerprint; writes nothing under `findings/`; what fires becomes review items |
@@ -1430,8 +1445,8 @@ Every command but `init` takes `--root <dir>` to name the repository root (§4).
 | `kblam ack <dependent> <target>` | record the target's current fingerprint in the dependent's `depends_on` after re-reading the target (K3). Edits only that value (round-trip YAML), then rewrites `tree.hash` by the tree.hash rule. `--all <target>` is deliberately absent: each dependent is re-read and acked on its own. `ack` first prints the target's claim as it stood at the recorded fingerprint (the version in git history that has it, found for an old-format stamp too) beside its current claim, so the re-reading has something to read. |
 | `kblam deps <id>` | list the finding's dependents and dependencies, with suspect ones marked |
 | `kblam resolve <item-id> --distinct "<reason>"` | close a review or rejected item that Jev misread, and record the resolution (§6.4) |
-| `kblam rm <id> --merged-into <target>` | remove a finding after a merge moved everything it stated into `<target>` (§8.1). Refused while another finding depends on it (edit each dependent to depend on `<target>` first), while `<target>` is not in the KB, or while one of its quantities is missing from `<target>` with the same value and unit. Under the lock it removes the file and a topic folder left empty, regenerates `INDEX.md`, applies the tree.hash rule and closes the finding's open items; the reason for the removal goes in the commit message. Refused also while any review record links the finding, in any status; records never follow a removed finding (§5.2). An adjudicator's command (§8 item 2). |
-| `kblam renumber <path>` | give a new ID to one of two findings that share an ID, which K1 reports after the work of two clones is merged: rewrite that file's `id` and filename, re-key each `depends_on` entry whose recorded fingerprint (in either format, §5.1) shows it means that finding, append a copy under the new ID of each resolution whose state hash shows it means that finding (§6.4), so the verdicts it settled are not raised again, and list the other mentions of the old ID for a person to check. Refused when a review record links the selected finding, in any status; records are never edited to follow it (§5.2). |
+| `kblam rm <id> --merged-into <target>` | remove a finding after a merge moved everything it stated into `<target>` (§8.1). Refused while another finding depends on it (edit each dependent to depend on `<target>` first), while `<target>` is not in the KB, or while one of its quantities is missing from `<target>` with the same value and unit. Under the lock it removes the file and a topic folder left empty, regenerates `INDEX.md`, applies the tree.hash rule and closes the finding's open items; the reason for the removal goes in the commit message. Refused also while any review record links the finding, in any status; records never follow a removed finding ("`rm` and `renumber` vs review records" below; not yet built, M6.11). An adjudicator's command (§8 item 2). |
+| `kblam renumber <path>` | give a new ID to one of two findings that share an ID, which K1 reports after the work of two clones is merged: rewrite that file's `id` and filename, re-key each `depends_on` entry whose recorded fingerprint (in either format, §5.1) shows it means that finding, append a copy under the new ID of each resolution whose state hash shows it means that finding (§6.4), so the verdicts it settled are not raised again, and list the other mentions of the old ID for a person to check. Refused when a review record links the selected finding, in any status; records are never edited to follow it ("`rm` and `renumber` vs review records" below; not yet built, M6.11). |
 | `kblam items [--reworded] [--stats]` | list the open review, rejected and unchecked items. `--reworded` lists each rejected item whose finding later went in at a different fingerprint while the other side of the pair stayed as it was: a correction or rewording to pass, for the adjudicator to tell apart (§6.4); `put` records the fingerprint that went in when it closes a rejected item. `--stats` counts, per verdict, the items closed as distinct and those closed otherwise (§10.7) |
 | `kblam recheck [F-…]` | run the `check:` commands (§4) of the named findings, in the order given, or of every finding, in ID order. At an interactive terminal it first shows a person each command that is new, changed, or whose named files changed since its approval, and asks; without one it runs only the approved commands and reports the others as not approved ("`kblam recheck`" below) |
 | `kblam recheck --list` | print each `check:` command with its approval state on this machine; run nothing |
@@ -1459,43 +1474,104 @@ in the git history of the KB root on any ref (`git log --all`: local branches, r
 and tags), so an ID that was ever committed, including one `kblam rm` removed, is never issued
 again. Without git, or outside a repository, the history adds nothing. Two clones that allocate
 before they exchange commits can still pick the same ID; K1 reports the duplicate after the merge,
-and `kblam renumber` settles it. The slug is the title folded to ASCII and lowercased, each run of
-other characters turned into one `-`, trimmed of `-` at both ends and cut at a `-` to at most 60
-characters (`finding` if nothing is left). The skeleton holds every required key, today's date in
-`verified`, and the `**Claim.**` marker.
+and `kblam renumber` settles it, unless review records link both findings, or the linked one's
+peer cannot be renumbered (below; not yet built, M6.11). The slug is the title folded to ASCII and
+lowercased, each run of other characters turned into one `-`, trimmed of `-` at both ends and cut
+at a `-` to at most 60 characters (`finding` if nothing is left). The skeleton holds every required
+key, today's date in `verified`, and the `**Claim.**` marker.
 
-**`rm` and `renumber` vs review records** (user, D60, 2026-10-05). A CT or CU links the
-file its binding identifies: both the v2 fingerprint and full-file sha256 match. If a binding
-matches no file with that ID (for example, it is stale), it ambiguously links every same-ID file.
-An SC's `linked_findings` entry is a bare ID and links every file with that ID. Every record
-status counts; retiring a record does not free a finding's identity for deletion or renumbering.
-These commands never rewrite a record to follow a finding.
+**`rm` and `renumber` vs review records** (not yet built, M6.11; user, 2026-10-05). A CT or CU
+links the file its binding identifies: both the v2 fingerprint and the full-file sha256 match. If a
+binding matches no file with that ID (for example, after the finding was edited), it ambiguously
+links every same-ID file. An SC's `linked_findings` entry is a bare ID and links every file with
+that ID. Every record status counts; retiring a record does not free a finding's identity for
+deletion or renumbering. These commands never rewrite a record to follow a finding. Their messages
+cite no SPEC section, and every command a message names succeeds in the state the message
+describes, or after the step the message names first. Each list of records reads `review record
+CT-0003 links` for one and `review records CT-0003, CU-0001 link` for several. In the examples
+F-0012 is the finding, F-0020 the target, CT-0003 and SC-0004 records that link F-0012, and CU-0001
+a record that links F-0020.
 
-`kblam rm <id> --merged-into <target>` refuses a linked finding and leaves it in place. When no
-copy is staged, its refusal is: "kblam rm: F-0012 is linked by review records CT-0003, CU-0001,
-and records are never edited to follow a finding (§5.2); F-0012 stays. Correct it with kblam edit
-F-0012 instead." When it is already staged, the same first sentence is followed by "Correct the
-staged copy <staged path> instead." `<staged path>` is the repository-relative path kblam
-prints for that staged file, for example `.kblam/staging/F-0012-sensor.md`, not another edit command
-(which would refuse). With one linking record, `review records` becomes `review record`.
+`kblam rm <id> --merged-into <target>` refuses a linked finding, once both IDs name single readable
+findings, and leaves `findings/` unchanged. When no record links the target and no copy of F-0012
+is staged, its refusal is:
 
-`kblam renumber <path>` refuses the selected file while any review record links it. With only
-that file linked and the other file eligible for renumbering, it says: "kblam renumber: <path>
-holds F-0012, which review record CT-0003 links; renumber the other finding with ID F-0012 instead:
-kblam renumber <other path>". With several records, `review record CT-0003 links` becomes `review
-records CT-0003, CU-0001 link`.
-When both are linked it says: "kblam renumber: both findings with ID F-0012 (<path 1>, <path 2>)
-are linked by review record SC-0004; kblam cannot renumber either without breaking a link (§13)".
-That message uses `review records` for several records. If the other file is unlinked but cannot
-be renumbered, the refusal is: "kblam renumber: <path> holds F-0012, which review record CT-0003
-links; the other finding with ID F-0012, <other path>, cannot be renumbered either: <failure
-reason>; kblam cannot renumber either without breaking a link (§13)". This also uses `records …
-link` for several records. `<failure reason>` is only the reason from renumber's existing refusal
-for the other file, without its own `kblam renumber:` prefix or alternative commands: those
-alternatives could point back to the linked file and would now fail. The first message is used
-only when renumbering the other file would succeed under all renumber preconditions, including a
-readable finding and a safely rewritable ID line, not merely when that file is unlinked. Both
-no-command cases are open questions (§13), not permission to change records or remove a finding.
+"kblam rm: F-0012 cannot be removed: review record CT-0003 links it, and kblam never removes a
+finding a review record links. findings/ is unchanged. Merge the other way: make F-0012 also
+state what F-0020 states that F-0012 does not yet (its detail and quantities; kblam edit F-0012),
+then kblam rm F-0020 --merged-into F-0012. The edit makes CT-0003 stale until a reviewer rechecks
+and rebinds it; kblam put prints the kblam review rebind command for it."
+
+- The last sentence names the CT and CU records that the put of the edited F-0012 will list as made
+  stale (§5.2.4): those whose binding matches F-0012 and whose status is neither `stale` nor
+  `withdrawn`. With several it reads "The edit makes CT-0003, CU-0002 stale until a reviewer
+  rechecks and rebinds each; kblam put prints the kblam review rebind command for each." With none
+  (only SC links, or only retired or withdrawn records) the sentence is left out. It names no
+  rebind command itself: `review rebind` needs `--by`, `--reason` and `--expect`, a closed task
+  also `--evidence`, and a closed record a reviewer independent of it (§5.2.2), and the put prints
+  the full command for each record.
+- When a copy of F-0012 is staged, `kblam edit F-0012` would refuse, so "make F-0012 also state
+  what F-0020 states that F-0012 does not yet (its detail and quantities; kblam edit F-0012)"
+  becomes "make your staged copy <staged path> also state what F-0020 states that F-0012 does not
+  yet (its detail and quantities) and put it". `<staged path>` is the repository-relative path of
+  the staged file, for example `.kblam/staging/F-0012-sensor.md`; with several staged copies of
+  F-0012 it reads "one of your staged copies <path 1>, <path 2>".
+- The edit adds only what F-0012 lacks. A copy of F-0020 would restate it while F-0020 is still
+  installed, and K9 or Jev's `same_fact` would refuse the put.
+- The commands it names: `kblam edit F-0012` succeeds because no copy is staged. `kblam rm F-0020
+  --merged-into F-0012` is named for the state after the edit, in which F-0012 gives every quantity
+  of F-0020 and no record links F-0020; `rm`'s own refusals for other problems (a finding that
+  depends on F-0020, F-0012 itself listing F-0020 in `depends_on`) still apply and name their own
+  fix. A rebind that cannot keep a use's excerpt refuses and says to stage a new use (§5.2.5).
+
+When a record also links the target, there is no way round, and the refusal is:
+
+"kblam rm: F-0012 cannot be removed: review record CT-0003 links it, and F-0020 cannot be removed
+in its place: review record CU-0001 links it; kblam never removes a finding a review record links.
+findings/ is unchanged. Leave both as they are and tell the user F-0012, F-0020, CT-0003 and
+CU-0001."
+
+The final list names each record once, so a record that links both findings appears once. The two
+findings and their open items stay until a person decides (§13).
+
+`kblam renumber <path>` refuses the selected file while any review record links it. In the
+examples `<path>` holds F-0012 and is linked; `<other path>` is the other file with that ID.
+
+- **The other file can be renumbered** (no record links it, and renumbering it would pass every
+  renumber precondition, including a readable finding, a rewritable `id` line and a readable
+  `kblam.resolutions.jsonl`):
+  "kblam renumber: <path> holds F-0012, which review record CT-0003 links, so it keeps its ID.
+  Renumber the other finding with that ID instead: kblam renumber <other path>"
+- **Every file with that ID is linked:**
+  "kblam renumber: both findings with ID F-0012 (<path 1>, <path 2>) are linked by review record
+  SC-0004, and kblam renumbers no finding a review record links. K1 fails kblam validate and every
+  commit until a person settles this: tell the user both paths and SC-0004."
+  The record list names every record that links any of the files. K1 is an error, and the
+  pre-commit hook applies the K rules to every commit (§8 item 4).
+- **The other file is unlinked but cannot be renumbered:**
+  "kblam renumber: <path> holds F-0012, which review record CT-0003 links, so it keeps its ID; the
+  other finding with that ID, <other path>, cannot be renumbered yet: <failure reason>. Ask a
+  person to fix that, then run kblam renumber <other path>."
+  `<failure reason>` is the refusal renumber would give for `<other path>`, without its
+  `kblam renumber:` prefix and without its "renumber <the other file> instead" alternative, which
+  would point at the linked file; any "ask a person to fix" advice it carries stays. The reasons
+  are an unreadable finding, an `id` line kblam cannot rewrite without changing anything else, no
+  `id` key, and a damaged `kblam.resolutions.jsonl`; a person can fix each, after which
+  `kblam renumber <other path>` succeeds.
+
+With three or more files sharing the ID (renumber handles any number), the first case applies when
+at least one other file can be renumbered; it names each such file, "Renumber the other findings
+with that ID that kblam can renumber instead: kblam renumber <path 2>; kblam renumber <path 3>"
+(with one, "the other finding with that ID that kblam can renumber"). The second applies when every
+file is linked, with "all N findings" and "the N paths" for "both findings" and "both paths". The
+third applies when no other file can be renumbered and at least one is unlinked; it names each
+unlinked file with its reason, "the other findings with that ID that no review record links cannot
+be renumbered yet: <path 2>: <reason 2>; <path 3>: <reason 3>", and ends "then run kblam renumber
+<path 2>; kblam renumber <path 3>". Renumber's existing refusals of the selected file itself (an
+unreadable finding, an `id` line it cannot rewrite, no `id` key) offer "renumber <the other file>
+instead" only when that file can be renumbered by the first case's test; otherwise they keep only
+their ask-a-person advice. Two findings that review records keep from being renumbered are an open
+question (§13), not permission to change records or remove a finding.
 
 **`put`** (M2, M5).
 - It takes a finding file from anywhere outside the KB root, normally a staged one, and refuses
@@ -1537,17 +1613,17 @@ an unrelated finding, and two agents editing one finding cannot lose an update. 
 the dependent's bytes, so an edit of it begun before the ack is refused at put the same way.
 
 **Lock** (M2). `new`, `edit`, `put`, `ack`, `index`, `resolve`, `rm`, `renumber`, `upgrade`,
-`validate --record`, `approve-config`, the recording step of `check` and `audit`, and `recheck`'s
-recording of an approval, and every record write of §5.2.5, hold an exclusive `.kblam/lock` for their read-validate-write span, so
-concurrent puts cannot both validate against the same old tree, concurrent `new` calls cannot
-allocate the same ID, and concurrent writers of `.kblam/review.jsonl`, which kblam rewrites whole,
-cannot lose an update. Waiting is bounded (`lock_wait_seconds`; then exit 3). The lock file records
-the holder's pid, command and start time. While it holds the lock, the holder refreshes the lock
-file's modification time at least every `lock_stale_seconds`/3 (M6.10; as built, every quarter of
-it). A lock is broken, with a message, only when its holder's process is not running or its last
-refresh is older than `lock_stale_seconds`, which also covers a pid another process now uses, so a
-live holder is never broken however long it holds the lock. `.kblam/lock.break` ensures that only
-one waiter breaks it.
+`validate --record`, `approve-config`, the recording step of `check` and `audit`, `recheck`'s
+recording of an approval, and every record write of §5.2.5 hold an exclusive `.kblam/lock` for
+their read-validate-write span, so concurrent puts cannot both validate against the same old
+tree, concurrent `new` calls cannot allocate the same ID, and concurrent writers of
+`.kblam/review.jsonl`, which kblam rewrites whole, cannot lose an update. Waiting is bounded
+(`lock_wait_seconds`; then exit 3). The lock file records the holder's pid, command and start
+time. While it holds the lock, the holder refreshes the lock file's modification time at least
+every `lock_stale_seconds`/3 (M6.10; as built, every quarter of it). A lock is broken, with a
+message, only when its holder's process is not running or its last refresh is older than
+`lock_stale_seconds`, which also covers a pid another process now uses, so a live holder is never
+broken however long it holds the lock. `.kblam/lock.break` ensures that only one waiter breaks it.
 
 **`upgrade`** (M6.10). `kblam upgrade` migrates what was recorded before fingerprint v2 (§5.1). It
 works under the lock, asks Jev nothing, and prints what it did, step by step; a second run finds
@@ -1659,7 +1735,9 @@ plugin: plugins can't ship rules, and each machine would still need an install s
   left alone:
   - `kblam.toml` from the §9 template, only if absent (never overwritten, even by `--update`);
   - `<kb root>/INDEX.md` from the findings present, only if the KB root has none;
-  - `<review root>/INDEX.md` from the records present, only if the review root has none (§5.2.5);
+  - `<review root>/INDEX.md` from the records present, only if the review root has none (§5.2.5),
+    and in the same step the record-ID registry from the records present, when there is none and
+    records are present (§5.2.6);
   - `.gitattributes`: the line `<kb root>/** -text` (from the configured root), appended if absent,
     because K7 and `tree.hash` are byte-exact and `core.autocrlf=true` would otherwise check files
     out with CRLF; and `kblam.resolutions.jsonl merge=union` (§6.4), so that two clones'
@@ -1678,7 +1756,8 @@ plugin: plugins can't ship rules, and each machine would still need an install s
     says so, and exits 1 after writing everything else;
   - `.kblam/config-approved`: a silent approval of the template when the config equals it (§8
     item 4), never of an edited config;
-  - `.kblam/tree.hash`: the format-2 migration and the record-ID registry (§5.2.6).
+  - `.kblam/tree.hash`: format 2, by §5.2.6 "Upgrade" (a missing one while review records are
+    present is `kept`, until the bootstrap with records is built, M6.11).
 
   With `--update`, the rule, the skill, the hook entries and a kblam pre-commit hook are rewritten
   to the installed version; otherwise an existing one of those files that differs from the
@@ -1719,7 +1798,7 @@ plugin: plugins can't ship rules, and each machine would still need an install s
   not JSON or not a mergeable hooks table (nothing written), `kblam` not on `PATH`, neither
   bash nor pwsh found, a hook that did not answer, or a write error. 2: not in a git
   repository, git missing, `--root` given, or an existing kblam.toml unreadable or invalid
-  (nothing written). 3: lock timeout from the index step.
+  (nothing written). 3: lock timeout.
 - *settings.json.* Read as UTF-8 (a BOM is accepted); a missing file is created with only the
   hooks. kblam's handlers are those whose command starts with `kblam hook`; they compare as a
   set of (event, matcher, handler). Merging removes kblam handlers from every group, drops a
@@ -1750,9 +1829,9 @@ plugin: plugins can't ship rules, and each machine would still need an install s
 
 ## 8. Enforcement points (Claude Code and git)
 
-Research agents write code and scratch files freely; nothing below touches paths outside `findings/`,
-the review root (§5.2), `.kblam/`, `kblam.toml`, `kblam.resolutions.jsonl` and `.git/kblam/` (§7, `kblam recheck`), except
-the pre-commit hook's evidence checks (item 4).
+Research agents write code and scratch files freely; nothing below touches paths outside
+`findings/`, the review root (§5.2), `.kblam/`, `kblam.toml`, `kblam.resolutions.jsonl` and
+`.git/kblam/` (§7, `kblam recheck`), except the pre-commit hook's evidence checks (item 4).
 
 **The review root** (`research-review/` by default) is guarded like `findings/` in items 1–4: a
 write under it is denied with "kblam: <what> under research-review/ denied. Review records are
@@ -1772,13 +1851,13 @@ obligation reports it, and `validate` and pre-commit fail on it.
 there could silence the Stop hook or close a review item, so items 1 and 2 treat a path under
 `.kblam/` like one under `findings/`, with two differences: `.kblam/staging/` is exempt (staged
 findings are the author's to edit), as is `.kblam/review-staging/` (not review-receipts), and
-removal is denied too (`rm`, `rmdir`, the PowerShell
-removal commands, and the *source* of `mv`/`Move-Item`), since deleting `review.jsonl` would close
-every item. The deny reason reads "kblam: <what> under .kblam/ denied. .kblam/ holds kblam's own
-state and only kblam writes it; stage findings under .kblam/staging/ (kblam new, kblam edit)." plus
-the skill pointer. A stale lock is broken by kblam itself (§7). The committed
-`kblam.resolutions.jsonl` (§6.4) is kblam's state too, and items 1 and 2 protect it the same way,
-with the reason that only `kblam resolve` writes it.
+removal is denied too (`rm`, `rmdir`, the PowerShell removal commands, and the *source* of
+`mv`/`Move-Item`), since deleting `review.jsonl` would close every item. The deny reason reads
+"kblam: <what> under .kblam/ denied. .kblam/ holds kblam's own state and only kblam writes it;
+stage findings under .kblam/staging/ (kblam new, kblam edit)." plus the skill pointer. A stale
+lock is broken by kblam itself (§7). The committed `kblam.resolutions.jsonl` (§6.4) is kblam's
+state too, and items 1 and 2 protect it the same way, with the reason that only `kblam resolve`
+writes it.
 `.git/kblam/`, where `kblam recheck` keeps what a person approved (§7), is protected as well: items
 1 and 2 deny writes and removals there, with the reason that only `kblam recheck` writes it, after
 showing each command to a person at a terminal.
@@ -1787,11 +1866,12 @@ showing each command to a person at a terminal.
 over ignored ones, so a commit holding files there would replace every clone's `tree.hash`, review
 items and cached answers with its own. While git tracks anything under `.kblam/` (the index lists
 it, so a staged file counts, and so does a link at `.kblam` itself), every kblam command,
-including `init` and the record commands, refuses with exit 1 (hooks use their JSON protocol), naming the files and the fix: `git rm -r --cached .kblam` and a commit,
-and, when the files came with a pull, deleting `.kblam/`, then `kblam validate --record` (which
-accepts the committed findings as on a new clone, item 3) and `kblam audit`. The pre-commit hook's
-`validate --commit` refuses such a commit the same way. The Stop hook trusts none of that state
-(item 3).
+including `init` and the record commands, refuses with exit 1 (hooks use their JSON protocol;
+`init` has written `kblam.toml`, when it was absent, before this check), naming the files and the
+fix: `git rm -r --cached .kblam` and a commit, and, when the files came with a pull, deleting
+`.kblam/`, then `kblam validate --record` (which accepts the committed findings as on a new clone,
+item 3) and `kblam audit`. The pre-commit hook's `validate --commit` refuses such a commit the
+same way. The Stop hook trusts none of that state (item 3).
 
 **As built.** `.kblam` itself counts (so `rm -rf .kblam` is denied), and so does `.kblam/staging`
 itself for the exemption. Bash removals: every operand of `rm` and `rmdir`, and the `mv` sources
@@ -1816,8 +1896,11 @@ them" (format 2, §5.2.6). Every write to either root compares that digest with 
 *before* its write, under the lock. When they match it records the new format-2 digest afterwards.
 With no `tree.hash`, an empty findings tree with no review record is kblam's; a populated tree
 bootstraps only when the full deterministic rules pass, including K13–K15. A clean bootstrap
-marks every finding as accepted from the repository (item 3), asks no Jev, and with review records
-creates the registry from those present. A failed bootstrap leaves the marker missing.
+marks every finding as accepted from the repository (item 3) and asks no Jev. With review records
+present, it also creates the registry from those present (not yet built, M6.11: today a write
+with no `tree.hash` while records are present does not bootstrap, and warns "kblam <command>: no
+.kblam/tree.hash, and the review root holds records; tree.hash not advanced. Run kblam validate
+--record once the tree validates."). A failed bootstrap leaves the marker missing.
 
 If the digests differ, something changed `findings/` or the review root outside kblam: the command
 still does its own write, but leaves `tree.hash` stale and warns, so Stop still validates that
@@ -1826,7 +1909,8 @@ validation. Only `kblam validate --record` accepts an existing out-of-band chang
 "kblam <command>: <findings root>/ or <review root>/ was changed outside kblam since kblam last
 wrote it; tree.hash not advanced. Run kblam validate --record once the change is validated."
 `<command>` is the label kblam passes to its write, including its arguments when the label has
-them (for example, `kblam ack F-0002 F-0001:` or `kblam put F-0001-slug.md:`).
+them (for example, `kblam ack F-0002 F-0001:` or `kblam put F-0001-slug.md:`; `rm`, `renumber`
+and `upgrade` pass theirs without arguments, `kblam rm:`).
 
 A format-1 marker never matches, and writes leave it in place with the old-format warning;
 `validate --record` and `init --update` migrate it (§5.2.6). `kblam upgrade` alone has a bridge:
@@ -1910,12 +1994,11 @@ exits 0; the decision travels only in the JSON on stdout (desk-hooks H4–H6).
    that writes files, a backslash path in Bash), and the Stop hook (item 3) catches what it misses.
 
 3. **Stop and SubagentStop:** hash `findings/` and the review root (format 2, §5.2.6); if the hash
-   equals `.kblam/tree.hash`, exit 0
-   silently, so while the tree is as kblam left it the hook costs one hash (a practitioner in the
-   comment thread of Karpathy's LLM-wiki gist removed a Stop hook because it fired on every
-   response, desk-llmwiki A6). With no `tree.hash`, no `findings/` and no review record there is
-   no knowledge base yet, and the hook is silent. If the hash differs, either root changed outside
-   kblam:
+   equals `.kblam/tree.hash`, exit 0 silently, so while the tree is as kblam left it the hook
+   costs one hash (a practitioner in the comment thread of Karpathy's LLM-wiki gist removed a
+   Stop hook because it fired on every response, desk-llmwiki A6). With no `tree.hash`, no
+   `findings/` and no review root folder there is no knowledge base yet, and the hook is silent.
+   If the hash differs, either root changed outside kblam:
    - It checks every finding not yet checked at its current fingerprint (as `validate --record`
      does, so what fires becomes review items), then runs `validate` and lists the open items.
    - A clean result is silent and leaves `tree.hash` stale: only `kblam validate --record` accepts
@@ -1923,25 +2006,28 @@ exits 0; the decision travels only in the JSON on stdout (desk-hooks H4–H6).
      nothing new to ask) and every write warns that `findings/` or the review root changed
      outside kblam, so the change stays visible until someone accepts it on purpose.
    - Otherwise it blocks, quoting at most 30 failure lines plus "... and N more; run kblam validate
-     for all of them". The reason names `findings/` and the review root as changed outside kblam and failing
-     `kblam validate`, lists the failures, says to fix each through kblam (`kblam edit`, change the
-     staged copy, `kblam put`, or the record workflow of §5.2.5) and never to write under either
-     root directly, that `kblam validate
-     --record` accepts the change once the tree is clean, and ends with the skill pointer.
+     for all of them". The reason says `findings/` was changed outside `kblam put` and fails
+     `kblam validate` (it names `findings/` also when the change was to the review root), lists
+     the failures, says to fix each through kblam (`kblam edit`, change the staged copy,
+     `kblam put`) and never to write under `findings/` directly, that `kblam validate --record`
+     accepts the change once the tree is clean, and ends with the skill pointer.
    - **Loop guard.** Each block writes the tree digest to `.kblam/stop-block`. A stop is let
      through, with a systemMessage note, only when the input's `stop_hook_active` is true (the
      agent is continuing because of a block) *and* the tree is unchanged since the last block. An
      agent that cannot fix the tree is released instead of looping; one that changed either root
      and still fails is blocked again; a later ordinary stop is blocked again.
-   - **A new clone.** A populated `findings/` or review root with no `tree.hash`, as in a fresh clone or after
-     `.kblam/` was deleted, counts as changed. Checking every finding with Jev there could not
-     finish within the hook's 300 s timeout for a KB of the pilot's size (at six workers, the 4,077
-     pairs of the pilot's migration would each need an answer in under 0.44 s), so the hook runs
-     only the full deterministic rules, including K13–K15, which the committing machines'
-     pre-commit hooks already ran, and blocks on their failures as above (M6.10, M6.11). A clean
-     bootstrap, including one with review records, creates the registry from the records present,
-     records format-2 `tree.hash` and marks every finding as accepted from the repository, without
-     Jev. `kblam validate --record` does the same for a missing marker. Later checks cover what
+   - **A new clone.** A populated `findings/` or review root with no `tree.hash`, as in a fresh
+     clone or after `.kblam/` was deleted, counts as changed. Checking every finding with Jev
+     there could not finish within the hook's 300 s timeout for a KB of the pilot's size (at six
+     workers, the 4,077 pairs of the pilot's migration would each need an answer in under
+     0.44 s), so the hook runs only the full deterministic rules, including K13–K15, which the
+     committing machines' pre-commit hooks already ran, and blocks on their failures as above
+     (M6.10, M6.11). The hook records nothing. `kblam validate --record` records the tree without
+     asking Jev and marks every finding as accepted from the repository, and so does the first
+     clean write, by the tree.hash rule's bootstrap (above). With review records present, both
+     also create the registry from the records present (not yet built, M6.11: today, with records
+     present, `validate --record` asks Jev about the findings not yet checked before it records
+     the tree and creates the registry, and a write does not bootstrap). Later checks cover what
      changes after the clone, and `kblam audit` checks the rest when someone wants it.
    - **Before `kblam upgrade`.** While `.kblam/` holds state recorded before fingerprint v2 (§7,
      "`upgrade`"), the hook notes that `kblam upgrade` must run first, with a systemMessage, and
@@ -1987,8 +2073,8 @@ exits 0; the decision travels only in the JSON on stdout (desk-hooks H4–H6).
    - It refuses a commit while any file under the KB root or the review root has unstaged
      changes or is untracked, so the findings and records it validates are the tree being committed.
    - The open-item condition applies only to a commit that changes a file under the KB root,
-     the review root or `kblam.resolutions.jsonl`; other commits are not blocked by open items. The K rules apply to
-     every commit.
+     the review root or `kblam.resolutions.jsonl`; other commits are not blocked by open items.
+     The K rules apply to every commit.
    - It refuses a commit that modifies or deletes a file under an `evidence_roots` or
      `history_dirs` folder that the last commit holds (adding files is allowed), because evidence
      is immutable (P3) and reported findings quote the retired documents (K11). A person who must
@@ -1997,7 +2083,8 @@ exits 0; the decision travels only in the JSON on stdout (desk-hooks H4–H6).
    - It warns about an `evidence` path or verbatim source that git does not track: that finding
      passes K2 and K10 here and fails them on every clone. Paths inside a nested Git repository
      under an evidence root are exempt: a directory with its own `.git` (a directory or a file)
-     is its own repository, not a file the outer repository should track.
+     is its own repository, not a file the outer repository should track (not yet built, M6.11:
+     today such a path is warned about like any other).
    - It refuses a commit whose `kblam.resolutions.jsonl` does not parse.
 
 5. **Librarian agent** (optional; proposed by the user 2026-09-23; see §8.1).
@@ -2332,9 +2419,10 @@ root, `.kblam/`, an `evidence_roots` or `history_dirs` folder, or a nested Git r
 `provenance` is non-empty and `primary_provenance` a subset of it. `root` is chosen at init and
 then fixed: the format-2 `tree.hash` stores it, and a `kblam.toml` that names another root is a
 K13 error that refuses every mutating command ("the review root changed from X to Y in kblam.toml;
-schema 1 fixes it at init"). Only while neither root holds a record and the registry is empty may `validate --record` or
-`init --update` record a new one (§5.2.6). Moving the root is deferred (§13). `kblam.toml` is
-committed, so it holds nothing machine-specific.
+schema 1 fixes it at init"; mutating as §5.2.6 defines it, so `rm`, `renumber` and `upgrade` do
+not refuse it). Only while neither root holds a record and the registry is empty may
+`validate --record` or `init --update` record a new one (§5.2.6). Moving the root is deferred
+(§13).
 
 **Why the check's settings sit in `[jev]`.** `[jev]` configures the whole §6 check, not only the
 calls to Jev: candidate selection (`max_candidates`, the bonuses and the embedding settings, §6.1)
@@ -2540,7 +2628,6 @@ items are recorded only since commit `af316b5`), this document has no counts yet
    enforces from CLAUDE.md and from the research-desk definition (its answers-file INDEX-with-line-
    numbers scheme is failure mode 3). Narrow CLAUDE.md's manifest requirements to observations
    (Appendix C).
-
 6. **Source challenges and claim tasks (§5.2), additive.** `kblam init --update` creates the
    review root's `INDEX.md` if it is missing (from the records present; it never replaces a
    populated one), adds `<review root>/** -text` to `.gitattributes`, updates the rule, the skill
@@ -2677,7 +2764,7 @@ sections above, it points there.
   reconciled with M6.10 on 2026-10-04). *Status: built (2026-09-28 .. 2026-10-04); reconciled
   with M6.10 on 2026-10-05. Not yet built: rm/renumber refusals for linked findings, record IDs
   above git history, new-clone bootstrap with records, and the nested-repository exemption from
-  the untracked-evidence warning (R3, user decisions D60, 2026-10-05).*
+  the untracked-evidence warning (user, 2026-10-05).*
   - `[review]` config (§9); record schemas and parsing (the §5.2.2–5.2.3 field tables); `KBView`
     with the review records. `Issue` gains a `level` (error or warning) and an `owner` (the
     finding or record ID it concerns, separate from its display path). Errors and warnings are
@@ -2746,12 +2833,13 @@ sections above, it points there.
        each ID); after a fresh clone, the registry created from the records present.
     9. *Root and upgrade* (A7): a root edited in kblam.toml with a format-2 `tree.hash` (K13,
        and every mutation refused), and with a format-1 or no `tree.hash`, which records no root
-       (the registry's IDs missing from the new root, as K13 errors); a root change while no record exists
-       (accepted by `validate --record`); `init` in a fresh repository (both indexes);
-       `init --update` repeated (idempotent; a populated review index never replaced); the
-       format-1 migration only when the findings tree matches and validation is clean (else
-       `kept`, exit status unchanged); a missing `tree.hash` with records present (full deterministic
-       validation clean: bootstrapped, registry created, no Jev; dirty: not bootstrapped); `R-`/`U-` items, Jev caches and finding text unchanged by the upgrade.
+       (the registry's IDs missing from the new root, as K13 errors); a root change while no
+       record exists (accepted by `validate --record`); `init` in a fresh repository (both
+       indexes); `init --update` repeated (idempotent; a populated review index never replaced);
+       the format-1 migration only when the findings tree matches and validation is clean (else
+       `kept`, exit status unchanged); a missing `tree.hash` with records present (not yet built,
+       M6.11: full deterministic validation clean: bootstrapped, registry created, no Jev; dirty:
+       not bootstrapped); `R-`/`U-` items, Jev caches and finding text unchanged by the upgrade.
     10. *Concurrency and recovery* (A6): two processes putting records at once (lock and edit
         base); a record changed between `show` and `decide`, `rebind` or `pin` (refused by
         `--expect`); a failure injected after each file of a multi-file write (records, index,
@@ -2847,23 +2935,25 @@ Settled questions move to Appendix A with their answers.
   - Stop validating review obligations after kblam's own writes and on source changes outside
     both roots (§5.2.4). Stop keeps its out-of-band-only semantics; `validate` and pre-commit
     catch these.
-
 - **Deferred (user, 2026-09-24):** the MCP server (M7). Idea recorded for then:
   rejection tickets. A rejected `put` returns `needs_rewrite` with a ticket stored under `.kblam/`,
   and the Stop/SubagentStop hook blocks the agent from finishing while it holds an open ticket.
   This works the same for the CLI and MCP. A ticket would be keyed on the hook input's `agent_id`
   (§8.1, desk-hooks H15). SubagentStop also fires for Claude Code's internal agents, with an empty
   or session-level `agent_type`, so a ticket check must ignore those.
-
 - **Adjudicator gate for record decisions (§5.2.5), open (user, 2026-10-05).** Record commands
   are not gated now; whether `review decide`, `review rebind` or `challenge pin` should be
   restricted like `resolve` and `rm` is deferred.
-- **Record-ID collisions between clones (§5.2.5), open.** Allocation considers all local refs,
-  but two clones allocating before exchanging commits may still collide. Git reports the add/add
-  conflict; records are never renamed, so its resolution needs a decision.
-- **Same-ID findings that cannot be renumbered (§7), open.** When both are linked by review
-  records, or the selected file is linked and the other fails renumber's preconditions, neither
-  can be renumbered without breaking a link. Records are never rewritten to follow a finding.
+- **Record-ID collisions between clones (§5.2.5), open.** Allocation will consider all local refs
+  (not yet built, M6.11), but two clones allocating before exchanging commits may still collide.
+  Git reports the add/add conflict; records are never renamed, so its resolution needs a decision.
+- **Same-ID findings that cannot be renumbered (§7), open.** When every file with the ID is
+  linked by review records, or the selected file is linked and no other file can be renumbered,
+  `kblam renumber` settles nothing, and K1 fails `validate` and every commit until a person
+  decides. Records are never rewritten to follow a finding.
+- **Two linked findings that restate each other (§7), open.** When `kblam rm` refuses a linked
+  finding whose target a record also links, neither can be removed: the restatement, and the open
+  items it raised, stay until a person decides.
 
 ## Appendix A. Decision log
 
@@ -2992,19 +3082,22 @@ every finding; M6.10 lists what they change in the code).
 - **Keep the upgrade bridge narrow.** Only `upgrade` can treat a matching format-1 marker as clean,
   with no review records and an absent or empty, readable, well-shaped registry (§8).
 
-**2026-10-05**
-- **Linked findings keep their identity (user, D60).** `rm` and `renumber` refuse a linked finding
-  in any record status; records are never rewritten to follow a finding. When both same-ID
-  findings are linked, or the unlinked peer cannot be renumbered, the resolution remains open
-  (§7, §13). Refusal messages name only a command that succeeds in that state (D49).
-- **Allocate record IDs above history (user, D60).** Consider every local ref of the review root,
-  as for finding IDs. Between-clone collisions remain open because records never rename (§5.2.5).
-- **Bootstrap clones with records (user, D60).** A full clean deterministic validation including
+**2026-10-05** (decided by the user; not yet built, M6.11)
+- **Linked findings keep their identity (user).** `rm` and `renumber` refuse a linked finding in
+  any record status; records are never rewritten to follow a finding. A refused `rm` says to merge
+  the other way (make the linked finding also state what the target states that it does not yet,
+  then remove the target), unless a record also links the target; then both stay for a person to
+  decide. When every same-ID file is linked, or no unlinked peer can be renumbered, the
+  resolution remains open (§7, §13). The messages cite no SPEC section, and every command a
+  message names must succeed in the state it describes.
+- **Allocate record IDs above history (user).** Consider every local ref of the review root, as for
+  finding IDs. Between-clone collisions remain open because records never rename (§5.2.5).
+- **Bootstrap clones with records (user).** A full clean deterministic validation including
   K13–K15 creates the registry and format-2 tree.hash without Jev (§5.2.6, §8).
-- **Do not gate record commands yet (user, D60).** Independence checks remain; an adjudicator gate
-  for record decisions is open (§13).
-- **Nested evidence repositories are not outer untracked evidence (user, D60).** Pre-commit
-  exempts their paths under an evidence root from that warning (§8 item 4).
+- **Do not gate record commands yet (user).** Independence checks remain; an adjudicator gate for
+  record decisions is open (§13).
+- **Nested evidence repositories are not outer untracked evidence (user).** Pre-commit exempts
+  their paths under an evidence root from that warning (§8 item 4).
 
 ## Appendix B. Evidence and measurements
 
