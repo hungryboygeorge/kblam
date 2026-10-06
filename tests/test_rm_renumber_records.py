@@ -330,7 +330,7 @@ def damage_id_line(kb) -> str:
 
 def damage_no_id(kb) -> str:
     kb.write(THEIRS, finding_text("F-0012", CLAIM_B, topic="motor").replace("id: F-0012\n", ""))
-    return f"{THEIRS} has no id key, so kblam cannot rewrite it"
+    return f"{THEIRS} has no id key, so kblam cannot rewrite it; ask a person to add its id line (id: F-0012)"
 
 
 def damage_resolutions(kb) -> str:
@@ -363,6 +363,30 @@ def test_renumber_says_why_the_unlinked_file_cannot_be_renumbered_yet(kb, at_roo
     assert (kb.findings / "motor" / "F-0013-motor.md").is_file()
 
 
+def test_renumber_says_when_a_dependent_of_the_unlinked_file_cannot_be_rekeyed(kb, at_root):
+    """Case C, fifth reason: a depends_on entry meaning the other file that kblam cannot re-key without
+    changing anything else (its value on a line of its own); once a person rewrites the entry, the command the message names succeeds."""
+    same_id(kb)
+    ct(kb, "CT-0003", MINE)
+    theirs_fp = binding(kb, THEIRS)[0]
+    dependent = "findings/pump/F-0030-pump.md"
+    kb.add("F-0030", "pump", CLAIM_C, topic="pump", extra=f"depends_on:\n  F-0012:\n    '{theirs_fp}'\n")
+    renamed = "findings/motor/F-0031-motor.md"
+    text = finding_text("F-0012", CLAIM_B, topic="motor").replace("id: F-0012", "id: F-0031")
+    new_fp = fingerprint(parse_finding(renamed, text.encode()), "/")
+    m.accept_tree(kb)
+    assert refused(kb, "renumber", kb.root / MINE) == message("renumber", (
+        f"{MINE} holds F-0012, which review record CT-0003 links, so it keeps its ID; the other finding with "
+        f"that ID, {THEIRS}, cannot be renumbered yet: {dependent}: could not change depends_on F-0012 to "
+        f"F-0031 without changing anything else; change that entry by hand to F-0031: {new_fp}. Ask a person "
+        f"to fix that, then run kblam renumber {THEIRS}."))
+
+    kb.add("F-0030", "pump", CLAIM_C, topic="pump", extra=f"depends_on:\n  F-0012: '{theirs_fp}'\n")
+    m.accept_tree(kb)
+    m.ok(m.kblam(kb, "renumber", THEIRS), "renumber")
+    assert f"F-0031: {new_fp}".encode() in (kb.root / dependent).read_bytes()
+
+
 def test_renumber_with_three_files_names_each_unlinked_file_and_its_reason(kb):
     same_id(kb, third=True)
     ct(kb, "CT-0003", MINE)
@@ -372,24 +396,32 @@ def test_renumber_with_three_files_names_each_unlinked_file_and_its_reason(kb):
     assert refused(kb, "renumber", kb.root / MINE) == message("renumber", (
         f"{MINE} holds F-0012, which review record CT-0003 links, so it keeps its ID; the other findings with "
         f"that ID that no review record links cannot be renumbered yet: {THEIRS}: {unreadable}; {THIRD}: "
-        f"{THIRD} has no id key, so kblam cannot rewrite it. Ask a person to fix that, then run kblam renumber "
+        f"{THIRD} has no id key, so kblam cannot rewrite it; ask a person to add its id line (id: F-0012). Ask a "
+        f"person to fix that, then run kblam renumber "
         f"{THEIRS}; kblam renumber {THIRD}."))
 
 
-@pytest.mark.parametrize("linked", [False, True])
-def test_the_selected_files_own_refusal_offers_the_other_file_only_when_it_can_be_renumbered(kb, at_root, linked):
+def peer_state(kb, peer: str) -> None:
+    """The other file: renumberable, linked by a record, or unlinked but failing renumber's dry run."""
+    if peer == "linked":
+        ct(kb, "CT-0003", THEIRS)
+    elif peer == "broken":
+        damage_no_id(kb)
+    m.accept_tree(kb)
+
+
+@pytest.mark.parametrize("peer", ["ready", "linked", "broken"])
+def test_the_selected_files_own_refusal_offers_the_other_file_only_when_it_can_be_renumbered(kb, at_root, peer):
     same_id(kb)
     kb.write(MINE, UNREADABLE)
-    if linked:
-        ct(kb, "CT-0003", THEIRS)
-    m.accept_tree(kb)
+    peer_state(kb, peer)
     line, problem = parse_finding(MINE, UNREADABLE.encode()).parse_errors[0]
-    advice = "ask a person to fix this file" if linked else f"renumber {THEIRS} instead, or ask a person to fix this file"
+    offer = f"renumber {THEIRS} instead (kblam renumber {THEIRS}), or " if peer == "ready" else ""
     assert refused(kb, "renumber", kb.root / MINE) == message("renumber", (
         f"{MINE} cannot be read as a finding (" + (f"line {line}: " if line else "") + f"{problem}), so kblam "
-        f"cannot rewrite its id; {advice}."))
-    if not linked:
-        m.ok(m.kblam(kb, "renumber", THEIRS), "renumber")
+        f"cannot rewrite its id; {offer}ask a person to fix this file."))
+    if peer == "ready":
+        m.ok(m.kblam(kb, "renumber", THEIRS), "renumber")      # the offered command, as printed
 
 
 # --- renumber: the records a re-keyed dependent makes stale --------------------------------------
@@ -467,18 +499,20 @@ def test_challenge_new_allocates_above_a_removed_record(kb, source_repo):
     assert m.stage_challenge(kb, source_repo, "3-3", by="reviewer-a").id == "SC-0003"
 
 
-@pytest.mark.parametrize("linked", [False, True])
-@pytest.mark.parametrize("damage, refusal, offer", [
-    ("id: !!str F-0012", f"{MINE}: could not set id to F-0013 without changing anything else; {{}}ask a person to "
-                         f"fix this file's id line", "renumber the other file with that ID instead, or "),
-    ("", f"{MINE} has no id key, so kblam cannot rewrite it{{}}", "; renumber the other file with its ID instead"),
+@pytest.mark.parametrize("peer", ["ready", "linked", "broken"])
+@pytest.mark.parametrize("damage, refusal, offer, advice", [
+    ("id: !!str F-0012", f"{MINE}: could not set id to F-0013 without changing anything else; {{}}",
+     f"renumber {THEIRS} instead (kblam renumber {THEIRS}), or ask a person to fix this file's id line",
+     "ask a person to fix this file's id line"),
+    ("", f"{MINE} has no id key, so kblam cannot rewrite it; {{}}",
+     f"renumber {THEIRS} instead (kblam renumber {THEIRS})", "ask a person to add its id line (id: F-0012)"),
 ])
 def test_the_selected_files_id_line_refusals_offer_the_other_file_only_when_it_can_be_renumbered(
-        kb, damage, refusal, offer, linked):
+        kb, at_root, damage, refusal, offer, advice, peer):
     same_id(kb)
     kb.write(MINE, finding_text("F-0012", CLAIM_A).replace("id: F-0012\n", f"{damage}\n" if damage else ""))
-    if linked:
-        ct(kb, "CT-0003", THEIRS)
-    m.accept_tree(kb)
+    peer_state(kb, peer)
     assert refused(kb, "renumber", kb.root / MINE) == message(
-        "renumber", refusal.format("" if linked else offer) + ".")
+        "renumber", refusal.format(offer if peer == "ready" else advice) + ".")
+    if peer == "ready":
+        m.ok(m.kblam(kb, "renumber", THEIRS), "renumber")      # the offered command, as printed

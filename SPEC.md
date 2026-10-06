@@ -1556,8 +1556,8 @@ examples `<path>` holds F-0012 and is linked; `<other path>` is the other file w
   `kblam renumber:` prefix and without its "renumber <the other file> instead" alternative, which
   would point at the linked file; any "ask a person to fix" advice it carries stays. The reasons
   are an unreadable finding, an `id` line kblam cannot rewrite without changing anything else, no
-  `id` key, and a damaged `kblam.resolutions.jsonl`; a person can fix each, after which
-  `kblam renumber <other path>` succeeds.
+  `id` key, a damaged `kblam.resolutions.jsonl`, or a `depends_on` entry in another finding that
+  kblam cannot re-key; a person can fix each, after which `kblam renumber <other path>` succeeds.
 
 With three or more files sharing the ID (renumber handles any number), the first case applies when
 at least one other file can be renumbered; it names each such file, "Renumber the other findings
@@ -1568,10 +1568,12 @@ third applies when no other file can be renumbered and at least one is unlinked;
 unlinked file with its reason, "the other findings with that ID that no review record links cannot
 be renumbered yet: <path 2>: <reason 2>; <path 3>: <reason 3>", and ends "then run kblam renumber
 <path 2>; kblam renumber <path 3>". Renumber's existing refusals of the selected file itself (an
-unreadable finding, an `id` line it cannot rewrite, no `id` key) offer "renumber <the other file>
-instead" only when that file can be renumbered by the first case's test; otherwise they keep only
-their ask-a-person advice. Two findings that review records keep from being renumbered are an open
-question (§13), not permission to change records or remove a finding.
+unreadable finding, an `id` line it cannot rewrite, no `id` key) offer "renumber <other path>
+instead (kblam renumber <other path>)", naming a file that the first case's test passes, only when
+there is one; otherwise they keep only their ask-a-person advice (the no-`id`-key refusal, which
+had none, says to ask a person to add the id line: "ask a person to add its id line (id:
+F-0012)"). Two findings that review records keep from being renumbered are an open question (§13),
+not permission to change records or remove a finding.
 
 A renumber that goes ahead also rewrites each other finding whose `depends_on` entry it re-keys,
 and that changes the finding's bytes: a CT or CU whose binding matched the finding before is stale
@@ -2274,6 +2276,9 @@ a skill would miss the moments it is for; writing guidance loaded into every rea
     - the merge rule: a real `same_fact` or `restates_and_extends` restatement is merged into the
       existing finding, and a finding the merge leaves with nothing to state is removed with
       `kblam rm`;
+    - that `kblam rm` and `kblam renumber` refuse a finding a review record links, since records
+      never follow a finding: the author does what the refusal says (merge the other way, renumber
+      the other file), and when it says to tell the user, stops and tells them (§7);
     - `resolve --distinct` is only for an item Jev misread: two findings that state distinct facts,
       or, for `revision`, a direct statement read as a correction. The reason names what differs,
       for a later reader. A `quantity_conflict` is never resolved;

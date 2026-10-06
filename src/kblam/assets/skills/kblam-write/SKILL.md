@@ -282,6 +282,9 @@ write raised, with a written reason. An author sends the item IDs to the librari
   merge leaves with nothing of its own to state is removed with
   `kblam rm F-NNNN --merged-into F-MMMM` (the finding that now states it); deleting a finding file
   any other way is denied.
+- `kblam rm` and `kblam renumber` refuse a finding that a review record links (records never
+  follow a finding): do what the refusal says (merge the other way, renumber the other file), and
+  when it says to tell the user, stop and tell them.
 - `kblam resolve R-XXXXXXXX --distinct "<reason>"` only when Jev misread the item: two findings
   that state distinct facts, or, for a `revision` item, a finding that states a fact directly
   rather than correcting an earlier claim. The reason names what differs (component, operation,

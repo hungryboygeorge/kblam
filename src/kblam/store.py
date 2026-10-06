@@ -922,16 +922,24 @@ def _set_id(finding: Finding, new_id: str, shown: str, other) -> bytes:
     try:
         position = finding.meta.lc.key("id")
     except (AttributeError, KeyError):
-        raise StoreError(f"{shown} has no id key, so kblam cannot rewrite it"
-                         + ("; renumber the other file with its ID instead" if other() else "")) from None
+        alternative = other()
+        raise StoreError(f"{shown} has no id key, so kblam cannot rewrite it; "
+                         + (_instead(alternative) if alternative
+                            else f"ask a person to add its id line (id: {finding.file_id})")) from None
     data = _rewrite_entry(finding, position, new_id)
     expected = plain_data(finding.meta)
     expected["id"] = new_id
     if data is None or not _changes_only(finding, data, expected):
+        alternative = other()
         raise StoreError(f"{shown}: could not set id to {new_id} without changing anything else; "
-                         + ("renumber the other file with that ID instead, or " if other() else "")
+                         + (f"{_instead(alternative)}, or " if alternative else "")
                          + "ask a person to fix this file's id line")
     return data
+
+
+def _instead(path: str) -> str:
+    """A renumber refusal's alternative: the other file with the ID that kblam can renumber (SPEC §7)."""
+    return f"renumber {path} instead (kblam renumber {path})"
 
 
 def _names(text: str, finding_id: str) -> bool:
@@ -972,13 +980,14 @@ def _renumber(cfg: Config, source: Path) -> RenumberResult:
                          f"an ID never changes, and kblam renumber only settles an ID two findings share (K1)")
     links = _links(view, old_id)
     new_id = allocate_id(cfg)
-    peers: list[tuple[Finding, str | None]] = []
+    peers: list[tuple[Finding, str | None]] | None = None  # None until a message needs them
 
     def unlinked_peers() -> list[tuple[Finding, str | None]]:
         """Each other file with the ID that no review record links, with the reason kblam cannot renumber
         it (None when it can: the first case's test, SPEC §7). Worked out once, when a message needs it."""
-        if not peers:
-            peers.extend((k, _renumber_problem(cfg, view, k, new_id)) for k in kept if not links[k.path])
+        nonlocal peers
+        if peers is None:
+            peers = [(k, _renumber_problem(cfg, view, k, new_id)) for k in kept if not links[k.path]]
         return peers
 
     def other() -> str | None:
@@ -1032,7 +1041,7 @@ def _renumber_plan(cfg: Config, view: KBView, finding: Finding, kept: list[Findi
         alternative = other()
         raise StoreError(f"{finding.path} cannot be read as a finding (" + (f"line {line}: " if line else "")
                          + f"{message}), so kblam cannot rewrite its id; "
-                         + (f"renumber {alternative} instead, or " if alternative else "")
+                         + (f"{_instead(alternative)}, or " if alternative else "")
                          + "ask a person to fix this file")
     new_path = f"{PurePosixPath(finding.path).parent.as_posix()}/{new_id}-{finding.slug}.md"
     data = _set_id(finding, new_id, finding.path, other)
