@@ -242,14 +242,15 @@ def task_stale(kb, source_repo) -> str:
 def test_validate_record_records_nothing_on_a_clone_that_fails(jkb, source_repo, no_jev_check, dirty,
                                                                 pending):
     """No tree.hash and no registry: a failed validate --record writes nothing. A stale task (K15) is
-    not listed as pending."""
+    not listed as pending. The count names where the error is: a record's (K13, K15) or a finding's (K14)."""
     error = dirty(jkb, source_repo)
     clone(jkb)
+    root = "findings" if dirty is use_missing else REVIEW
 
     run = m.validate(jkb, "--record")
 
     assert run == m.Run(1, f"{error}\n" + (f"{PENDING}\n" if pending else "") +
-                        "kblam validate: 1 error(s) in findings/; tree.hash not recorded\n", "")
+                        f"kblam validate: 1 error(s) in {root}/; tree.hash not recorded\n", "")
     assert unbootstrapped(jkb)
     assert m.registry(jkb) is None
     assert jkb.fake.requests == []
@@ -287,7 +288,7 @@ def test_a_put_on_a_clone_that_fails_says_what_to_do_and_doing_it_bootstraps(jkb
                            f"kblam validate still fails (1 error(s) listed above that this put did not "
                            f"refuse)\n", f"kblam put F-0003-tray.md: {MISSING}\n")
     assert unbootstrapped(jkb)
-    assert m.validate(jkb) == m.Run(1, f"{error}\nkblam validate: 1 error(s) in findings/\n", "")
+    assert m.validate(jkb) == m.Run(1, f"{error}\nkblam validate: 1 error(s) in {REVIEW}/\n", "")
 
     rebound = m.rebind(jkb, "CT-0001", by="reviewer-b")
 

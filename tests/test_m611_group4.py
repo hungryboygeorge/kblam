@@ -505,7 +505,7 @@ def test_a_finding_put_with_an_open_task_lists_the_task_it_makes_stale(kb, sourc
 
     validate(kb, source_repo, code=1, out=text(
         k15_binding_line(kb, SENSOR_PATH, bound),
-        "kblam validate: 1 error(s) in findings/"))
+        "kblam validate: 1 error(s) in research-review/"))
 
 
 def test_a_finding_put_with_an_already_stale_task_is_accepted(kb, source_repo):
@@ -515,13 +515,13 @@ def test_a_finding_put_with_an_already_stale_task_is_accepted(kb, source_repo):
     was already broken is not listed again as newly stale. Diagnostics: the put line, the K15 error it
     did not refuse, and "done, but kblam validate still fails (1 error(s)…)". Files changed: the
     finding, tree.hash, the staged file and the edit-base receipt removed, and kblam's own caches.
-    validate afterwards: exit 1, 1 error in findings/. Acceptance 4."""
+    validate afterwards: exit 1, 1 error in research-review/. Acceptance 4."""
     finding_with_a_task(kb, source_repo)
     bound = sha_of(kb, SENSOR_PATH)
     kb.add("F-0001", "sensor", m.CLAIM, body="A first detail.")
     validate(kb, source_repo, code=1, out=text(
         k15_binding_line(kb, SENSOR_PATH, bound),
-        "kblam validate: 1 error(s) in findings/"))
+        "kblam validate: 1 error(s) in research-review/"))
     staged = edit_finding(kb, source_repo, "F-0001", "sensor")
     staged.write_bytes(edited(reading(kb, SENSOR_PATH), "A second one.").encode("utf-8"))
 
@@ -539,7 +539,7 @@ def test_a_finding_put_with_an_already_stale_task_is_accepted(kb, source_repo):
 
     validate(kb, source_repo, code=1, out=text(
         k15_binding_line(kb, SENSOR_PATH, bound),
-        "kblam validate: 1 error(s) in findings/"))
+        "kblam validate: 1 error(s) in research-review/"))
 
 
 def test_a_finding_put_with_a_retired_task_is_accepted_and_raises_nothing(kb, source_repo):

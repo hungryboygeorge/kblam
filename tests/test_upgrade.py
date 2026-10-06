@@ -167,8 +167,23 @@ def test_upgrade_bridges_a_matching_format_1_marker_without_records(kb, capsys, 
     assert found(kb, "F-0002").meta["depends_on"]["F-0001"] == v2_of(kb, "F-0001")
 
 
+CHANGED = ("kblam upgrade: left .kblam/tree.hash as it was: findings/ had changed outside kblam, and kblam "
+           "validate --record accepts that once the tree is clean")
+NEXT = "Run kblam validate, fix anything it lists, then run kblam validate --record"
+OLD_FORMAT = ("kblam upgrade: left .kblam/tree.hash as it was: it is in the old format, which cannot vouch for "
+              "review records, and ")
+KEPT = {"mismatch": CHANGED,
+        "records": f"{OLD_FORMAT}research-review/ holds some. {NEXT}",
+        "registry": f"{OLD_FORMAT}.kblam/review-ids lists some. {NEXT}",
+        "malformed-registry": f"{OLD_FORMAT}.kblam/review-ids cannot be read as a list of record IDs. {NEXT}",
+        "wrong-shape-registry": f"{OLD_FORMAT}.kblam/review-ids cannot be read as a list of record IDs. {NEXT}"}
+
+
 @pytest.mark.parametrize("reason", ["mismatch", "records", "registry", "malformed-registry", "wrong-shape-registry"])
 def test_upgrade_keeps_format_1_marker_when_the_bridge_cannot_vouch_for_the_tree(kb, capsys, reason):
+    """The line says why the marker stays, and what to do next. D49: doing what it says (and, where
+    validate lists an error, what that error's line says) records tree.hash. A registry that lists an ID
+    no record holds says to restore the record from git, which this test has none of to restore."""
     kb.add("F-0001", "sensor", CLAIM_A)
     kb.add("F-0002", "motor", CLAIM_B, topic="motor",
            extra=f"depends_on:\n  F-0001: {v1_of(kb, 'F-0001')}\n")
@@ -188,20 +203,42 @@ def test_upgrade_keeps_format_1_marker_when_the_bridge_cannot_vouch_for_the_tree
     assert run(kb, "upgrade") == 0
 
     captured = capsys.readouterr()
-    assert "left .kblam/tree.hash as it was" in captured.out
+    assert KEPT[reason] in captured.out.splitlines()
     assert ".kblam/tree.hash is in the old format; tree.hash not advanced" in captured.err
     assert marker.read_bytes() == before
     assert found(kb, "F-0002").meta["depends_on"]["F-0001"] == v2_of(kb, "F-0001")
 
+    if reason == "registry":
+        return
+    listed = m.validate(kb)
+    if reason == "records":
+        assert listed.code == 1 and listed.out.splitlines()[0] == (
+            "K13 research-review/INDEX.md: INDEX.md is missing; run kblam review index")
+        assert m.kblam(kb, "review", "index").code == 0
+    elif reason != "mismatch":
+        assert listed.code == 1 and listed.out.startswith(
+            "K13 .kblam/review-ids: .kblam/review-ids ")
+        assert listed.out.splitlines()[0].endswith(
+            "kblam writes it, so restore it from a backup, or delete it and run kblam validate --record")
+        (kb.root / ".kblam/review-ids").unlink()
+    else:
+        assert listed.code == 0
+    assert m.validate(kb, "--record").code == 0
+    assert read_recorded(kb.cfg) == (2, kb.cfg.review_dir, tree_digest_v2(load_view(kb.cfg)))
 
-def test_upgrade_leaves_tree_hash_stale_after_a_change_outside_kblam(kb, capsys):
+
+@pytest.mark.parametrize("changed", ["findings/motor/notes.txt", "research-review/notes.txt"])
+def test_upgrade_leaves_tree_hash_stale_after_a_change_outside_kblam(kb, capsys, changed):
+    """Format 2 covers both roots: once the review root exists, the line names both."""
     kb.add("F-0001", "sensor", CLAIM_A)
     kb.add("F-0002", "motor", CLAIM_B, topic="motor", extra=f"depends_on:\n  F-0001: {v1_of(kb, 'F-0001')}\n")
     recorded = read_recorded(kb.cfg)
-    kb.write("findings/motor/notes.txt", "written by hand\n")  # findings/ changed outside kblam
+    kb.write(changed, "written by hand\n")  # findings/ or the review root changed outside kblam
     capsys.readouterr()
     assert run(kb, "upgrade") == 0
-    assert "left .kblam/tree.hash as it was" in capsys.readouterr().out
+    roots = "findings/" if changed.startswith("findings/") else "findings/ or research-review/"
+    assert (f"kblam upgrade: left .kblam/tree.hash as it was: {roots} had changed outside kblam, and kblam "
+            f"validate --record accepts that once the tree is clean") in capsys.readouterr().out.splitlines()
     assert read_recorded(kb.cfg) == recorded
 
 
@@ -225,13 +262,34 @@ def test_upgrade_on_a_clone_with_records_records_nothing_and_says_what_to_do(kb,
     assert upgraded == m.Run(0, (
         f"kblam upgrade: re-stamped 1 depends_on value(s) in findings/ with v2 fingerprints:\n"
         f"  findings/motor/F-0002-motor.md: F-0001 {current} -> {v2_of(kb, 'F-0001')}\n"
-        f"kblam upgrade: left .kblam/tree.hash as it was: findings/ had changed outside kblam, and kblam "
-        f"validate --record accepts that once the tree is clean\n"
+        f"kblam upgrade: recorded no .kblam/tree.hash: there is none (a new clone, or .kblam/ was deleted), and "
+        f"kblam upgrade does not record one while research-review/ holds review records. {NEXT}\n"
         f"kblam upgrade: commit the re-stamped findings, so every clone has them; each other machine runs kblam "
         f"upgrade once for its own .kblam/\n"), unrecorded("upgrade"))
     assert unbootstrapped(kb) and m.registry(kb) is None
     bootstraps_as_named(kb, f"CT-0001 open replication of F-0001: {QUESTION}", 2)
     assert m.registry(kb) == ["CT-0001"]
+
+
+def test_upgrade_on_a_clone_without_records_records_nothing_and_says_what_to_do(kb, no_jev_check):
+    """The old stamp fails K1 before the upgrade, so the bootstrap's validation fails and nothing is
+    recorded; the upgrade fixes the stamp. D49: kblam validate passes, and kblam validate --record
+    bootstraps."""
+    kb.add("F-0001", "sensor", CLAIM_A)
+    current = v1_of(kb, "F-0001")
+    kb.add("F-0002", "motor", CLAIM_B, topic="motor", extra=f"depends_on:\n  F-0001: {current}\n")
+    shutil.rmtree(kb.root / ".kblam")                       # a clone: no tree.hash or Jev state
+    assert m.validate(kb).code == 1
+
+    upgraded = m.kblam(kb, "upgrade")
+
+    assert upgraded.code == 0
+    assert (f"kblam upgrade: recorded no .kblam/tree.hash: there is none (a new clone, or .kblam/ was deleted), "
+            f"and the tree as it was before this upgrade failed kblam validate. {NEXT}") in upgraded.out.splitlines()
+    assert unbootstrapped(kb)
+    assert m.validate(kb) == m.Run(0, "kblam validate: OK (2 findings)\n", "")
+    assert m.validate(kb, "--record").code == 0
+    assert read_recorded(kb.cfg) == (2, kb.cfg.review_dir, tree_digest_v2(load_view(kb.cfg)))
 
 
 def test_upgrade_restamps_a_staged_copy_and_its_edit_still_puts(kb, capsys):

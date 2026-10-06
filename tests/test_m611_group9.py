@@ -74,9 +74,10 @@ def call(kb, source_repo, argv, *, changed=(), code=0, out="", err=""):
     return run
 
 
-def validate(kb, source_repo, *, code=0, diagnostics="", findings=0):
+def validate(kb, source_repo, *, code=0, diagnostics="", findings=0, root="findings"):
+    """`code` errors, all in `root` (a finding's, unless a record's root is named)."""
     summary = (f"kblam validate: OK ({findings} findings)\n" if code == 0 else
-               f"kblam validate: {code} error(s) in findings/\n")
+               f"kblam validate: {code} error(s) in {root}/\n")
     call(kb, source_repo, ["validate"], code=int(code != 0), out=diagnostics + summary)
 
 
@@ -224,7 +225,8 @@ def test_format_2_root_change_refuses_every_mutation(kb, source_repo, monkeypatc
                  if name in {"record", "forget-missing"} else set())
     call(kb, source_repo, argv, changed=permitted, code=1, out=expected_out,
          err=f"kblam {command}: {ROOT_MESSAGE}{pointer}\n")
-    validate(kb, source_repo, code=2, diagnostics=f"K13 kblam.toml: {ROOT_MESSAGE}\n" + MISSING_MESSAGE)
+    validate(kb, source_repo, code=2, diagnostics=f"K13 kblam.toml: {ROOT_MESSAGE}\n" + MISSING_MESSAGE,
+             root="research-notes")
 
 
 @pytest.mark.parametrize("hash_format", ["format-1", "missing"])
@@ -245,8 +247,8 @@ def test_legacy_or_missing_hash_reports_ids_missing_from_changed_root(kb, source
     else:
         (kb.root / TREE_HASH).unlink()
     set_root(kb)
-    validate(kb, source_repo, code=1, diagnostics=MISSING_MESSAGE)
-    validate(kb, source_repo, code=1, diagnostics=MISSING_MESSAGE)
+    validate(kb, source_repo, code=1, diagnostics=MISSING_MESSAGE, root="research-notes")
+    validate(kb, source_repo, code=1, diagnostics=MISSING_MESSAGE, root="research-notes")
     assert (kb.root / SC_PATH).is_file()
     assert m.registry(kb) == ["SC-0001"]
 
@@ -369,7 +371,8 @@ def test_update_preserves_a_populated_review_index(fresh_repo, hand_edited):
         assert (kb.root / REVIEW_INDEX).read_bytes() == populated
         validate(kb, source_repo, code=int(hand_edited), diagnostics=(
             "K13 research-review/INDEX.md: INDEX.md differs from the generated review index; it is "
-            "never edited by hand. Run kblam review index to regenerate it\n" if hand_edited else ""))
+            "never edited by hand. Run kblam review index to regenerate it\n" if hand_edited else ""),
+                 root="research-review")
 
 
 def legacy_hash(kb, digest=None):

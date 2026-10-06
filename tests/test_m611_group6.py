@@ -115,9 +115,9 @@ def k14_after_confirmation(kb, source_repo) -> str:
             "other findings or records)\n")
 
 
-def failed(n: int) -> str:
-    """Validate's failure summary line, for n errors."""
-    return f"kblam validate: {n} error(s) in findings/"
+def failed(n: int, root: str = "research-review/") -> str:
+    """Validate's failure summary line, for n errors in `root` (a record's, unless a finding's is named)."""
+    return f"kblam validate: {n} error(s) in {root}"
 
 
 def bind_message(stale: str, now: str) -> str:
@@ -338,7 +338,7 @@ def test_a_use_proponent_cannot_approve_its_own_use(kb, source_repo):
     decide_refused(kb, source_repo, "CU-0001", "approved", by=PROPONENT,
                    err="kblam review decide: researcher-a is CU-0001's proponent; a closing decision needs "
                        "someone else\n")
-    validate(kb, source_repo, code=1, out=f"{k14_line(kb, source_repo)}\n{failed(1)}\n")
+    validate(kb, source_repo, code=1, out=f"{k14_line(kb, source_repo)}\n{failed(1, 'findings/')}\n")
 
 
 def test_a_uses_creator_may_approve_it(kb, source_repo):

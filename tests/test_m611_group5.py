@@ -42,7 +42,7 @@ TREE_HASH = ".kblam/tree.hash"
 
 OK = "kblam validate: OK (0 findings)"
 OK_ONE = "kblam validate: OK (1 findings)"
-FAILED = "kblam validate: 1 error(s) in findings/"
+FAILED = "kblam validate: 1 error(s) in research-review/"
 # The exact paths each of the group's commands may change: the staging command writes the staged record
 # and its allocation receipt; the put installs the record, the review index, the registry and tree.hash
 # and removes the staged file; a decision rewrites the record, the index and tree.hash.
@@ -548,7 +548,7 @@ def test_another_basis_file_changed_is_an_error_once_the_challenge_is_confirmed(
     the three reads change nothing in the KB or the source repository. The initial validate exits 0;
     both post-edit validates exit 1 and print the one K13 error
     "basis[1]: the source changed since SC-0001 was written" on the record's `basis:` line, then "kblam
-    validate: 1 error(s) in findings/". It changes nothing, prints the same bytes both times, and leaves
+    validate: 1 error(s) in research-review/". It changes nothing, prints the same bytes both times, and leaves
     the source repository untouched. Acceptance 5: the confirmation rests on a file whose bytes changed,
     so it no longer holds, and validate says so rather than rewriting the reference."""
     staged = stage(kb, source_repo, by="reviewer-a",

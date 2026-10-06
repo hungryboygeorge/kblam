@@ -284,8 +284,8 @@ def test_a_deleted_record_is_missing_and_restoring_it_clears_the_report(kb, sour
     Diagnostics: the K13 issue "INDEX.md differs from the generated review index ..." on
     research-review/INDEX.md (line 0), then "SC-0001 is missing from research-review/; records are never
     deleted or renamed; restore it from git" on the canonical path the record should have, then "kblam
-    validate: 2 error(s) in findings/"; after `review index` the one missing error and "kblam validate: 1
-    error(s) in findings/; tree.hash not recorded". `review index` exits 0 with "kblam review index: wrote
+    validate: 2 error(s) in research-review/"; after `review index` the one missing error and "kblam validate: 1
+    error(s) in research-review/; tree.hash not recorded". `review index` exits 0 with "kblam review index: wrote
     research-review/INDEX.md" and the stderr note that tree.hash was not advanced because the two roots
     changed outside kblam. The registry still lists SC-0001 after all of it: neither `review index` nor
     `validate --record` forgets a registered ID. Restoring the two files puts both roots back byte for
@@ -305,7 +305,7 @@ def test_a_deleted_record_is_missing_and_restoring_it_clears_the_report(kb, sour
     read(kb, source_repo, "validate", code=1, out="\n".join([
         STALE_INDEX,
         missing(kb, "SC-0001"),
-        "kblam validate: 2 error(s) in findings/",
+        "kblam validate: 2 error(s) in research-review/",
     ]) + "\n")
 
     run = cli(kb, source_repo, {INDEX}, "review", "index")
@@ -315,7 +315,7 @@ def test_a_deleted_record_is_missing_and_restoring_it_clears_the_report(kb, sour
     run = cli(kb, source_repo, CHECK_STATE_EMPTY, "validate", "--record")
     exactly(run, "\n".join([
         missing(kb, "SC-0001"),
-        f"kblam validate: 1 error(s) in findings/{NOT_RECORDED}",
+        f"kblam validate: 1 error(s) in research-review/{NOT_RECORDED}",
     ]) + "\n", "validate --record", code=1)
     assert m.registry(kb) == ["SC-0001"]                  # nor does validate --record
 
@@ -347,7 +347,7 @@ def test_a_renamed_record_is_missing_and_the_forget_drop_stands(kb, source_repo)
     the two reads change nothing, in the KB or the source repository. Diagnostics: the stale-index issue,
     the missing-record issue on research-review/challenges/SC-0001.yaml, and the K13 issue on the renamed
     file's `id` line, "id: 'SC-0001' does not match the file name's ID (SC-0002)", then "kblam validate:
-    3 error(s) in findings/"; `review index` exits 0 with its one line and the out-of-band note on stderr;
+    3 error(s) in research-review/"; `review index` exits 0 with its one line and the out-of-band note on stderr;
     `validate --record` exits 1, writes no record and still lists SC-0001 in the registry; `validate
     --record --forget-missing` exits 1, prints "forgot SC-0001 (no record in research-review/)", empties
     the registry and records no tree.hash — the drop stands while the tree still fails; the read afterwards
@@ -366,7 +366,7 @@ def test_a_renamed_record_is_missing_and_the_forget_drop_stands(kb, source_repo)
         STALE_INDEX,
         missing(kb, "SC-0001"),
         mismatch,
-        "kblam validate: 3 error(s) in findings/",
+        "kblam validate: 3 error(s) in research-review/",
     ]) + "\n")
 
     run = cli(kb, source_repo, {INDEX}, "review", "index")
@@ -377,7 +377,7 @@ def test_a_renamed_record_is_missing_and_the_forget_drop_stands(kb, source_repo)
     exactly(run, "\n".join([
         missing(kb, "SC-0001"),
         mismatch,
-        f"kblam validate: 2 error(s) in findings/{NOT_RECORDED}",
+        f"kblam validate: 2 error(s) in research-review/{NOT_RECORDED}",
     ]) + "\n", "validate --record", code=1)
     assert m.registry(kb) == ["SC-0001"]
 
@@ -385,13 +385,13 @@ def test_a_renamed_record_is_missing_and_the_forget_drop_stands(kb, source_repo)
     assert run.out == "\n".join([
         forgot("SC-0001"),
         mismatch,
-        f"kblam validate: 1 error(s) in findings/{NOT_RECORDED}",
+        f"kblam validate: 1 error(s) in research-review/{NOT_RECORDED}",
     ]) + "\n"
     assert m.registry(kb) == []
 
     read(kb, source_repo, "validate", code=1, out="\n".join([
         mismatch,
-        "kblam validate: 1 error(s) in findings/",
+        "kblam validate: 1 error(s) in research-review/",
     ]) + "\n")
     assert renamed.is_file()                               # kblam removed nothing: it reported
 
@@ -412,7 +412,7 @@ def test_a_moved_record_is_reported_as_a_known_record_out_of_place(kb, source_re
     issue; then, on the moved file and only while the registry still lists SC-0001, "a challenge must sit
     directly in its kind's folder (research-review/challenges/SC-0001.yaml); this ID is a record kblam
     knows, so restore research-review/ from git (the record's place is its canonical path)" beside the
-    missing-record issue, and "kblam validate: 3 error(s) in findings/"; `validate --record` exits 1 and
+    missing-record issue, and "kblam validate: 3 error(s) in research-review/"; `validate --record` exits 1 and
     writes no record; `validate --record --forget-missing` exits 1, prints "forgot SC-0001 (no record in
     research-review/)", empties the registry, records no tree.hash, and the moved file's message becomes
     the one for an ID kblam does not know, "this ID is not an installed record or a registered ID, so
@@ -437,7 +437,7 @@ def test_a_moved_record_is_reported_as_a_known_record_out_of_place(kb, source_re
         STALE_INDEX,
         f"K13 {REVIEW}/SC-0001.yaml: {known}",
         missing(kb, "SC-0001"),
-        "kblam validate: 3 error(s) in findings/",
+        "kblam validate: 3 error(s) in research-review/",
     ]) + "\n")
 
     run = cli(kb, source_repo, {INDEX}, "review", "index")
@@ -448,7 +448,7 @@ def test_a_moved_record_is_reported_as_a_known_record_out_of_place(kb, source_re
     exactly(run, "\n".join([
         f"K13 {REVIEW}/SC-0001.yaml: {known}",
         missing(kb, "SC-0001"),
-        f"kblam validate: 2 error(s) in findings/{NOT_RECORDED}",
+        f"kblam validate: 2 error(s) in research-review/{NOT_RECORDED}",
     ]) + "\n", "validate --record", code=1)
     assert m.registry(kb) == ["SC-0001"]
 
@@ -456,13 +456,13 @@ def test_a_moved_record_is_reported_as_a_known_record_out_of_place(kb, source_re
     assert run.out == "\n".join([
         forgot("SC-0001"),
         f"K13 {REVIEW}/SC-0001.yaml: {unknown}",
-        f"kblam validate: 1 error(s) in findings/{NOT_RECORDED}",
+        f"kblam validate: 1 error(s) in research-review/{NOT_RECORDED}",
     ]) + "\n"
     assert m.registry(kb) == []
 
     read(kb, source_repo, "validate", code=1, out="\n".join([
         f"K13 {REVIEW}/SC-0001.yaml: {unknown}",
-        "kblam validate: 1 error(s) in findings/",
+        "kblam validate: 1 error(s) in research-review/",
     ]) + "\n")
     assert moved.is_file()
 
@@ -489,7 +489,7 @@ def test_forget_missing_prints_each_id_it_drops(kb, source_repo):
     again with the registry and tree.hash (the drop and the clean recording), and nothing else — the read
     changes nothing, in the KB or the source repository. Diagnostics: the stale-index issue and one
     missing-record issue per ID — on research-review/challenges/SC-0001.yaml and
-    research-review/tasks/CT-0001.yaml — then "kblam validate: 3 error(s) in findings/"; `review index`
+    research-review/tasks/CT-0001.yaml — then "kblam validate: 3 error(s) in research-review/"; `review index`
     exits 0 and keeps both IDs registered; `validate --record` exits 1, prints the check line "kblam
     validate --record: F-0001 (<fingerprint>): 0 candidate(s)" and the §6 Jev note on stderr, and keeps
     both IDs; `validate --record --forget-missing` exits 0, prints that check line, then "forgot CT-0001
@@ -515,7 +515,7 @@ def test_forget_missing_prints_each_id_it_drops(kb, source_repo):
         STALE_INDEX,
         missing(kb, "SC-0001"),
         missing(kb, "CT-0001"),
-        "kblam validate: 3 error(s) in findings/",
+        "kblam validate: 3 error(s) in research-review/",
     ]) + "\n")
 
     run = cli(kb, source_repo, {INDEX}, "review", "index")
@@ -527,7 +527,7 @@ def test_forget_missing_prints_each_id_it_drops(kb, source_repo):
         check_line(kb, "F-0001"),
         missing(kb, "SC-0001"),
         missing(kb, "CT-0001"),
-        f"kblam validate: 2 error(s) in findings/{NOT_RECORDED}",
+        f"kblam validate: 2 error(s) in research-review/{NOT_RECORDED}",
     ]) + "\n", "validate --record", code=1, err=JEV_NOTE)
     assert m.registry(kb) == ["CT-0001", "SC-0001"]
 

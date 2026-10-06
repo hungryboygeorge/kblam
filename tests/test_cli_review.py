@@ -554,7 +554,7 @@ def test_forget_missing_drops_the_gone_ids_and_record_alone_does_not(kb, source_
     assert text.splitlines() == [
         f"K13 {CHALLENGES}/SC-0002.yaml: SC-0002 is missing from {REVIEW}/; records are never deleted or "
         f"renamed; restore it from git",
-        "kblam validate: 1 error(s) in findings/; tree.hash not recorded",
+        "kblam validate: 1 error(s) in research-review/; tree.hash not recorded",
     ]
     assert registry_ids(kb) == ["SC-0001", "SC-0002"]
 
@@ -584,6 +584,21 @@ def test_forgetting_stands_when_the_validation_after_it_fails(kb, source_repo, c
     assert any(line.startswith("K4 findings/calibration/F-0002-history.md:") for line in lines)
     assert lines[-1] == "kblam validate: 1 error(s) in findings/; tree.hash not recorded"
     assert registry_ids(kb) == []
+
+
+def test_the_error_count_names_each_root_that_holds_an_error(kb, source_repo, capsys):
+    """validate's count names findings/ for a finding's error, the review root for a record's, and both
+    when both hold one."""
+    install_record(kb, "SC", sc(source_repo, rec_id="SC-0001"))
+    accept_tree(kb, capsys)
+    assert run(kb, "review", "index") == 0                    # a write creates the registry
+    capsys.readouterr()
+    (kb.root / CHALLENGES / "SC-0001.yaml").unlink()          # K13: a registered record is missing
+    assert run(kb, "validate") == 1
+    assert capsys.readouterr().out.splitlines()[-1] == f"kblam validate: 2 error(s) in {REVIEW}/"
+    kb.add("F-0002", "history", "The first curve type was superseded by the second.")   # K4: a finding's
+    assert run(kb, "validate") == 1
+    assert capsys.readouterr().out.splitlines()[-1] == f"kblam validate: 3 error(s) in findings/ and {REVIEW}/"
 
 
 def test_forget_missing_without_record_is_a_usage_error(kb, capsys):

@@ -43,7 +43,7 @@ def _read(kb, rec_id=CT):
 
 
 def _validate(kb, source_repo, *, pending=False, issues="", code=0):
-    summary = ("kblam validate: 1 error(s) in findings/\n" if code else
+    summary = ("kblam validate: 1 error(s) in research-review/\n" if code else
                "kblam validate: OK (1 findings)" + ("; 1 pending task(s)" if pending else "") + "\n")
     return _run(kb, source_repo, set(), "validate", code=code,
                 out=issues + (PENDING if pending else "") + summary)

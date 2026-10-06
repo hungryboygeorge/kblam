@@ -11,7 +11,8 @@ and a person's approval of kblam.toml (approval.py), it checks the commit itself
   folder, but not modify, delete, move away or change the type of a file the last commit holds there.
 - An evidence path or verbatim source that git does not track gets a warning: its finding passes K2 or
   K10 here and fails it on every clone. A path inside a nested Git repository under an evidence root is
-  that repository's, and is exempt.
+  that repository's, and is exempt; for one inside a nested repository elsewhere, git add would stage
+  nothing, so the warning names [kb] evidence_roots instead.
 - The kblam.resolutions.jsonl the commit holds must parse.
 
 git runs from the repository root with the hook's environment, so it sees the index the commit is made
@@ -27,7 +28,7 @@ import subprocess
 from dataclasses import dataclass, field
 
 from kblam.approval import ApprovalError
-from kblam.config import RESOLUTIONS_NAME, Config
+from kblam.config import CONFIG_NAME, RESOLUTIONS_NAME, Config
 from kblam.rules import VERBATIM_RE
 from kblam.view import KBView
 
@@ -252,10 +253,30 @@ def _untracked_citations(cfg: Config, view: KBView) -> list[str]:
         one = len(ids) == 1
         codes = " and ".join(sorted(rules, key=lambda code: int(code[1:])))
         what = {"K2": "as evidence", "K10": "as a verbatim source"}.get(codes, "as evidence and a verbatim source")
-        warnings.append(f"{rel} is not tracked by git, so {', '.join(ids)}, which cite{'s' if one else ''} it "
-                        f"{what}, pass{'es' if one else ''} {codes} here and fail{'s' if one else ''} on every "
-                        f"clone. Commit it (git add {rel}), or cite a file that is committed")
+        warning = (f"{rel} is not tracked by git, so {', '.join(ids)}, which cite{'s' if one else ''} it "
+                   f"{what}, pass{'es' if one else ''} {codes} here and fail{'s' if one else ''} on every clone. ")
+        nested = _nested_repository(cfg, rel)
+        if nested is None:
+            warnings.append(warning + f"Commit it (git add {rel}), or cite a file that is committed")
+            continue
+        # git add stages nothing inside another repository's work tree, so that advice would not work here
+        warnings.append(warning + f"It is inside the git repository {nested}/, whose files this repository does "
+                        f"not track, so git add cannot commit it. If {nested}/ is a source repository, it belongs "
+                        f"in [kb] evidence_roots in {CONFIG_NAME}, which only a person changes: ask the user to add "
+                        f"\"{nested}\" there and run kblam approve-config before committing. Otherwise cite a file "
+                        f"that is committed")
     return warnings
+
+
+def _nested_repository(cfg: Config, rel: str) -> str | None:
+    """The outermost folder from the repository root down to the cited path `rel` itself that holds its own
+    `.git` (a nested Git repository, worktree or submodule), or None. The repository's own `.git` is not
+    looked at."""
+    parts = rel.split("/")
+    for depth in range(1, len(parts) + 1):
+        if (cfg.repo_root.joinpath(*parts[:depth]) / ".git").exists():
+            return "/".join(parts[:depth])
+    return None
 
 
 def _in_nested_repository(cfg: Config, rel: str, roots: list[str]) -> bool:

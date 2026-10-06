@@ -1745,14 +1745,14 @@ def test_confirmed_provisional_source_fixes_registry_before_retirement(kb_ready,
     captured = capsys.readouterr()
     assert (captured.out, captured.err) == (
         f"K13 {registry}: {registry_message}\nK13 {rec.path}:{rec.key_line('source')}: "
-        f"{diagnosis} Restore it from git, or {recovery}\nkblam validate: 2 error(s) in findings/\n", "")
+        f"{diagnosis} Restore it from git, or {recovery}\nkblam validate: 2 error(s) in research-review/\n", "")
     assert "kblam review decide" not in captured.out
     kb_ready.write(registry, original)                 # restore the backup the registry message names
     assert run(kb_ready, "validate") == 1
     captured = capsys.readouterr()
     assert (captured.out, captured.err) == (
         f"K13 {rec.path}:{rec.key_line('source')}: {CONFIRMATION_FIX}\n"
-        "kblam validate: 1 error(s) in findings/\n", "")
+        "kblam validate: 1 error(s) in research-review/\n", "")
     command = captured.out.split("retire it (", 1)[1].split(")", 1)[0].split()
     command = [DECIDER if token == "NAME" else "retire-unpinned-confirmation" if token == "TEXT"
                else challenge_binding(kb_ready) if token == "D" else token for token in command]

@@ -41,6 +41,15 @@ from kblam.view import load_view
 
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
+# Why the tree.hash rule left tree.hash as it was, for `kblam upgrade` to say (UpgradeResult.kept_because).
+KEPT_NONE_RECORDS = "no tree.hash, records"         # none, and upgrade writes no registry for the records
+KEPT_NONE_INVALID = "no tree.hash, invalid"         # none, and the tree before the upgrade failed validation
+KEPT_OLD_RECORDS = "format 1, records"              # a matching format-1 marker cannot vouch for records
+KEPT_OLD_REGISTRY = "format 1, registry"            # ... nor for the IDs a registry lists
+KEPT_OLD_UNREADABLE = "format 1, unreadable"        # ... nor for a registry that cannot be read
+KEPT_CHANGED_V1 = "format 1, changed"               # findings/ changed since the format-1 marker
+KEPT_CHANGED = "changed"                            # the tree changed since the format-2 marker
+
 
 @dataclass(frozen=True)
 class Restamp:
@@ -58,6 +67,7 @@ class UpgradeResult:
     staged: list[Restamp] = field(default_factory=list)         # re-stamped in .kblam/staging/
     edit_records: list[str] = field(default_factory=list)       # IDs whose edit record followed the re-stamp
     recorded: bool | None = None       # tree.hash advanced; None when nothing in findings/ was written
+    kept_because: str | None = None    # why not, when recorded is False: one of the KEPT_* reasons
     items_rekeyed: list[tuple[str, str]] = field(default_factory=list)  # (old ID, new ID)
     items_closed: list[str] = field(default_factory=list)       # open items whose finding changed since
     marks_moved: int = 0
@@ -159,6 +169,12 @@ def _upgrade(cfg: Config, settings: JevSettings) -> UpgradeResult:
     if writes:
         clean = clean_before_v2(cfg, view, bool(view.records), creates_registry=False)
         recorded = read_recorded(cfg)
+        if recorded is None:
+            kept = KEPT_NONE_RECORDS if view.records else KEPT_NONE_INVALID
+        elif recorded[0] == 1:
+            kept = KEPT_CHANGED_V1 if recorded[2] != tree_digest(view) else KEPT_OLD_RECORDS
+        else:
+            kept = KEPT_CHANGED
         # Only upgrade may bridge a matching format-1 marker to format 2, and only before records
         # exist: that old marker cannot vouch for the review root or its registered IDs.
         if (recorded is not None and recorded[0] == 1 and recorded[2] == tree_digest(view)
@@ -168,14 +184,15 @@ def _upgrade(cfg: Config, settings: JevSettings) -> UpgradeResult:
             except ValueError:
                 # A damaged registry cannot authorize the bridge; leave the old marker and warn as
                 # for a nonempty registry, while the rest of the upgrade continues.
-                clean = False
+                clean, kept = False, KEPT_OLD_UNREADABLE
             else:
-                clean = not registered
+                clean, kept = not registered, KEPT_OLD_REGISTRY
         for finding, data in writes:
             atomic_write(cfg.repo_root / finding.path, data)
             if _follow_edit_record(cfg, finding, data):
                 result.edit_records.append(finding.file_id)
         result.recorded = record_after_write_v2(cfg, clean, "upgrade", creates_registry=False)
+        result.kept_because = None if result.recorded else kept
 
     # 2. staged findings
     staged: dict[str, Finding] = {}

@@ -53,6 +53,17 @@ def _pending_note(pending: list[str]) -> str:
     return f"; {len(pending)} pending task(s)" if pending else ""
 
 
+def _error_roots(cfg, failures) -> str:
+    """Where validate's errors are: findings/, the review root, or both. An error outside findings/ concerns
+    the review records (a record, the review index, the registry or the review root's setting)."""
+    prefix = f"{cfg.findings_dir}/"
+    in_findings = any(issue.path.startswith(prefix) for issue in failures)
+    in_review = any(not issue.path.startswith(prefix) for issue in failures)
+    if in_review and in_findings:
+        return f"{cfg.findings_dir}/ and {cfg.review_dir}/"
+    return f"{cfg.review_dir}/" if in_review else prefix
+
+
 def _forget_missing(cfg) -> None:
     """`validate --record --forget-missing`: drop the registered IDs whose records are gone, printing each
     (SPEC §5.2.6). The drop stands even when the validation that follows fails."""
@@ -98,7 +109,7 @@ def _validate(cfg, args, *, baseline: bool = False) -> int:
     for warning in commit.warnings if commit else []:
         print(f"kblam validate: warning: {warning}")
     if failures or blocking or config or refusals:
-        print(f"kblam validate: {len(failures)} error(s) in {cfg.findings_dir}/"
+        print(f"kblam validate: {len(failures)} error(s) in {_error_roots(cfg, failures)}"
               + (f", {len(blocking)} open item(s) in .kblam/review.jsonl" if blocking else "")
               + (f", {len(refusals)} problem(s) with the commit being made" if refusals else "")
               + (f", and {CONFIG_NAME} needs approval before this commit" if config else "")
@@ -539,6 +550,30 @@ def _cmd_renumber(cfg, args) -> int:
     return EXIT_OK
 
 
+def _tree_hash_kept(cfg, because: str | None) -> str:
+    """Why `kblam upgrade` did not advance tree.hash (upgrade.KEPT_*), and what a person does next."""
+    from kblam import upgrade
+
+    fix = "Run kblam validate, fix anything it lists, then run kblam validate --record"
+    none = "recorded no .kblam/tree.hash: there is none (a new clone, or .kblam/ was deleted), and "
+    old = "left .kblam/tree.hash as it was: it is in the old format, which cannot vouch for review records, and "
+    if because == upgrade.KEPT_NONE_RECORDS:
+        return f"{none}kblam upgrade does not record one while {cfg.review_dir}/ holds review records. {fix}"
+    if because == upgrade.KEPT_NONE_INVALID:
+        return f"{none}the tree as it was before this upgrade failed kblam validate. {fix}"
+    if because == upgrade.KEPT_OLD_RECORDS:
+        return f"{old}{cfg.review_dir}/ holds some. {fix}"
+    if because == upgrade.KEPT_OLD_REGISTRY:
+        return f"{old}.kblam/review-ids lists some. {fix}"
+    if because == upgrade.KEPT_OLD_UNREADABLE:
+        return f"{old}.kblam/review-ids cannot be read as a list of record IDs. {fix}"
+    # Format 1 covers findings/ only; format 2 covers the review root as well.
+    roots = (f"{cfg.findings_dir}/ or {cfg.review_dir}/" if because == upgrade.KEPT_CHANGED
+             and cfg.review_path.is_dir() else f"{cfg.findings_dir}/")
+    return (f"left .kblam/tree.hash as it was: {roots} had changed outside kblam, and kblam validate --record "
+            f"accepts that once the tree is clean")
+
+
 def _cmd_upgrade(cfg, args) -> int:
     """`kblam upgrade` (SPEC §7): what it migrated, step by step, and what a person does next."""
     from kblam.upgrade import upgrade
@@ -550,8 +585,7 @@ def _cmd_upgrade(cfg, args) -> int:
                    f"with v2 fingerprints:")
         out += [f"  {r.path}: {r.target} {r.old} -> {r.new}" for r in result.restamped]
         out.append("kblam upgrade: " + ("recorded .kblam/tree.hash for the tree" if result.recorded else
-                   f"left .kblam/tree.hash as it was: {cfg.findings_dir}/ had changed outside kblam, and kblam "
-                   f"validate --record accepts that once the tree is clean"))
+                                        _tree_hash_kept(cfg, result.kept_because)))
     if result.stale:
         out.append(f"kblam upgrade: {len(result.stale)} depends_on value(s) stay in the old format, because "
                    f"their target changed since it was recorded; re-read each target, then kblam ack "

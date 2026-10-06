@@ -382,7 +382,7 @@ def test_a_record_path_spelling_is_a_k13_error(kb, source_repo, capsys, spelled,
     assert capsys.readouterr().out.splitlines() == [
         f"K13 {CHALLENGES}/SC-0001.yaml:{_key_line(kb, f'{CHALLENGES}/SC-0001.yaml', 'source')}: "
         f"source.path: {reason}",
-        "kblam validate: 1 error(s) in findings/",
+        "kblam validate: 1 error(s) in research-review/",
     ]
 
 
@@ -402,7 +402,7 @@ def test_a_record_path_through_an_escaping_symlink_is_a_k13_error(kb, source_rep
     assert capsys.readouterr().out.splitlines() == [
         f"K13 {CHALLENGES}/SC-0001.yaml:{_key_line(kb, f'{CHALLENGES}/SC-0001.yaml', 'source')}: "
         f"source: path 'escape.md': resolves outside the repository",
-        "kblam validate: 1 error(s) in findings/",
+        "kblam validate: 1 error(s) in research-review/",
     ]
 
 

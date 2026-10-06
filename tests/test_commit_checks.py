@@ -276,10 +276,24 @@ def test_a_path_in_a_nested_repository_under_an_evidence_root_gets_no_warning(gk
         0, untracked("evidence/new-run/log.txt", "F-0002", "as evidence", "K2") + "kblam validate: OK (2 findings)\n")
 
 
+def in_nested(path: str, finding_id: str, what: str, rule: str, repository: str) -> str:
+    """The pre-commit warning for one finding citing `path`, untracked and inside the nested Git repository
+    `repository`, which no evidence root exempts: git add would stage nothing there."""
+    return (f"kblam validate: warning: {path} is not tracked by git, so {finding_id}, which cites it {what}, "
+            f"passes {rule} here and fails on every clone. It is inside the git repository {repository}/, whose "
+            f"files this repository does not track, so git add cannot commit it. If {repository}/ is a source "
+            f"repository, it belongs in [kb] evidence_roots in kblam.toml, which only a person changes: ask the "
+            f"user to add \"{repository}\" there and run kblam approve-config before committing. Otherwise cite a "
+            f"file that is committed\n")
+
+
 def test_a_nested_repository_outside_an_evidence_root_does_not_hold_what_a_finding_cites(gkb, capsys):
     """Only a nested repository under an evidence root counts: one elsewhere (vendor/specs, cited as a
     verbatim source) gets the warning, and so does a path under the evidence root lab/evidence whose
-    .git lies above that root (lab/.git), since nothing above an evidence root is looked at."""
+    .git lies above that root (lab/.git), since nothing above an evidence root is looked at. git add
+    stages nothing inside either, so the warning names the repository and [kb] evidence_roots instead.
+    D49: git add of the cited path leaves the warning; adding each repository to [kb] evidence_roots, as
+    the user does and approves, removes it."""
     gkb.write("kblam.toml", (gkb.root / "kblam.toml").read_text(encoding="utf-8").replace(
         "[kb]\n", '[kb]\nevidence_roots = ["evidence", "lab/evidence"]\n'))
     approval.record_approval(gkb.cfg, (gkb.root / "kblam.toml").read_bytes())
@@ -292,10 +306,20 @@ def test_a_nested_repository_outside_an_evidence_root_does_not_hold_what_a_findi
         body=quote("vendor/specs/spec.txt"))
     git(gkb, "add", "findings")
 
-    assert validate_commit(gkb, capsys) == (
-        0, untracked("lab/evidence/run-1/log.txt", "F-0001", "as evidence", "K2") +
-        untracked("vendor/specs/spec.txt", "F-0001", "as a verbatim source", "K10") +
-        "kblam validate: OK (1 findings)\n")
+    warned = (0, in_nested("lab/evidence/run-1/log.txt", "F-0001", "as evidence", "K2", "lab") +
+              in_nested("vendor/specs/spec.txt", "F-0001", "as a verbatim source", "K10", "vendor/specs") +
+              "kblam validate: OK (1 findings)\n")
+    assert validate_commit(gkb, capsys) == warned
+
+    git(gkb, "add", "lab/evidence/run-1/log.txt", "vendor/specs/spec.txt")   # exits 0 and stages nothing
+    assert validate_commit(gkb, capsys) == warned
+
+    gkb.write("kblam.toml", (gkb.root / "kblam.toml").read_text(encoding="utf-8").replace(
+        'evidence_roots = ["evidence", "lab/evidence"]', 'evidence_roots = ["evidence", "lab/evidence", "lab", '
+                                                         '"vendor/specs"]'))
+    approval.record_approval(gkb.cfg, (gkb.root / "kblam.toml").read_bytes())   # kblam approve-config
+    git(gkb, "add", "kblam.toml")
+    assert validate_commit(gkb, capsys) == (0, "kblam validate: OK (1 findings)\n")
 
 
 # --- kblam.resolutions.jsonl ----------------------------------------------------------------------------
