@@ -8,6 +8,7 @@ creates no registry either. Jev is the fake transport from test_check, and nothi
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import shutil
 import subprocess
@@ -22,8 +23,11 @@ from kblam.treehash import read_recorded, tree_digest_v2
 from kblam.view import load_view
 
 from test_check import E2, jkb  # noqa: F401 (jkb is a fixture)
+from test_m611_group4 import excerpt_line, line_with, same_bytes_message
 
 REVIEW = "research-review"
+FINDING = "findings/calibration/F-0001-ratio.md"      # F-0001 as `quoting_finding` installs it
+MOTOR = "findings/motor/F-0002-motor.md"
 CLAIM_B = "The pump motor reaches steady output after 90 seconds of warm-up at 4000 rpm."
 QUESTION = "Does an independent measurement establish the claim?"
 PENDING = f"CT-0001 open replication of F-0002: {QUESTION}"
@@ -33,6 +37,14 @@ BASELINE = ("kblam validate: there was no .kblam/tree.hash (a new clone, or .kbl
 MISSING = ("there is no .kblam/tree.hash (a new clone, or .kblam/ was deleted), and the tree as it was before this "
            "write fails kblam validate, so kblam did not record it; tree.hash not advanced. Run kblam validate, "
            "fix anything it lists, then run kblam validate --record.")
+
+
+def unrecorded(command: str) -> str:
+    """The whole stderr of `kblam rm`, `renumber` or `upgrade` with review records and no tree.hash: none
+    of them writes the registry, so none of them bootstraps."""
+    return (f"kblam {command}: there is no .kblam/tree.hash (a new clone, or .kblam/ was deleted), and kblam "
+            f"{command} does not record one while {REVIEW}/ holds review records; tree.hash not advanced. Run "
+            f"kblam validate, fix anything it lists, then run kblam validate --record.\n")
 
 
 @pytest.fixture
@@ -86,6 +98,25 @@ def bootstrapped(kb, *, registry: list[str]) -> None:
     assert recorded(kb)
     assert m.registry(kb) == registry == present(kb)
     assert accepted(kb, "F-0001", "F-0002")
+
+
+def unbootstrapped(kb) -> bool:
+    """Whether the KB still has no tree.hash."""
+    return not (kb.cfg.state_dir / "tree.hash").exists()
+
+
+def bootstraps_as_named(kb, pending: str, findings: int) -> None:
+    """D49 for the "Run kblam validate, fix anything it lists, then run kblam validate --record" of a
+    tree that is clean now: validate passes, and validate --record records tree.hash, creates the
+    registry from the records present and accepts every finding from the repository."""
+    status = f"kblam validate: OK ({findings} findings); 1 pending task(s)"
+    assert m.validate(kb) == m.Run(0, f"{pending}\n{status}\n", "")
+    baseline = BASELINE.replace("2 finding(s)", f"{findings} finding(s)")
+    assert m.validate(kb, "--record") == m.Run(
+        0, f"{pending}\n{status}; recorded .kblam/tree.hash for this tree\n{baseline}\n", "")
+    assert recorded(kb)
+    assert m.registry(kb) == present(kb)
+    assert accepted(kb, *(f.file_id for f in load_view(kb.cfg).findings))
 
 
 # --- clean: every path bootstraps, asking Jev nothing ---------------------------------------------
@@ -167,3 +198,102 @@ def test_init_update_bootstraps_a_clone_with_records(git_kb, source_repo, no_jev
                             "them.\n"), run.out
     bootstrapped(git_kb, registry=["CT-0001", "CU-0001", "SC-0001"])
     assert git_kb.fake.requests == []
+
+
+# --- dirty: nothing is recorded, and doing what the message says bootstraps -------------------------
+# A dirty put of a finding, and the index write and init --update on a dirty tree, have their own tests:
+# test_put_review.py test_a_missing_tree_hash_with_a_failing_record_leaves_a_put_unrecorded,
+# test_init_review.py test_a_missing_tree_hash_with_a_failing_record_is_kept, and test_treehash.py
+# test_bootstrap_refuses_a_tree_that_fails_the_rules and
+# test_a_missing_tree_hash_with_a_failing_record_is_not_bootstrapped.
+
+
+def sha(kb, path: str) -> str:
+    return hashlib.sha256((kb.root / path).read_bytes()).hexdigest()
+
+
+def index_deleted(kb, source_repo) -> str:
+    """reviewed(), then the review root's INDEX.md deleted: K13. Returns the error validate prints."""
+    reviewed(kb, source_repo)
+    (kb.root / REVIEW / "INDEX.md").unlink()
+    return f"K13 {REVIEW}/INDEX.md: INDEX.md is missing; run kblam review index"
+
+
+def use_missing(kb, source_repo) -> str:
+    """reviewed() without CU-0001, so F-0001's excerpt of the challenged line is uncovered: K14."""
+    reviewed(kb, source_repo, use=False)
+    return f"K14 {FINDING}:{excerpt_line(kb.root / FINDING)}: {same_bytes_message(source_repo)}"
+
+
+def task_stale(kb, source_repo) -> str:
+    """reviewed(), then F-0002's body extended outside kblam after CT-0001 bound its bytes: K15."""
+    reviewed(kb, source_repo)
+    bound = sha(kb, MOTOR)
+    kb.add("F-0002", "motor", CLAIM_B, topic="motor", body="A first detail.")
+    record = m.record_path(kb, "CT-0001")
+    return (f"K15 {REVIEW}/tasks/CT-0001.yaml:{line_with(record, bound)}: F-0002's file now hashes to "
+            f"{sha(kb, MOTOR)}, not the {bound} CT-0001 was bound to (the binding covers the whole file, not "
+            f"only the fingerprint); reread it, then run kblam review rebind CT-0001 --by NAME --reason TEXT "
+            f"--expect D")
+
+
+@pytest.mark.parametrize("dirty, pending", [(index_deleted, True), (use_missing, True), (task_stale, False)],
+                         ids=["K13", "K14", "K15"])
+def test_validate_record_records_nothing_on_a_clone_that_fails(jkb, source_repo, no_jev_check, dirty,
+                                                                pending):
+    """No tree.hash and no registry: a failed validate --record writes nothing. A stale task (K15) is
+    not listed as pending."""
+    error = dirty(jkb, source_repo)
+    clone(jkb)
+
+    run = m.validate(jkb, "--record")
+
+    assert run == m.Run(1, f"{error}\n" + (f"{PENDING}\n" if pending else "") +
+                        "kblam validate: 1 error(s) in findings/; tree.hash not recorded\n", "")
+    assert unbootstrapped(jkb)
+    assert m.registry(jkb) is None
+    assert jkb.fake.requests == []
+
+
+def test_the_put_of_a_record_on_a_clone_that_fails_is_not_recorded(jkb, source_repo, no_jev_check):
+    """The put goes in and creates the registry, from the records present and its own; tree.hash stays
+    missing and the put says what to do."""
+    error = task_stale(jkb, source_repo)
+    clone(jkb)
+    staged = m.stage_task(jkb, "F-0001", by="researcher-a", proponent="researcher-a")
+
+    run = m.put(jkb, staged)
+
+    assert run == m.Run(0, f"kblam put: CT-0002 -> {REVIEW}/tasks/CT-0002.yaml\n{error}\nkblam put: done, but "
+                           f"kblam validate still fails (1 error(s) listed above, owned by other findings or "
+                           f"records)\n", f"kblam put CT-0002: {MISSING}\n")
+    assert unbootstrapped(jkb)
+    assert m.registry(jkb) == ["CT-0001", "CT-0002", "CU-0001", "SC-0001"] == present(jkb)
+    assert jkb.fake.requests == []
+
+
+def test_a_put_on_a_clone_that_fails_says_what_to_do_and_doing_it_bootstraps(jkb, source_repo,
+                                                                              no_jev_check):
+    """D49: the put's message names kblam validate; validate lists the K15 error, whose rebind command
+    runs as printed (it is a write on a tree that still fails, so it records nothing either); then
+    validate passes and validate --record bootstraps."""
+    error = task_stale(jkb, source_repo)
+    clone(jkb)
+    staged = m.stage_finding(jkb, None, m.finding_text("F-0003", E2, topic="tray"), slug="tray")
+
+    run = m.put(jkb, staged)
+
+    assert run == m.Run(0, f"kblam put: F-0003 -> findings/tray/F-0003-tray.md\n{error}\nkblam put: done, but "
+                           f"kblam validate still fails (1 error(s) listed above that this put did not "
+                           f"refuse)\n", f"kblam put F-0003-tray.md: {MISSING}\n")
+    assert unbootstrapped(jkb)
+    assert m.validate(jkb) == m.Run(1, f"{error}\nkblam validate: 1 error(s) in findings/\n", "")
+
+    rebound = m.rebind(jkb, "CT-0001", by="reviewer-b")
+
+    assert rebound == m.Run(0, f"kblam review rebind: CT-0001 rebound, now open (subject digest "
+                               f"{m.expect(jkb, 'CT-0001')[:12]})\n", f"kblam review rebind CT-0001: {MISSING}\n")
+    assert unbootstrapped(jkb)
+    bootstraps_as_named(jkb, PENDING, 3)
+    bootstrapped(jkb, registry=["CT-0001", "CU-0001", "SC-0001"])
+    assert accepted(jkb, "F-0003")

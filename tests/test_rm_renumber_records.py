@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import shlex
+import shutil
 
 import pytest
 
@@ -16,6 +17,8 @@ from kblam import resolutions, review_stage
 from kblam.finding import fingerprint, parse_finding
 from kblam.records import KINDS
 
+from test_bootstrap_records import (QUESTION, bootstraps_as_named, no_jev_check,  # noqa: F401 (a fixture)
+                                    unbootstrapped, unrecorded)
 from test_rm_renumber import commit_all, git, needs_git, no_outer_git  # noqa: F401 (no_outer_git: fixture)
 
 POINTER = "Load the kblam-write skill for how to fix this."
@@ -516,3 +519,39 @@ def test_the_selected_files_id_line_refusals_offer_the_other_file_only_when_it_c
         "renumber", refusal.format(offer if peer == "ready" else advice) + ".")
     if peer == "ready":
         m.ok(m.kblam(kb, "renumber", THEIRS), "renumber")      # the offered command, as printed
+
+
+# --- a clone: rm and renumber record no tree.hash while records are present -----------------------
+
+
+def test_rm_on_a_clone_with_records_records_nothing_and_says_what_to_do(kb, no_jev_check):
+    """rm writes no registry, so with records present it does not bootstrap; the removal goes in. D49:
+    kblam validate passes, and kblam validate --record bootstraps."""
+    merge_pair(kb)
+    task = m.task(kb, "F-0020", by="reviewer-a", proponent="researcher-a")
+    shutil.rmtree(kb.root / ".kblam")                       # a clone: no tree.hash, registry or Jev state
+
+    run = m.kblam(kb, "rm", "F-0012", "--merged-into", "F-0020")
+
+    assert run.code == 0 and run.err == unrecorded("rm"), run.out + run.err
+    assert run.out.startswith("kblam rm: removed F-0012 (findings/calibration/F-0012-sensor.md), merged into "
+                              "F-0020\n"), run.out
+    assert unbootstrapped(kb) and m.registry(kb) is None
+    bootstraps_as_named(kb, f"{task} open replication of F-0020: {QUESTION}", 1)
+    assert m.registry(kb) == [task]
+
+
+def test_renumber_on_a_clone_with_records_records_nothing_and_says_what_to_do(kb, at_root, no_jev_check):
+    """renumber writes no registry either. D49 as for rm."""
+    same_id(kb)
+    ct(kb, "CT-0003", MINE)
+    shutil.rmtree(kb.root / ".kblam")
+
+    run = m.kblam(kb, "renumber", THEIRS)
+
+    assert run.code == 0 and run.err == unrecorded("renumber"), run.out + run.err
+    assert run.out.startswith(f"kblam renumber: F-0012 -> F-0013: {THEIRS} is now findings/motor/F-0013-motor.md "
+                              f"(fingerprint "), run.out
+    assert unbootstrapped(kb) and m.registry(kb) is None
+    bootstraps_as_named(kb, f"CT-0003 open replication of F-0012: {QUESTION}", 2)
+    assert m.registry(kb) == ["CT-0003"]

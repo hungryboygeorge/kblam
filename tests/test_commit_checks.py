@@ -245,6 +245,59 @@ def test_untracked_evidence_and_verbatim_sources_get_a_warning(gkb, capsys):
     assert code == 0 and out.count("warning:") == 1 and "capture.bin" in out
 
 
+def untracked(path: str, finding_id: str, what: str, rule: str) -> str:
+    """The pre-commit warning for one finding citing an untracked `path`."""
+    return (f"kblam validate: warning: {path} is not tracked by git, so {finding_id}, which cites it {what}, "
+            f"passes {rule} here and fails on every clone. Commit it (git add {path}), or cite a file that is "
+            f"committed\n")
+
+
+def quote(path: str) -> str:
+    """A verbatim excerpt of line 1 of `path`, whose text is "Line one."."""
+    return f"<!-- verbatim: {path}:1 -->\n> Line one."
+
+
+def test_a_path_in_a_nested_repository_under_an_evidence_root_gets_no_warning(gkb, capsys):
+    """That repository holds the cited file, not this one: a nested repository made by git init, and one
+    whose .git is a file (git init --separate-git-dir, the form a linked worktree or a submodule has). An
+    ordinary untracked path beside them still gets the warning."""
+    gkb.write("evidence/vendor/spec.txt", "Line one.\n")
+    git(gkb, "init", "-q", "evidence/vendor")
+    gkb.write("evidence/linked/spec.txt", "Line one.\n")
+    git(gkb, "init", "-q", "--separate-git-dir", str(gkb.root.parent / "linked.git"), "evidence/linked")
+    assert (gkb.root / "evidence/linked/.git").is_file()
+    gkb.write("evidence/new-run/log.txt", "Line one.\n")
+    put(gkb, capsys, "F-0001", "motor", CLAIM_A, evidence="[evidence/vendor/spec.txt, evidence/linked/]",
+        body=f"{quote('evidence/vendor/spec.txt')}\n\n{quote('evidence/linked/spec.txt')}")
+    put(gkb, capsys, "F-0002", "tray", CLAIM_B, topic="tray", evidence="[evidence/new-run/log.txt]")
+    git(gkb, "add", "findings")
+
+    assert validate_commit(gkb, capsys) == (
+        0, untracked("evidence/new-run/log.txt", "F-0002", "as evidence", "K2") + "kblam validate: OK (2 findings)\n")
+
+
+def test_a_nested_repository_outside_an_evidence_root_does_not_hold_what_a_finding_cites(gkb, capsys):
+    """Only a nested repository under an evidence root counts: one elsewhere (vendor/specs, cited as a
+    verbatim source) gets the warning, and so does a path under the evidence root lab/evidence whose
+    .git lies above that root (lab/.git), since nothing above an evidence root is looked at."""
+    gkb.write("kblam.toml", (gkb.root / "kblam.toml").read_text(encoding="utf-8").replace(
+        "[kb]\n", '[kb]\nevidence_roots = ["evidence", "lab/evidence"]\n'))
+    approval.record_approval(gkb.cfg, (gkb.root / "kblam.toml").read_bytes())
+    commit(gkb, "configure")
+    gkb.write("vendor/specs/spec.txt", "Line one.\n")
+    git(gkb, "init", "-q", "vendor/specs")
+    gkb.write("lab/evidence/run-1/log.txt", "Line one.\n")
+    git(gkb, "init", "-q", "lab")
+    put(gkb, capsys, "F-0001", "motor", CLAIM_A, evidence="[lab/evidence/run-1/log.txt]",
+        body=quote("vendor/specs/spec.txt"))
+    git(gkb, "add", "findings")
+
+    assert validate_commit(gkb, capsys) == (
+        0, untracked("lab/evidence/run-1/log.txt", "F-0001", "as evidence", "K2") +
+        untracked("vendor/specs/spec.txt", "F-0001", "as a verbatim source", "K10") +
+        "kblam validate: OK (1 findings)\n")
+
+
 # --- kblam.resolutions.jsonl ----------------------------------------------------------------------------
 
 

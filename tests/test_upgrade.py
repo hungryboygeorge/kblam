@@ -7,12 +7,14 @@ the kblam before M6.10 wrote it. Nothing touches the network."""
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 import sqlite3
 from contextlib import closing
 
 import pytest
 
+import m611_helpers as m
 from kblam import review
 from kblam.finding import fingerprint, fingerprint_v1, parse_finding
 from kblam.jev import CACHE_NAME, PairCache, Side, jev_settings
@@ -23,6 +25,8 @@ from kblam.treehash import read_recorded, tree_digest, tree_digest_v2
 from kblam.view import load_view
 
 from conftest import DEFAULT_PROMPT_ID, KBLAM_TOML, NO_EMBEDDINGS, PROMPT_TOML, finding_text, record_text
+from test_bootstrap_records import (QUESTION, bootstraps_as_named, no_jev_check,  # noqa: F401 (a fixture)
+                                    unbootstrapped, unrecorded)
 from test_check import E1, E2, N, THRESHOLDS, jkb, run, set_config  # noqa: F401 (jkb is a fixture)
 from test_hook import call, stop
 
@@ -199,6 +203,35 @@ def test_upgrade_leaves_tree_hash_stale_after_a_change_outside_kblam(kb, capsys)
     assert run(kb, "upgrade") == 0
     assert "left .kblam/tree.hash as it was" in capsys.readouterr().out
     assert read_recorded(kb.cfg) == recorded
+
+
+def test_upgrade_on_a_clone_with_records_records_nothing_and_says_what_to_do(kb, no_jev_check):
+    """The old stamp fails K1 before the upgrade and the tree is clean after it, but upgrade writes no
+    registry, so with records present it does not bootstrap. D49: kblam validate passes, and kblam
+    validate --record bootstraps."""
+    kb.add("F-0001", "sensor", CLAIM_A)
+    current = v1_of(kb, "F-0001")
+    kb.add("F-0002", "motor", CLAIM_B, topic="motor", extra=f"depends_on:\n  F-0001: {current}\n")
+    sensor = kb.root / "findings/calibration/F-0001-sensor.md"
+    kb.write("research-review/tasks/CT-0001.yaml", record_text(
+        "CT", "CT-0001", finding="F-0001", claim_fingerprint=v2_of(kb, "F-0001"),
+        base_file_sha256=hashlib.sha256(sensor.read_bytes()).hexdigest()))
+    m.accept_tree(kb)
+    shutil.rmtree(kb.root / ".kblam")                       # a clone: no tree.hash, registry or Jev state
+    assert m.validate(kb).code == 1
+
+    upgraded = m.kblam(kb, "upgrade")
+
+    assert upgraded == m.Run(0, (
+        f"kblam upgrade: re-stamped 1 depends_on value(s) in findings/ with v2 fingerprints:\n"
+        f"  findings/motor/F-0002-motor.md: F-0001 {current} -> {v2_of(kb, 'F-0001')}\n"
+        f"kblam upgrade: left .kblam/tree.hash as it was: findings/ had changed outside kblam, and kblam "
+        f"validate --record accepts that once the tree is clean\n"
+        f"kblam upgrade: commit the re-stamped findings, so every clone has them; each other machine runs kblam "
+        f"upgrade once for its own .kblam/\n"), unrecorded("upgrade"))
+    assert unbootstrapped(kb) and m.registry(kb) is None
+    bootstraps_as_named(kb, f"CT-0001 open replication of F-0001: {QUESTION}", 2)
+    assert m.registry(kb) == ["CT-0001"]
 
 
 def test_upgrade_restamps_a_staged_copy_and_its_edit_still_puts(kb, capsys):
