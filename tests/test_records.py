@@ -6,6 +6,7 @@ from datetime import date
 
 import pytest
 
+from kblam import records
 from kblam.records import KINDS, KEYS, STATUSES, parse_record, schema_issues
 
 from conftest import DROP, SOURCE_REPO, TRACE_PATH, ZERO64, dump_record, record_data, record_text
@@ -238,9 +239,10 @@ def test_missing_schema_key_is_reported_and_the_rest_still_checked():
 
 
 def test_id_must_match_the_file_name():
-    """The step names the command that works in the state: git's last commit holds the record's file, so
-    the restore puts it back, and where it does not (a hand rename, a copy, a file only `git add`ed) has
-    no step an agent may run."""
+    """The step names the command that works in the state: `committed` answers that git's last commit
+    holds a copy kblam reads as the record the file name gives, so the restore puts it back — and says
+    what that undoes. Where it does not (a hand rename, a copy, a file only `git add`ed, a commit that
+    holds the damage itself) no step an agent may run is named."""
     rec = parse("SC", "SC-0001", id="SC-0002")
     assert rows(rec) == [expect("SC", "K13",
                                 "id: 'SC-0002' does not match the file name's ID (SC-0001); git's last "
@@ -249,8 +251,48 @@ def test_id_must_match_the_file_name():
                                 rec, "id")]
     committed = [i.message for i in schema_issues(rec, staged=False, committed=lambda path: True)]
     assert committed == ["id: 'SC-0002' does not match the file name's ID (SC-0001); restore the record's "
-                       "file from git (git restore --source=HEAD --staged --worktree "
-                       "research-review/challenges/SC-0001.yaml)"]
+                         "file from git (git restore --source=HEAD --staged --worktree "
+                         "research-review/challenges/SC-0001.yaml), which puts back the file as git's last "
+                         "commit holds it and undoes any kblam put or decision made to it since; if one "
+                         "was, leave it as it is and tell the user instead"]
+
+
+MISFILED = ["research-review/challenges/notes.yaml",          # a stray file, no ID in its name
+            "research-review/challenges/CT-0001.yaml",        # a record under another kind's folder
+            "research-review/tasks/SC-0001.yaml",
+            "research-review/SC-0001.yaml"]                   # directly under the review root
+
+
+@pytest.mark.parametrize("path", MISFILED)
+def test_a_stray_or_misfiled_file_names_no_step(path):
+    """Only a file that sits directly in its kind's folder is the record its file name gives: a stray or
+    misfiled file keeps the bare parse error, however git's last commit answers (the layout check names
+    that file's own step)."""
+    rec = parse_record(path, b"schema: 1\nid: [unterminated\n")
+    assert rec.path == path and rec.error
+    if rec.kind in KINDS:
+        assert not records.in_kind_folder(rec)
+    for committed in (None, lambda path: True):
+        assert [issue.message for issue in schema_issues(rec, staged=False, committed=committed)] == [
+            rec.error]
+
+
+def test_a_misfiled_record_keeps_its_id_error_bare():
+    """A record named under another kind's folder is not the record its file name gives: the id/file-name
+    mismatch keeps its diagnostic and names no step, while the same record in its own folder keeps the
+    restore."""
+    misfiled = parse_record("research-review/challenges/CT-0001.yaml",
+                            dump_record(build("CT", "CT-0001", id="CT-0002")).encode("utf-8"))
+    kept = parse("CT", "CT-0001", id="CT-0002")
+    assert [issue.message for issue in
+            schema_issues(misfiled, staged=False, committed=lambda path: True)] == [
+        "id: 'CT-0002' does not match the file name's ID (CT-0001)"]
+    assert [issue.message for issue in
+            schema_issues(kept, staged=False, committed=lambda path: True)] == [
+        "id: 'CT-0002' does not match the file name's ID (CT-0001); restore the record's file from git "
+        f"(git restore --source=HEAD --staged --worktree {kept.path}), which puts back the file as git's "
+        "last commit holds it and undoes any kblam put or decision made to it since; if one was, leave "
+        "it as it is and tell the user instead"]
 
 
 @pytest.mark.parametrize("value,message", [("X-0001", "id: 'X-0001' is not an ID"),

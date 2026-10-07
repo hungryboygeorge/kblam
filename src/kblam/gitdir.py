@@ -82,26 +82,35 @@ def tracked_state(cfg: Config) -> list[str]:
     return _ls_files(cfg, STATE_DIR)
 
 
-def committed_file(cfg: Config, path: str) -> bool:
-    """Whether git's last commit holds a file at the repository-relative `path`: what `git restore
-    --source=HEAD <path>` needs. The last commit is read, not the index, because a restore from HEAD
-    puts the committed file back and deletes a file that only the index holds, so a `git add` that was
-    never committed must not be answered with that command. False outside a git work tree and whenever
-    git cannot answer: an unborn HEAD (no commit yet) and a missing git both count as not holding it.
-    The listing is asked for NUL-terminated (-z), where every path is literal: without it git quotes a
-    path outside ASCII (core.quotePath), and a quoted path never equals the one asked for."""
+def committed_record(cfg: Config, path: str) -> bool:
+    """Whether git's last commit holds a copy of a record at the repository-relative `path` that kblam
+    reads as the record the file name gives: `git show HEAD:<path>` prints the committed bytes, and
+    records.parse_record of them yields a mapping whose `id` equals the ID the file name gives. That is
+    the copy a restore puts back, so it is the answer a restore step is built on: a commit that holds a
+    file that does not parse, or that names another ID (the damage itself was committed, or a stray file
+    was), would come back byte for byte and print the same step again.
+
+    The last commit is read, not the index: a record that is only `git add`ed is not in HEAD, so a
+    restore would delete the file rather than put it back, and `git show HEAD:<path>` fails for it (git
+    prints the blob itself, so a path outside ASCII needs no quoting trick here). False outside a git
+    work tree and whenever git cannot answer: an unborn HEAD (no commit yet) and a missing git both
+    count as not holding a copy."""
     if git_common_dir(cfg.repo_root) is None:
         return False
     import subprocess  # only here: the hooks' fast path never calls this
 
     try:
-        done = subprocess.run(["git", "--literal-pathspecs", "ls-tree", "-z", "--name-only", "HEAD", "--", path],
-                              cwd=cfg.repo_root, capture_output=True, timeout=GIT_TIMEOUT)
+        done = subprocess.run(["git", "show", f"HEAD:{path}"], cwd=cfg.repo_root, capture_output=True,
+                              timeout=GIT_TIMEOUT)
     except (OSError, subprocess.TimeoutExpired):
         return False
     if done.returncode != 0:
         return False
-    return path in [p for p in done.stdout.decode("utf-8", "replace").split("\0") if p]
+    from kblam import records  # only here: no import of the record tables on the hook's fast path
+
+    rec = records.parse_record(path, done.stdout)
+    value = rec.data.get("id") if isinstance(rec.data, dict) else None
+    return rec.id is not None and value == rec.id
 
 
 def tracked_state_problem(tracked: list[str]) -> str:

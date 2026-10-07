@@ -320,7 +320,9 @@ def use_review(cfg: Config, challenge_id: str, finding_id: str, ordinal: int, by
     with writes.locked(cfg, "use review", mutating=False):
         view = load_view(cfg)
         reader = SourceReader(cfg, view)
-        rec = _installed(cfg, "SC", challenge_id)
+        rec = _installed(cfg, "SC", challenge_id,
+                         retry=f"kblam use review {challenge_id} {finding_id} {ordinal} --by {by} "
+                               f"--proponent {proponent}")
         info = k13.challenge_info(view, reader, rec)
         if not info.confirmed:
             raise StoreError(
@@ -503,17 +505,19 @@ def _edit(cfg: Config, kind: str, rec_id: str) -> Path:
     return staged
 
 
-def _installed(cfg: Config, kind: str, rec_id: str):
+def _installed(cfg: Config, kind: str, rec_id: str, retry: str = ""):
     """The parsed record installed at `<review root>/<kind folder>/<ID>.yaml`, or a StoreError naming the
-    file and the command that writes one."""
+    file and the command that writes one. `retry` is the command the caller was running, named again for
+    an installed file that does not parse: fixed once, it can be run again."""
     shown = f"{cfg.review_dir}/{records.KINDS[kind]}/{rec_id}.yaml"
     path = cfg.review_path / records.KINDS[kind] / f"{rec_id}.yaml"
     if not path.is_file():
         raise StoreError(f"{rec_id} is not installed at {shown}; {_new_command(kind)}")
     rec = records.parse_record(shown, path.read_bytes())
     if rec.data is None:
+        again = f"; once it is fixed, run {retry} again" if retry else ""
         raise StoreError(f"{shown} did not parse ({rec.error}); run kblam validate and do what its line "
-                         f"for {shown} says")
+                         f"for {shown} says{again}")
     return rec
 
 

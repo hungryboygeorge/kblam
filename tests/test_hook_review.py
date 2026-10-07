@@ -513,6 +513,17 @@ def named_restore(text: str) -> str:
     return match.group(1)
 
 
+# The step a K13 line names where git's last commit holds a copy of the record kblam reads as the record
+# the file name gives (records.restore_step): the restore, then what restoring puts back and undoes.
+UNDO = ("which puts back the file as git's last commit holds it and undoes any kblam put or decision made "
+        "to it since; if one was, leave it as it is and tell the user instead")
+
+
+def restore_step(path: str) -> str:
+    """That step for `path`, as the line prints it."""
+    return f"restore the record's file from git (git restore --source=HEAD --staged --worktree {path}), {UNDO}"
+
+
 def test_the_fix_sentence_names_kblam_review_index_for_a_deleted_review_index(review_kb, monkeypatch, capsys):
     """D49 for the fix sentence's "do what its failure line says (the kblam command it names)": the review root's
     INDEX.md deleted out of band blocks the stop with a K13 line that names kblam review index; running
@@ -580,7 +591,7 @@ def test_the_fix_sentence_names_a_restore_from_git_for_a_record_line_that_names_
 
     restore = f"git restore --source=HEAD --staged --worktree {REVIEW}/challenges/SC-0001.yaml"
     assert failures == [f"K13 {REVIEW}/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file "
-                        f"name's ID (SC-0001); restore the record's file from git ({restore})"]
+                        f"name's ID (SC-0001); {restore_step(f'{REVIEW}/challenges/SC-0001.yaml')}"]
     assert (fix, pointer) == (STOP_FIX, POINTER)
 
     # the command the line names, run by an agent: the hook allows it, and it is what puts the ID back
@@ -780,9 +791,9 @@ def test_a_staged_id_and_an_installed_id_both_changed_by_hand_name_deleting_the_
     assert (refused.code, refused.out) == (1, "")
     assert refused.err == (f"kblam put: .kblam/review-staging/SC-0001.yaml: id is 'SC-0009', but the file "
                            f"name's ID is SC-0001; the ID never changes, and the installed record "
-                           f"{REVIEW}/challenges/SC-0001.yaml has id 'SC-0008' too. Delete "
-                           f".kblam/review-staging/SC-0001.yaml, run kblam validate and do what its line "
-                           f"for {REVIEW}/challenges/SC-0001.yaml says {POINTER}\n")
+                           f"{REVIEW}/challenges/SC-0001.yaml does not read as SC-0001 either: it has id "
+                           f"'SC-0008'. Delete .kblam/review-staging/SC-0001.yaml, run kblam validate and "
+                           f"do what its line for {REVIEW}/challenges/SC-0001.yaml says {POINTER}\n")
 
     staged.unlink()                                      # the step it names: delete the staged copy
     restore = named_restore(m.validate(kb).out)          # and run the restore its line prints
@@ -921,7 +932,7 @@ def test_damage_to_a_committed_record_names_a_restore_an_agent_can_run(
 
     assert (fix, pointer) == (STOP_FIX, POINTER)
     assert line.startswith(f"K13 {head}")
-    assert line.endswith(f"; restore the record's file from git ({restore})")
+    assert line.endswith(f"; {restore_step(path)}")
     assert named_restore(line) == restore
 
     assert call("PreToolUse", tool(kb, "Bash", command=restore), monkeypatch, capsys) == (0, None, "")
@@ -989,8 +1000,9 @@ def test_a_staged_id_and_an_installed_id_with_no_id_name_deleting_the_staged_cop
     assert (refused.code, refused.out) == (1, "")
     assert refused.err == (f"kblam put: .kblam/review-staging/SC-0001.yaml: id is 'SC-0009', but the file "
                            f"name's ID is SC-0001; the ID never changes, and the installed record {path} "
-                           f"has no id either. Delete .kblam/review-staging/SC-0001.yaml, run kblam "
-                           f"validate and do what its line for {path} says {POINTER}\n")
+                           f"does not read as SC-0001 either: it has no id. Delete "
+                           f".kblam/review-staging/SC-0001.yaml, run kblam validate and do what its line "
+                           f"for {path} says {POINTER}\n")
 
     staged.unlink()                                      # the step it names: delete the staged copy
     restore = named_restore(m.validate(kb).out)          # and run the restore its line prints
@@ -1036,3 +1048,207 @@ def test_either_edit_command_refuses_an_installed_record_with_no_id(
     restore = named_restore(m.validate(kb).out)                   # the step the refusal leads to
     git(kb.root, *restore.split()[1:])
     assert m.kblam(kb, word, "edit", rec_id).code == 0            # the command it says to run again
+
+
+# --- R3e 1b: when the restore is offered, and the steps a duplicate ID names -------------------------
+
+
+def test_the_restore_step_says_that_it_undoes_a_write_made_since_git(git_review_kb, monkeypatch, capsys):
+    """D49 for the clause the restore step now carries (NIT-1): a kblam decision written after git's last
+    commit is not in that commit, and the restore puts the committed bytes back over it, so the step says
+    what it undoes. The probe runs the step as printed: the record comes back as the commit holds it, and
+    the decision is gone."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    path = f"{REVIEW}/challenges/SC-0001.yaml"
+    sound = record_text("SC", "SC-0001")
+    kb.write(path, sound)
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
+
+    decided = m.decide(kb, "SC-0001", "rejected", by="reviewer-b",
+                       reason="The printed byte values do not support the claim.")
+    assert decided.code == 0, decided.out + decided.err
+    assert b"rejected" in (kb.root / path).read_bytes()      # a kblam write the commit does not hold
+
+    kb.write(path, record_text("SC", "SC-0001", id=DROP))    # the hand damage: no id
+
+    failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
+    line = next(line for line in failures if line.startswith(f"K13 {path}:"))
+
+    assert (fix, pointer) == (STOP_FIX, POINTER)
+    assert line.endswith(f"; {restore_step(path)}")
+    restore = named_restore(line)
+    assert restore == f"git restore --source=HEAD --staged --worktree {path}"
+
+    git(kb.root, *restore.split()[1:])                       # the step as printed, run
+    assert (kb.root / path).read_text(encoding="utf-8") == sound   # the commit's bytes: the decision gone
+    assert b"rejected" not in (kb.root / path).read_bytes()
+
+    assert m.kblam(kb, "review", "index").code == 0          # the index the decision rewrote
+    assert m.validate(kb, "--record").code == 0
+
+
+def test_a_commit_that_holds_the_damage_names_no_restore(git_review_kb, monkeypatch, capsys):
+    """D49 for NIT-2: where git's last commit holds the damaged bytes themselves, the restore would put
+    the same bytes back and the same line would print again. The step says to leave the file alone
+    instead, names no git command, and the file stays byte-identical."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    path = f"{REVIEW}/challenges/SC-0001.yaml"
+    kb.write(path, record_text("SC", "SC-0001"))
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
+
+    kb.write(path, record_text("SC", "SC-0001", id=DROP))    # the hand damage: no id
+    git(kb.root, "add", "-A")                                # and it is committed as the damage
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "the damage, committed")
+    before = (kb.root / path).read_bytes()
+
+    failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
+    line = next(line for line in failures if line.startswith(f"K13 {path}:"))
+
+    assert (fix, pointer) == (STOP_FIX, POINTER)
+    assert line.endswith(f"; git's last commit does not hold a file at {path}, so leave it as it is and "
+                         f"tell the user")
+    assert "git restore" not in line
+    assert (kb.root / path).read_bytes() == before
+
+
+def test_a_committed_stray_file_names_no_restore(git_review_kb, monkeypatch, capsys):
+    """D49 for NIT-2 where the committed stray is not a record at all: broken YAML in a file no kind's
+    folder holds gets the bare parse error, and the layout check's own line names the step (delete it)."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "the knowledge base")
+    path = f"{REVIEW}/challenges/notes.yaml"
+    kb.write(path, "a: [unterminated\n")                     # a stray file, broken YAML
+    git(kb.root, "add", "-f", path)                          # committed, and never a record
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "a stray file")
+    before = (kb.root / path).read_bytes()
+
+    failures, _fix, _pointer = blocked_parts(kb, monkeypatch, capsys)
+    lines = [line for line in failures if line.startswith(f"K13 {path}:")]
+    parse = next(line for line in lines if "not valid YAML" in line)
+    layout = next(line for line in lines if line not in (parse,))
+
+    assert len(lines) == 2, lines                            # the parse error, and the layout line
+    assert parse.endswith(": not valid YAML: expected ',' or ']', but got '<stream end>'")
+    assert "git restore" not in parse and "leave it as it is" not in parse
+    assert layout.endswith("then delete this file")
+    assert (kb.root / path).read_bytes() == before
+
+
+def test_a_misfiled_record_keeps_its_parse_error_bare(git_review_kb, monkeypatch, capsys):
+    """D49 for NIT-3 at the validator's level: a record under the wrong kind's folder gets no restore, and
+    the layout line names the step that fits it (restage it, since no receipt exists for that ID)."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "the knowledge base")
+    path = f"{REVIEW}/challenges/CT-0001.yaml"               # a task record under challenges/
+    kb.write(path, "schema: 1\nid: [unterminated\n")
+    before = (kb.root / path).read_bytes()
+
+    failures, _fix, _pointer = blocked_parts(kb, monkeypatch, capsys)
+    lines = [line for line in failures if line.startswith(f"K13 {path}:")]
+    parse = next(line for line in lines if "not valid YAML" in line)
+    layout = next(line for line in lines if line not in (parse,))
+
+    assert len(lines) == 2, lines
+    assert parse.endswith(": not valid YAML: expected ',' or ']', but got '<stream end>'")
+    assert "git restore" not in parse and "leave it as it is" not in parse
+    assert "restage it with kblam challenge new, kblam task new or kblam use review" in layout
+    assert (kb.root / path).read_bytes() == before
+
+
+def test_a_duplicate_id_names_the_restore_of_the_file_that_causes_it(git_review_kb, monkeypatch, capsys):
+    """D49 for the duplicate-ID line (R3e 1b): the file whose own bytes no longer read as the record its
+    file name gives is the one kblam will not accept, and git's last commit holds a copy kblam reads as
+    that record, so the line names its restore. Run as printed, the false claim is gone and the tree is
+    clean again."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    first, second = f"{REVIEW}/challenges/SC-0001.yaml", f"{REVIEW}/challenges/SC-0002.yaml"
+    kb.write(first, record_text("SC", "SC-0001"))
+    kb.write(second, record_text("SC", "SC-0002"))
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "two records")
+    kb.write(second, record_text("SC", "SC-0002", id="SC-0001"))   # the hand edit: SC-0001 claims SC-0001
+
+    failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
+    line = next(line for line in failures if "claimed by more than one record file" in line
+                and line.startswith(f"K13 {second}:"))
+
+    assert line.endswith(f"the ID SC-0001 is claimed by more than one record file ({first}, {second}); "
+                         f"each ID names one record, and records are never renamed. Restore the record's "
+                         f"file from git (git restore --source=HEAD --staged --worktree {second}), which "
+                         f"puts back the file as git's last commit holds it and undoes any kblam put or "
+                         f"decision made to it since; if one was, leave it as it is and tell the user "
+                         f"instead")
+
+    git(kb.root, *named_restore(line).split()[1:])           # the step as printed, run
+    assert (kb.root / second).read_text(encoding="utf-8") == record_text("SC", "SC-0002")
+    assert m.validate(kb, "--record").code == 0
+
+
+def test_a_hand_copied_duplicate_id_names_no_restore(git_review_kb, monkeypatch, capsys):
+    """D49 for the duplicate-ID line where the copy was never committed: no restore can put it back
+    (git never held the copy, and kblam never renames a record), so the step says to leave the file as it
+    is and tell the user, and the copy stays byte-identical."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    path = f"{REVIEW}/challenges/SC-0001.yaml"
+    kb.write(path, record_text("SC", "SC-0001"))
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
+    copy = f"{REVIEW}/challenges/SC-0002.yaml"
+    kb.write(copy, record_text("SC", "SC-0001"))             # a hand copy, never committed
+    before = (kb.root / copy).read_bytes()
+
+    failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
+    line = next(line for line in failures if "claimed by more than one record file" in line
+                and line.startswith(f"K13 {copy}:"))
+
+    assert (fix, pointer) == (STOP_FIX, POINTER)
+    assert line.endswith(f"the ID SC-0001 is claimed by more than one record file ({path}, {copy}); each "
+                         f"ID names one record, and records are never renamed. Git's last commit does not "
+                         f"hold a file at {copy}, so leave it as it is and tell the user")
+    assert "git restore" not in line
+    assert (kb.root / copy).read_bytes() == before
+
+
+def test_a_duplicate_id_that_no_restore_can_fix_names_no_command(git_review_kb, monkeypatch, capsys):
+    """D49 for the duplicate-ID line where both files read as the records their names give (a hand copy
+    beside the record it copies, in another kind's folder): putting back either one changes nothing, so
+    the step names the files it concerns, names no command, and says to leave them and tell the user."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    path = f"{REVIEW}/challenges/SC-0001.yaml"
+    sound = record_text("SC", "SC-0001")
+    kb.write(path, sound)
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
+    copy = f"{REVIEW}/tasks/SC-0001.yaml"
+    kb.write(copy, sound)                                    # a hand copy, committed where it sits
+    git(kb.root, "add", "-f", copy)
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "a hand copy")
+
+    failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
+    line = next(line for line in failures if "claimed by more than one record file" in line
+                and line.startswith(f"K13 {copy}:"))
+
+    assert (fix, pointer) == (STOP_FIX, POINTER)
+    assert line.endswith(f"the ID SC-0001 is claimed by more than one record file ({path}, {copy}); each "
+                         f"ID names one record, and records are never renamed. No command an agent may run "
+                         f"puts {path}, {copy} right; leave them as they are and tell the user")
+    assert "git restore" not in line
+    assert (kb.root / copy).read_bytes() == sound.encode("utf-8")

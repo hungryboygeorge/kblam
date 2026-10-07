@@ -111,6 +111,32 @@ class SourceReader:
         return (not self.trust_state
                 and paths._under(target.resolve(strict=False), self.cfg.state_dir.resolve(strict=False)))
 
+    def state_refused(self, raw) -> bool:
+        """Whether `raw` names a path this reader refuses to read for trust: it lies under `.kblam/`
+        and this validation does not trust machine state (SPEC §5.2.6 Committed state). The bytes are
+        never read, however sound the file is, so a reference to such a path is unavailable here and no
+        step that restores those bytes can work from this clone. A value that is not a path at all, or
+        one paths.resolve refuses, is False: the reference's own error reports it."""
+        if not isinstance(raw, str):
+            return False
+        try:
+            target = paths.resolve(self.cfg, raw)
+        except paths.PathRefused:
+            return False
+        return self._untrusted_state(target)
+
+    def refused_for_trust(self, ref: FileRef) -> str | None:
+        """The first path `ref` names — the reference's own path, its snapshot, or the repository its pin
+        names — that this reader refuses to read for trust (state_refused), or None when it names no such
+        path. Those bytes are unread however sound they are, so the reference is unavailable here and no
+        step that restores them can work from this validation."""
+        if self.trust_state:
+            return None
+        for raw in (ref.path, ref.snapshot, ref.repo):
+            if isinstance(raw, str) and self.state_refused(raw):
+                return raw
+        return None
+
     def working(self, raw: str) -> bytes | None:
         """The working bytes of a repo-relative path; None if it is refused, missing or a directory."""
         try:
