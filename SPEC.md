@@ -412,7 +412,7 @@ are K13 errors.
 | Key | Type | Rule |
 |---|---|---|
 | `schema` | integer | `1`. Any other value is a K13 error, "unsupported schema version N". |
-| `id` | string | matches the filename (`git restore --source=HEAD --staged --worktree <path>` where git's last commit holds it; otherwise leave it and tell the user) |
+| `id` | string | matches the filename: an installed record whose `id` is missing, blank or not an ID, or that no longer parses, gets the same step a mismatch does — `git restore --source=HEAD --staged --worktree <path>` where git's last commit holds the file, otherwise leave it and tell the user |
 | `created` | date | `YYYY-MM-DD`, set at allocation |
 | `creator` | name | who allocated the record (`--by`) |
 | `status` | string | in the kind's vocabulary (§5.2.3) |
@@ -778,6 +778,10 @@ output, in the same order.
 - The review root in `kblam.toml` is the one `tree.hash` records (§5.2.6).
 - Schema (§5.2.2, §5.2.3); each ID matches its file; IDs are unique; every ID in the registry is
   present (§5.2.6).
+- A record file the schema check cannot read as the record its ID and file name give — an `id` that
+  is missing, blank or not an ID, or a file that does not parse — and an `id` that does not match
+  its file name: the line ends with the step §5.2.2's `id` row gives, since kblam's hooks deny
+  editing or removing an installed record file, so an agent cannot set the field by hand.
 - Path syntax and containment; hash and object-ID syntax; Git pins verified (§5.2.2).
 - Dangling links: a `linked_findings` entry or `finding` that names no finding, or a `challenge`
   that names no SC.

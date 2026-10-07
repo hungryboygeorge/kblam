@@ -340,8 +340,12 @@ def test_editing_an_unknown_or_malformed_challenge_is_refused(kb):
     with pytest.raises(StoreError, match="is not a challenge ID like SC-0001"):
         review_stage.challenge_edit(kb.cfg, "F-0001")
     kb.write(f"{SC_DIR}/SC-0001.yaml", "- not a mapping\n")
-    with pytest.raises(StoreError, match="did not parse"):
+    with pytest.raises(StoreError) as exc:
         review_stage.challenge_edit(kb.cfg, "SC-0001")
+    assert str(exc.value) == ("research-review/challenges/SC-0001.yaml did not parse (not a YAML "
+                             "mapping); run kblam validate and do what its line for research-review/"
+                             "challenges/SC-0001.yaml says; once it is fixed, run kblam challenge edit "
+                             "SC-0001 again")
     assert not (kb.root / STAGING).exists()
 
 
@@ -679,7 +683,8 @@ def test_challenge_show_refuses_a_malformed_record(kb):
     with pytest.raises(StoreError) as exc:
         review_stage.challenge_show(kb.cfg, "SC-0001")
     assert str(exc.value) == ("research-review/challenges/SC-0001.yaml did not parse (not a YAML "
-                             "mapping); run kblam validate")
+                             "mapping); run kblam validate and do what its line for research-review/"
+                             "challenges/SC-0001.yaml says")
 
 
 def test_task_show_prints_the_binding_and_whether_it_holds(kb):

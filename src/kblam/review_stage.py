@@ -483,12 +483,13 @@ def _edit(cfg: Config, kind: str, rec_id: str) -> Path:
     raw = installed.read_bytes()
     rec = records.parse_record(shown, raw)
     if rec.data is None:
-        raise StoreError(f"{shown} did not parse ({rec.error}); run kblam validate")
+        raise StoreError(f"{shown} did not parse ({rec.error}); run kblam validate and do what its line "
+                         f"for {shown} says; once it is fixed, run kblam {word} edit {rec_id} again")
     if rec.data.get("id") != rec_id:
         raise StoreError(
-            f"the installed record {shown} has id {rec.data.get('id')!r}, but its file name's ID is "
-            f"{rec_id}, so kblam will not stage a copy of it. Run kblam validate and do what its line for "
-            f"{shown} says, then run kblam {word} edit {rec_id} again")
+            f"the installed record {shown} {records.id_text(rec.data.get('id'))}, but its file name's "
+            f"ID is {rec_id}, so kblam will not stage a copy of it. Run kblam validate and do what its "
+            f"line for {shown} says; once it is fixed, run kblam {word} edit {rec_id} again")
     staged = cfg.review_staging_dir / f"{rec_id}.yaml"
     if staged.exists():
         raise StoreError(f"{rec_id} is already staged at {display_path(cfg, staged)}; edit that copy and "
@@ -511,7 +512,8 @@ def _installed(cfg: Config, kind: str, rec_id: str):
         raise StoreError(f"{rec_id} is not installed at {shown}; {_new_command(kind)}")
     rec = records.parse_record(shown, path.read_bytes())
     if rec.data is None:
-        raise StoreError(f"{shown} did not parse ({rec.error}); run kblam validate")
+        raise StoreError(f"{shown} did not parse ({rec.error}); run kblam validate and do what its line "
+                         f"for {shown} says")
     return rec
 
 

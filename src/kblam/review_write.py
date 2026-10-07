@@ -974,8 +974,14 @@ def _id_refusal(cfg: Config, kind: str, rec_id: str, shown: str, bad) -> str:
     before the hand edit, or staged by hand — putting the staged `id` back would only meet put's next
     refusal ("id is not a free field"), so the staged file goes and the installed file is restored. An
     installed file that does not parse (or is not a mapping, or cannot be read) gets that same step
-    without the "has id … too" clause, its own `id` being unsayable."""
-    head = f"{shown}: id is {bad!r}, but the file name's ID is {rec_id}; the ID never changes"
+    with no "has id …" clause, its own `id` being unsayable, and one whose `id` is missing or blank is
+    named as having no `id` (records.id_text), never as Python's None. The STAGED `id` is named the same
+    way: a missing or blank one gives "the staged file has no id", with whichever step the installed
+    record chooses ("Set id back to …" also covers adding the line back)."""
+    blank = bad is None or (isinstance(bad, str) and not bad.strip())
+    head = (f"{shown}: the staged file has no id, but the file name's ID is {rec_id}; the ID never "
+            f"changes" if blank else
+            f"{shown}: id is {bad!r}, but the file name's ID is {rec_id}; the ID never changes")
     path = _record_path(cfg, kind, rec_id)
     installed = cfg.review_path / records.KINDS[kind] / f"{rec_id}.yaml"
     if not installed.is_file():
@@ -988,7 +994,8 @@ def _id_refusal(cfg: Config, kind: str, rec_id: str, shown: str, bad) -> str:
         return (f"{head}, and the installed record {path} does not read as {rec_id} either. Delete "
                 f"{shown}, run kblam validate and do what its line for {path} says")
     if data.get("id") != rec_id:
-        return (f"{head}, and the installed record {path} has id {data.get('id')!r} too. Delete {shown}, "
+        return (f"{head}, and the installed record {path} "
+                f"{records.id_text(data.get('id'), also=True)}. Delete {shown}, "
                 f"run kblam validate and do what its line for {path} says")
     return f"{head}. Set id back to {rec_id} in {shown} and put it again"
 

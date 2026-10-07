@@ -135,13 +135,18 @@ def schema_issues(rec: Record, *, staged: bool, committed=None) -> list[Issue]:
     owner rec.id or "",
     path rec.path, line rec.key_line(<top-level key>) or 0.
 
-    `committed` answers whether git's last commit holds a file at a record's path, for the step the
-    id/file-name mismatch names: a callable taking that path (kblam.gitdir.committed_file of the
-    config), called only for a record whose `id` does not match its file name. None is the answer
-    outside a repository, so that mismatch then names no git command.
+    `committed` answers whether git's last commit holds a file at a record's path, for the step an
+    installed record's damage names (an `id` that is missing, blank or not an ID, one that does not
+    match the file name, and a file that did not parse): a callable taking that path
+    (kblam.gitdir.committed_file of the config). None is the answer outside a repository, so those
+    messages then name no git command. A staged record's `id` errors name no step: its author can set
+    the field.
     """
     if rec.data is None:
-        return [Issue(rec.path, 0, "K13", rec.error or "record did not parse", "error", rec.id or "")]
+        message = rec.error or "record did not parse"
+        if not staged:
+            message += f"; {_restore_step(rec.path, committed)}"
+        return [Issue(rec.path, 0, "K13", message, "error", rec.id or "")]
     kind = rec.kind
     if kind not in KEYS:
         return []   # not a record at all: how the review root names its files is K13's own check (§5.2.4)
@@ -168,7 +173,10 @@ def schema_issues(rec: Record, *, staged: bool, committed=None) -> list[Issue]:
         if key == "schema":
             continue
         if key not in data:
-            add(key, f"missing key {key!r}")
+            message = f"missing key {key!r}"
+            if key == "id" and not staged:
+                message += f"; {_restore_step(rec.path, committed)}"
+            add(key, message)
             continue
         checker, argument = FIELD_CHECKS[key]
         if checker is _check_id:
@@ -193,6 +201,17 @@ def dump(mapping) -> bytes:
 def file_ref(mapping: dict) -> FileRef:
     """A FileRef from a parsed reference mapping; missing keys become None."""
     return FileRef(*(mapping.get(key) for key in REF_KEYS))
+
+
+def id_text(value, *, also: bool = False) -> str:
+    """The `id` an installed record's file holds, as a refusal names it: a non-empty string as
+    "has id 'SC-0001'", and a value that is missing or blank as "has no id" — never Python's None,
+    which is no part of a record. A value that is neither is named by its repr. `also` fits a sentence
+    whose preceding clause already said the ID never changes: "has id 'SC-0002' too" / "has no id
+    either"."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return "has no id either" if also else "has no id"
+    return f"has id {value!r} too" if also else f"has id {value!r}"
 
 
 # --- values (SPEC §5.2.2 Values) ---------------------------------------------------------------
@@ -230,30 +249,35 @@ def _check_id(rec, top_key, prefix, value, staged, add, committed):
     if not (isinstance(value, str) and ID_RE.match(value)):
         if staged and _blank(value):
             return
-        add(top_key, "id: required" if _missing(value) else f"id: {value!r} is not an ID")
+        message = "id: required" if _missing(value) else f"id: {value!r} is not an ID"
+        if not staged:
+            message += f"; {_restore_step(rec.path, committed)}"
+        add(top_key, message)
         return
     if rec.id is not None and value != rec.id:
         add(top_key, f"id: {value!r} does not match the file name's ID ({rec.id}); "
-                     f"{_id_step(rec, committed)}")
+                     f"{_restore_step(rec.path, committed, renamed=True)}")
 
 
-def _id_step(rec: Record, committed) -> str:
-    """What fixes a record file whose `id` does not match its file name (SPEC §5.2.4 K13). Where git's
-    last commit holds a file at the record's path, restoring it puts the recorded `id` back. The restore
-    names HEAD for both the index and the worktree, so a hand edit already `git add`ed is put back too
-    (a plain `git restore <path>` restores the index version, so the added hand edit would survive).
-    The last commit is what the restore needs, not the index: a record that is only `git add`ed is not in
-    HEAD, so the restore would delete the file rather than put it back, and it is named only where HEAD
-    holds the path. Where it does not — a record renamed or copied by hand, one never committed, a
-    repository with no commit — no command an agent may run puts the record back under the name its ID
-    gives: kblam's hooks deny removing a record file, and git cannot move a file it never held.
-    `committed` is the caller's answer (kblam.gitdir.committed_file); None means no repository can
-    answer."""
-    if committed is not None and committed(rec.path):
+def _restore_step(rec_path: str, committed, *, renamed: bool = False) -> str:
+    """What fixes an installed record file kblam cannot read as the record its ID and file name give
+    (SPEC §5.2.2 `id`, §5.2.4 K13). Where git's last commit holds a file at the record's path, restoring
+    it puts the recorded bytes back. The restore names HEAD for both the index and the worktree, so a
+    hand edit already `git add`ed is put back too (a plain `git restore <path>` restores the index
+    version, so the added hand edit would survive). The last commit is what the restore needs, not the
+    index: a record that is only `git add`ed is not in HEAD, so the restore would delete the file rather
+    than put it back, and it is named only where HEAD holds the path. Where it does not — a record
+    renamed or copied by hand, one never committed, a repository with no commit — no command an agent
+    may run puts the record back: kblam's hooks deny editing or removing a record file, and git cannot
+    move a file it never held. `committed` is the caller's answer (kblam.gitdir.committed_file); None
+    means no repository can answer. `renamed` adds that a record is never renamed, for the id/file-name
+    mismatch, where the record may sit under a name of its own."""
+    if committed is not None and committed(rec_path):
         return (f"restore the record's file from git "
-                f"(git restore --source=HEAD --staged --worktree {rec.path})")
-    return (f"git's last commit does not hold a file at {rec.path}, and records are never renamed, so "
-            f"leave it as it is and tell the user")
+                f"(git restore --source=HEAD --staged --worktree {rec_path})")
+    renamed_note = ", and records are never renamed" if renamed else ""
+    return (f"git's last commit does not hold a file at {rec_path}{renamed_note}, so leave it as it is "
+            f"and tell the user")
 
 
 def _check_date(rec, top_key, prefix, value, staged, add, argument):
