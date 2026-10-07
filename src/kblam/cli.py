@@ -744,12 +744,19 @@ def _cmd_cost(cfg, args) -> int:
 
 
 def _cmd_recheck(cfg, args) -> int:
-    """Run the check: commands a person has approved on this machine (SPEC §7). At a terminal, ask about
-    each new or changed one first; without one, report those as not approved."""
+    """Run the check: commands approved on this machine (SPEC §7). At a terminal, ask about each new or
+    changed one first; without one, either show each for the agent to approve with --approve (the default)
+    or, when kblam.toml requires a person's approval, report it as not approved."""
     recheck.check_state_paths(cfg)
+    if args.list and args.approve is not None:
+        raise RecheckError("--list prints each check: command and runs nothing, while --approve approves one "
+                           "command and runs it; use one or the other")
+    person_only = cfg.recheck_person_approval
+    if args.approve is not None:
+        return _approve(cfg, args)
     checks, problems = recheck.collect(cfg, args.ids)
     approvals = recheck.load_approvals(cfg)
-    states = {c.finding_id: recheck.approval_state(c, approvals) for c in checks}
+    states = {c.finding_id: recheck.approval_state(c, approvals, person_only=person_only) for c in checks}
     if args.list:
         return _list_rechecks(checks, states, problems)
     terminal = recheck.at_terminal()
@@ -764,27 +771,66 @@ def _cmd_recheck(cfg, args) -> int:
                     answer = ""
                 if answer.strip().lower() in ("y", "yes"):
                     recheck.record_approval(cfg, c)
-                    states[c.finding_id] = recheck.State(True)
+                    states[c.finding_id] = recheck.State(True, approver=recheck.PERSON)
                 else:
                     declined.add(c.finding_id)
                     states[c.finding_id] = recheck.State(False, "you did not approve it")
-    counts = Counter(_recheck_one(cfg, c, states[c.finding_id], terminal, c.finding_id in declined)
+    counts = Counter(_recheck_one(cfg, c, states[c.finding_id], terminal, c.finding_id in declined, person_only)
                      for c in checks)
     for problem in problems:
         print(f"kblam recheck: {problem}")
     if not checks and not problems:
         print("kblam recheck: no finding has a check: command")
         return EXIT_OK
+    return _recheck_summary(len(checks), counts, len(problems))
+
+
+def _approve(cfg, args) -> int:
+    """`kblam recheck F-NNNN --approve DIGEST`: the agent running kblam records its own approval of the one
+    check whose block it read, then that check runs."""
+    if cfg.recheck_person_approval:
+        raise RecheckError("--approve is refused: kblam.toml sets recheck_person_approval = true, so only a person "
+                           "at a terminal approves a check: command. Ask the user to run kblam recheck with that "
+                           "finding's ID at a terminal, which shows the command and asks them")
+    if len(args.ids) != 1:
+        got = ", ".join(args.ids) if args.ids else "none"
+        raise RecheckError(f"--approve approves the one check whose block you read, so it needs exactly one finding "
+                           f"ID; {got} was given. Run kblam recheck --list to see which findings have a check: "
+                           f"command, then approve one by ID with the digest its block prints")
+    check = recheck.collect(cfg, args.ids)[0][0]
+    if check.problem:
+        raise RecheckError(f"{check.finding_id} cannot be approved: {check.problem}")
+    digest = recheck.approval_digest(check)
+    if args.approve != digest:
+        state = recheck.approval_state(check, recheck.load_approvals(cfg), person_only=False)
+        if state.approved:
+            raise RecheckError(f"{check.finding_id} is already approved as it is now, so there is nothing to "
+                               f"approve, and {shown(args.approve)} is not the digest of its check: command and "
+                               f"files ({digest}). Run kblam recheck {check.finding_id} to run it")
+        print(f"kblam recheck: {check.finding_id} was not approved: {shown(args.approve)} does not name its check: "
+              f"command and files as they are now, so the command or a file it names changed since that digest "
+              f"was shown. Read the block below again, then approve the digest it prints, or leave the finding "
+              f"as it is.")
+        print(recheck.approval_block(cfg, check, state))
+        return EXIT_INVALID
+    recheck.record_approval(cfg, check, approver=recheck.AGENT)
+    outcome = _recheck_one(cfg, check, recheck.State(True, approver=recheck.AGENT), False, False, False)
+    return _recheck_summary(1, Counter([outcome]), 0)
+
+
+def _recheck_summary(total: int, counts: Counter, problems: int) -> int:
+    """The run's last line and its exit status: 0 when every selected check passed, 1 otherwise."""
     parts = [f"{counts['passed']} passed"] + [f"{counts[k]} {k}" for k in ("failed", "could not run", "not approved")
                                               if counts[k]]
     if problems:
-        parts.append(f"{len(problems)} finding(s) not considered")
-    bad = len(checks) - counts["passed"] + len(problems)
-    print(f"kblam recheck: {len(checks)} check(s): {', '.join(parts)}" + (f". {SKILL_POINTER}" if bad else ""))
+        parts.append(f"{problems} finding(s) not considered")
+    bad = total - counts["passed"] + problems
+    print(f"kblam recheck: {total} check(s): {', '.join(parts)}" + (f". {SKILL_POINTER}" if bad else ""))
     return EXIT_INVALID if bad else EXIT_OK
 
 
-def _recheck_one(cfg, c: recheck.Check, state: recheck.State, terminal: bool, declined: bool) -> str:
+def _recheck_one(cfg, c: recheck.Check, state: recheck.State, terminal: bool, declined: bool,
+                 person_only: bool) -> str:
     """Run or report one check; the summary's category for it."""
     if c.problem:
         print(f"kblam recheck: {c.finding_id} could not run: {c.problem}")
@@ -797,7 +843,9 @@ def _recheck_one(cfg, c: recheck.Check, state: recheck.State, terminal: bool, de
     if not state.approved:
         print(f"kblam recheck: {c.finding_id} not run: not approved on this machine ({state.reason}): "
               f"{shown(c.command)}")
-        if not terminal:
+        if not terminal and not person_only:  # the agent running kblam reads the block and approves it itself
+            print(recheck.approval_block(cfg, c, state))
+        elif not terminal:
             print(f"  A person approves it by running kblam recheck {c.finding_id} at a terminal, which shows the "
                   f"command first; an agent asks the user to do that. Anyone who can push to this repository "
                   f"can put a command in a finding, so an agent never runs an unapproved one itself.")
@@ -807,7 +855,7 @@ def _recheck_one(cfg, c: recheck.Check, state: recheck.State, terminal: bool, de
         return "not approved"
     print(f"kblam recheck: {c.finding_id} running: {shown(c.command)}", flush=True)
     result = recheck.run_check(cfg, c)
-    recheck.log(cfg, c, result.status, terminal=terminal, result=result)
+    recheck.log(cfg, c, result.status, terminal=terminal, approver=state.approver, result=result)
     if result.status == "passed":
         print(f"kblam recheck: {c.finding_id} passed ({result.detail} after {result.seconds:.1f} s)")
         return "passed"
@@ -984,11 +1032,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("cost", help="summarise .kblam/calls.jsonl: Jev requests, tokens and cost, per day and kind")
     p.set_defaults(func=_cmd_cost)
     p = sub.add_parser("recheck", help="run the check: commands of the given findings, or of every finding; a "
-                                       "new or changed command runs only once a person approves it at a "
-                                       "terminal")
+                                       "new or changed command runs only once it is approved on this machine, "
+                                       "by the agent that read its block (--approve) or, when kblam.toml sets "
+                                       "recheck_person_approval, by a person at a terminal")
     p.add_argument("ids", nargs="*", metavar="F-NNNN")
     p.add_argument("--list", action="store_true",
                    help="print each check: command and whether it is approved on this machine; run nothing")
+    p.add_argument("--approve", metavar="DIGEST",
+                   help="approve the check: command of the one finding given, exactly as the block printed for it "
+                        "shows, and run it; refused when kblam.toml sets recheck_person_approval = true")
     p.set_defaults(func=_cmd_recheck)
     p = sub.add_parser("prompt-id", help="print the ids of this project's Jev prompt (its [jev.prompt] tables): "
                                          "the combined id, then each question's own, which [jev.thresholds] "

@@ -40,6 +40,11 @@ adjudicators = []              # agent types that may run kblam resolve and kbla
 lock_wait_seconds = 30         # how long kblam's writers wait for .kblam/lock (SPEC §7)
 lock_stale_seconds = 300       # a lock not refreshed for this long (or whose holder is dead) is broken
 recheck_timeout_seconds = 600  # kblam recheck: a check: command running longer is killed and fails
+# kblam recheck: who approves a check: command. false (the default) = the agent running kblam recheck
+# reads each new or changed command and approves it itself; true = only a person at a terminal approves
+# one, which is stronger: no agent can approve a command that reached this machine through a pull.
+# Changing it needs kblam approve-config at a terminal.
+recheck_person_approval = false
 
 # The [review] section (SPEC §5.2) names the folder that holds the source challenges, claim tasks and
 # reviewed uses of the knowledge base, and the provenance vocabulary a challenge's basis and a

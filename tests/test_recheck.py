@@ -1,6 +1,6 @@
-"""`kblam recheck` (SPEC §4, §7, §8.3): a finding's check: command runs only in recheck, and only once a person
-approved that exact command, with the repository files it names, at a terminal. Without a terminal the
-approved commands run and every other one is reported as not approved. The approvals live in the git
+"""`kblam recheck` (SPEC §4, §7, §8.3): a finding's check: command runs only in recheck, and only once it
+is approved on this machine, by the agent that read its block and ran `--approve` (the default) or, when
+kblam.toml sets recheck_person_approval, by a person at a terminal. The approvals live in the git
 directory, where no commit can write, and a command runs without the Jev key's variable. The commands here
 are local Python scripts under tmp_path; nothing touches the network."""
 
@@ -11,6 +11,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -92,6 +93,15 @@ def run(kb, capsys, monkeypatch, *args: str, answers: list[str] | None = None) -
     return code, out, err
 
 
+def approval_command(out: str) -> list[str]:
+    """The arguments of the `kblam recheck F-NNNN --approve DIGEST` command the last block printed, taken
+    from the output as an agent reading it would (run() supplies the program name and --root)."""
+    line = next(line for line in out.splitlines() if "To approve it, run: " in line)
+    command = line.split("To approve it, run: ", 1)[1].split()
+    assert command[:2] == ["kblam", "recheck"], command
+    return command[2:]
+
+
 def log_lines(kb) -> list[dict]:
     path = kb.root / ".kblam" / "recheck.jsonl"
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
@@ -133,6 +143,7 @@ def test_a_failing_check_is_reported_with_its_output(mkb, capsys, monkeypatch):
                         "fix this.\n")
     last = log_lines(mkb)[-1]
     assert (last["id"], last["outcome"], last["exit_code"], last["terminal"]) == ("F-0001", "failed", 3, True)
+    assert last["approver"] == "person"  # approved at the terminal this run asked at
     assert last["command"] == hashlib.sha256(command.encode()).hexdigest()
     assert command not in (mkb.root / ".kblam/recheck.jsonl").read_text(encoding="utf-8")  # digests, not text
 
@@ -142,8 +153,18 @@ def test_without_a_terminal_an_unapproved_command_is_not_run(mkb, capsys, monkey
     code, out, err = run(mkb, capsys, monkeypatch)
     assert code == 1 and ran(mkb) == [] and err == ""
     assert f"kblam recheck: F-0001 not run: not approved on this machine (new command): {mark('F-0001')}\n" in out
-    assert "A person approves it by running kblam recheck F-0001 at a terminal" in out
-    assert "an agent asks the user to do that" in out and "never runs an unapproved one itself" in out
+    assert (f"  command: {mark('F-0001')}\n"
+            f"  argv:    {json.dumps(shlex.split(mark('F-0001')))}\n"
+            f"  program: {sys.executable}\n"
+            f"  pinned:  {MARK}\n") in out
+    args = approval_command(out)  # the block shows the agent exactly what would approve this command
+    assert args[:2] == ["F-0001", "--approve"]
+    assert re.fullmatch(r"[0-9a-f]{12}", args[-1])
+    assert "  That digest names this command and these files; kblam refuses it once either changes.\n" in out
+    assert ("  Approve it only if the command does what this finding's check: needs and nothing else. If\n"
+            "  anything looks wrong -- a program unrelated to the finding, deleting or sending anything, a\n"
+            "  path outside this repository, or a character hidden in an escaped command -- do not approve\n"
+            "  it: leave the finding as it is and tell the user.\n") in out
     assert "1 check(s): 0 passed, 1 not approved" in out
     assert not (mkb.root / APPROVALS).exists()
     assert log_lines(mkb)[-1]["outcome"] == "not_approved"
@@ -272,6 +293,198 @@ def test_list_shows_each_command_and_its_state_and_runs_nothing(mkb, capsys, mon
                    f"quoting with kblam edit F-0003\n"
                    f"kblam recheck --list: 3 check(s): 1 approved, 1 not approved on this machine, 1 cannot run; "
                    f"nothing was run\n")
+
+
+# --- the agent approves a check (the default: recheck_person_approval = false) ----------------------
+
+
+def test_an_agent_approves_the_digest_its_block_printed_and_the_check_runs(mkb, capsys, monkeypatch):
+    add_check(mkb, "F-0001", mark("F-0001"))
+    code, out, _ = run(mkb, capsys, monkeypatch)  # no terminal: the block is shown, nothing runs
+    assert code == 1 and ran(mkb) == []
+    code, out, err = run(mkb, capsys, monkeypatch, *approval_command(out))  # the printed command, as printed
+    assert (code, err) == (0, "") and ran(mkb) == ["F-0001"]
+    assert "kblam recheck: F-0001 running: " in out and "F-0001 passed (exit 0 after " in out
+    assert out.endswith("kblam recheck: 1 check(s): 1 passed\n")
+    assert [a["approver"] for a in recheck.load_approvals(mkb.cfg)] == ["agent"]
+    last = log_lines(mkb)[-1]
+    assert (last["id"], last["outcome"], last["approver"], last["terminal"]) == ("F-0001", "passed", "agent", False)
+
+    (mkb.root / "ran-F-0001").unlink()  # approved now: an ordinary recheck runs it, asking nobody
+    assert run(mkb, capsys, monkeypatch)[0] == 0 and ran(mkb) == ["F-0001"]
+    assert log_lines(mkb)[-1]["approver"] == "agent"
+
+
+def test_an_approved_check_that_fails_exits_1(mkb, capsys, monkeypatch):
+    add_check(mkb, "F-0001", mark("F-0001", exit_code=3))
+    code, out, _ = run(mkb, capsys, monkeypatch)
+    assert code == 1
+    code, out, err = run(mkb, capsys, monkeypatch, *approval_command(out))
+    assert (code, err) == (1, "") and "F-0001 FAILED (exit 3 after " in out
+    assert out.endswith("kblam recheck: 1 check(s): 0 passed, 1 failed. Load the kblam-write skill for how to "
+                        "fix this.\n")
+    assert log_lines(mkb)[-1]["approver"] == "agent"
+
+
+def test_a_digest_that_is_not_the_commands_is_refused_with_the_new_block(mkb, capsys, monkeypatch):
+    """A command or a named file changed since the block was shown: the digest read then approves something
+    else now, so it is refused, nothing is recorded, and the block to read again is printed."""
+    add_check(mkb, "F-0001", mark("F-0001"))
+    code, out, _ = run(mkb, capsys, monkeypatch)
+    stale = approval_command(out)[-1]
+    add_check(mkb, "F-0001", mark("F-0001") + " 0")  # the finding's check: rewritten, e.g. by a git pull
+    code, out, err = run(mkb, capsys, monkeypatch, "F-0001", "--approve", stale)
+    assert (code, err) == (1, "") and ran(mkb) == [] and not (mkb.root / APPROVALS).exists()
+    assert (f"kblam recheck: F-0001 was not approved: {stale} does not name its check: command and files as they "
+            f"are now, so the command or a file it names changed since that digest was shown. Read the block "
+            f"below again, then approve the digest it prints, or leave the finding as it is.\n") in out
+    assert f"  command: {mark('F-0001')} 0\n" in out
+    fresh = approval_command(out)[-1]
+    assert fresh != stale
+    assert run(mkb, capsys, monkeypatch, "F-0001", "--approve", fresh)[0] == 0
+    assert ran(mkb) == ["F-0001"] and [a["approver"] for a in recheck.load_approvals(mkb.cfg)] == ["agent"]
+
+
+def test_a_pinned_file_changed_after_an_agent_approved_needs_approving_again(mkb, capsys, monkeypatch):
+    """The approval pins each repository file the command names: a script changed by a git pull is shown
+    again, with a new digest, before it runs."""
+    add_check(mkb, "F-0001", mark("F-0001"))
+    code, out, _ = run(mkb, capsys, monkeypatch)
+    assert run(mkb, capsys, monkeypatch, *approval_command(out))[0] == 0
+    mkb.write(MARK, MARK_SCRIPT + "# changed\n")
+    code, out, _ = run(mkb, capsys, monkeypatch)
+    assert code == 1 and (mkb.root / "ran-F-0001").read_text() == "x"
+    assert f"F-0001 not run: not approved on this machine ({MARK} changed since approval)" in out
+    assert f"  command: {mark('F-0001')}\n" in out
+    assert run(mkb, capsys, monkeypatch, *approval_command(out))[0] == 0
+    assert (mkb.root / "ran-F-0001").read_text() == "xx"
+
+
+@pytest.mark.parametrize("ids, got", [([], "none"), (["F-0001", "F-0002"], "F-0001, F-0002")])
+def test_approving_needs_exactly_one_id(mkb, capsys, monkeypatch, ids, got):
+    for finding_id in ("F-0001", "F-0002"):
+        add_check(mkb, finding_id, mark(finding_id))
+    code, out, err = run(mkb, capsys, monkeypatch, *ids, "--approve", "0" * 12)
+    assert (code, out) == (1, "") and ran(mkb) == []
+    assert err == (f"kblam recheck: --approve approves the one check whose block you read, so it needs exactly one "
+                   f"finding ID; {got} was given. Run kblam recheck --list to see which findings have a check: "
+                   f"command, then approve one by ID with the digest its block prints\n")
+    code, out, err = run(mkb, capsys, monkeypatch, "--list")  # the command the refusal names: it runs
+    assert (code, err) == (0, "") and out.count("not approved (new command)") == 2
+
+
+def test_approving_an_already_approved_command_with_another_digest_is_refused(mkb, capsys, monkeypatch):
+    add_check(mkb, "F-0001", mark("F-0001"))
+    code, out, _ = run(mkb, capsys, monkeypatch)
+    assert run(mkb, capsys, monkeypatch, *approval_command(out))[0] == 0
+    (mkb.root / "ran-F-0001").unlink()
+    code, out, err = run(mkb, capsys, monkeypatch, "F-0001", "--approve", "0" * 12)
+    assert (code, out) == (1, "") and ran(mkb) == []
+    check = recheck.collect(mkb.cfg, ["F-0001"])[0][0]
+    assert err == (f"kblam recheck: F-0001 is already approved as it is now, so there is nothing to approve, and "
+                   f"000000000000 is not the digest of its check: command and files "
+                   f"({recheck.approval_digest(check)}). Run kblam recheck F-0001 to run it\n")
+    assert run(mkb, capsys, monkeypatch, "F-0001")[0] == 0 and ran(mkb) == ["F-0001"]  # the command it names
+
+
+def test_approving_a_command_that_cannot_run_is_refused(mkb, capsys, monkeypatch):
+    add_check(mkb, "F-0001", "kblam-no-such-program --version")
+    code, out, err = run(mkb, capsys, monkeypatch, "F-0001", "--approve", "0" * 12)
+    assert (code, out) == (1, "") and ran(mkb) == [] and not (mkb.root / APPROVALS).exists()
+    assert err == ("kblam recheck: F-0001 cannot be approved: kblam-no-such-program was not found on PATH\n")
+
+
+def test_list_and_approve_together_are_refused(mkb, capsys, monkeypatch):
+    add_check(mkb, "F-0001", mark("F-0001"))
+    code, out, err = run(mkb, capsys, monkeypatch, "--list", "--approve", "0" * 12)
+    assert (code, out) == (1, "") and ran(mkb) == []
+    assert err == ("kblam recheck: --list prints each check: command and runs nothing, while --approve approves "
+                   "one command and runs it; use one or the other\n")
+
+
+# --- the machine requires a person (recheck_person_approval = true) ---------------------------------
+
+
+def person_only(kb) -> None:
+    kb.write("kblam.toml", KBLAM_TOML + "recheck_person_approval = true\n" + NO_EMBEDDINGS + PROMPT_TOML)
+
+
+def test_with_person_approval_the_prompt_stays_and_an_agent_may_not_approve(mkb, capsys, monkeypatch):
+    person_only(mkb)
+    add_check(mkb, "F-0001", mark("F-0001"))
+    code, out, err = run(mkb, capsys, monkeypatch)  # no terminal: today's report, with no block to approve
+    assert (code, err) == (1, "") and ran(mkb) == []
+    assert "A person approves it by running kblam recheck F-0001 at a terminal" in out
+    assert "an agent asks the user to do that" in out and "never runs an unapproved one itself" in out
+    assert "To approve it, run: " not in out
+
+    code, out, err = run(mkb, capsys, monkeypatch, "F-0001", "--approve", "0" * 12)
+    assert (code, out) == (1, "") and ran(mkb) == [] and not (mkb.root / APPROVALS).exists()
+    assert err == ("kblam recheck: --approve is refused: kblam.toml sets recheck_person_approval = true, so only "
+                   "a person at a terminal approves a check: command. Ask the user to run kblam recheck with that "
+                   "finding's ID at a terminal, which shows the command and asks them\n")
+
+    code, out, _ = run(mkb, capsys, monkeypatch, answers=["y"])  # a person at a terminal, as before
+    assert code == 0 and ran(mkb) == ["F-0001"]
+    assert [a["approver"] for a in recheck.load_approvals(mkb.cfg)] == ["person"]
+    assert log_lines(mkb)[-1]["approver"] == "person"
+
+
+def test_an_agent_approval_does_not_count_once_a_person_is_required(mkb, capsys, monkeypatch):
+    """Switching recheck_person_approval on revokes an agent's approvals: the state says so and the check
+    does not run until a person approves it at a terminal."""
+    add_check(mkb, "F-0001", mark("F-0001"))
+    code, out, _ = run(mkb, capsys, monkeypatch)
+    assert run(mkb, capsys, monkeypatch, *approval_command(out))[0] == 0
+    (mkb.root / "ran-F-0001").unlink()
+    person_only(mkb)
+    code, out, err = run(mkb, capsys, monkeypatch)
+    assert (code, err) == (1, "") and ran(mkb) == []
+    assert ("F-0001 not run: not approved on this machine (it was approved by an agent, and kblam.toml sets "
+            "recheck_person_approval = true, so only a person's approval counts on this machine)") in out
+    assert run(mkb, capsys, monkeypatch, "F-0001", "--approve", "0" * 12)[0] == 1
+    assert run(mkb, capsys, monkeypatch, answers=["y"])[0] == 0 and ran(mkb) == ["F-0001"]
+
+
+def test_an_approval_line_without_an_approver_reads_as_a_person(mkb, capsys, monkeypatch):
+    """Only a person could approve before kblam recorded who did, so such a line is a person's, and it still
+    counts when the machine later requires one."""
+    add_check(mkb, "F-0001", mark("F-0001"))
+    assert run(mkb, capsys, monkeypatch, answers=["y"])[0] == 0
+    path = mkb.root / APPROVALS
+    record = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    del record["approver"]
+    path.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    (mkb.root / "ran-F-0001").unlink()
+    assert run(mkb, capsys, monkeypatch)[0] == 0 and ran(mkb) == ["F-0001"]
+    assert [a["approver"] for a in recheck.load_approvals(mkb.cfg)] == ["person"]
+    assert log_lines(mkb)[-1]["approver"] == "person"
+    person_only(mkb)
+    (mkb.root / "ran-F-0001").unlink()
+    assert run(mkb, capsys, monkeypatch)[0] == 0 and ran(mkb) == ["F-0001"]
+
+
+def test_recheck_person_approval_defaults_to_false_and_must_be_true_or_false(kb):
+    assert kb.cfg.recheck_person_approval is False
+    for value in ("1", '"yes"', '"true"'):
+        kb.write("kblam.toml", KBLAM_TOML + f"recheck_person_approval = {value}\n" + NO_EMBEDDINGS + PROMPT_TOML)
+        with pytest.raises(ConfigError, match=r"\[kb\] recheck_person_approval must be true or false"):
+            load_config(root=kb.root)
+    kb.write("kblam.toml", KBLAM_TOML + "recheck_person_approval = true\n" + NO_EMBEDDINGS + PROMPT_TOML)
+    assert load_config(root=kb.root).recheck_person_approval is True
+
+
+def test_the_hook_allows_an_agent_to_approve_and_still_denies_writing_the_approvals(kb, monkeypatch, capsys):
+    """The command kblam prints is what the agent runs, so the PreToolUse hook must let it through; writing
+    the approvals file by hand stays denied, kblam included."""
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    for command in ("kblam recheck F-0001 --approve 3f2a9c1b7e04",
+                    "cd repo && kblam recheck F-0001 --approve 3f2a9c1b7e04"):
+        assert call("PreToolUse", tool(kb, "Bash", command=command), monkeypatch, capsys) == (0, None, "")
+    for command in (f"kblam recheck F-0001 --approve 3f2a9c1b7e04 >> {APPROVALS}",
+                    f"kblam recheck F-0001 --approve 3f2a9c1b7e04; echo x > {APPROVALS}"):
+        code, answer, _ = call("PreToolUse", tool(kb, "Bash", command=command), monkeypatch, capsys)
+        assert code == 0 and "kblam recheck's approvals" in denied(answer)
 
 
 # --- running ------------------------------------------------------------------------------------
