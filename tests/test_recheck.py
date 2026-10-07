@@ -616,26 +616,40 @@ def test_the_hook_allows_an_agent_to_approve_and_still_denies_writing_the_approv
 # --- running ------------------------------------------------------------------------------------
 
 
-SPAWN_SCRIPT = """\
-import subprocess, sys, time
-subprocess.Popen([sys.executable, "-c", "import time; time.sleep(2); open('survived', 'w').write('x')"])
+# "spawned" is printed only once the grandchild runs, and the timeout leaves time for that on a loaded
+# machine. The grandchild, if it survives, writes `survived` once the test writes `go`.
+GRANDCHILD = """\
+import os, time
+open('started', 'w').close()
+for _ in range(6000):
+    if os.path.exists('go'):
+        open('survived', 'w').write('x')
+        break
+    time.sleep(0.01)
+"""
+SPAWN_SCRIPT = f"""\
+import os, subprocess, sys, time
+subprocess.Popen([sys.executable, "-c", {GRANDCHILD!r}])
+while not os.path.exists('started'):
+    time.sleep(0.01)
 print("spawned", flush=True)
 time.sleep(60)
 """
 
 
 def test_a_check_past_the_timeout_is_killed_with_every_process_it_started(kb, capsys, monkeypatch):
-    kb.write("kblam.toml", KBLAM_TOML + "recheck_timeout_seconds = 1\n" + NO_EMBEDDINGS + PROMPT_TOML)
+    kb.write("kblam.toml", KBLAM_TOML + "recheck_timeout_seconds = 5\n" + NO_EMBEDDINGS + PROMPT_TOML)
     kb.write(f"{EVIDENCE}/spawn.py", SPAWN_SCRIPT)
     add_check(kb, "F-0001", f"{PY} {EVIDENCE}/spawn.py")
     start = time.monotonic()
     code, out, _ = run(kb, capsys, monkeypatch, answers=["y"])
     assert time.monotonic() - start < 30
-    assert code == 1 and "F-0001 FAILED (timed out after 1 s; it and every process it started were killed)" in out
-    assert "  | spawned\n" in out  # the grandchild had started before the timeout
+    assert code == 1 and "F-0001 FAILED (timed out after 5 s; it and every process it started were killed)" in out
+    assert "  | spawned\n" in out  # the grandchild was running before the timeout
     assert "raise [kb] recheck_timeout_seconds" in out
     assert log_lines(kb)[-1]["outcome"] == "timed_out"
-    time.sleep(max(0.0, start + 3.5 - time.monotonic()))  # past the grandchild's two seconds
+    kb.write("go", "")
+    time.sleep(1.5)  # a surviving grandchild looks for `go` every 10 ms
     assert not (kb.root / "survived").exists()
 
 

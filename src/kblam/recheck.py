@@ -34,6 +34,7 @@ module its script imports, the project that `uv run` syncs) is not pinned, and a
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -43,6 +44,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -495,32 +497,188 @@ def _run(cfg: Config, check: Check, output) -> tuple[int | None, str | None]:
                                    stderr=subprocess.STDOUT, **_own_group())
     except OSError as exc:
         return None, f"{shown(check.argv[0])} could not be started ({exc.strerror or exc})"
+    job = None
     try:
+        if sys.platform == "win32":
+            try:
+                job = _Job(process)
+            except OSError as exc:  # it could not be resumed
+                _stop(process, None)
+                return None, f"{shown(check.argv[0])} could not be started ({exc.strerror or exc})"
         return process.wait(timeout=cfg.recheck_timeout_seconds), None
     except subprocess.TimeoutExpired:
-        _stop(process)
+        _stop(process, job)
         return None, None
     except BaseException:  # Ctrl-C reaches only kblam, since the command has a group of its own
-        _stop(process)
+        _stop(process, job)
         raise
+    finally:
+        if job is not None:
+            job.close()
 
 
 def _own_group() -> dict:
     """Popen arguments that start the command in a process group of its own (a new session on POSIX),
     so that a timeout can stop it with everything it started, and the terminal's Ctrl-C reaches only
-    kblam, which then stops it."""
+    kblam, which then stops it. On Windows it starts suspended, and _Job resumes it."""
     if sys.platform == "win32":
-        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | _CREATE_SUSPENDED}
     return {"start_new_session": True}
 
 
-def _stop(process: subprocess.Popen) -> None:
-    """Kill the command and every process in its group (on Windows, its process tree)."""
+_CREATE_SUSPENDED = 0x00000004
+STOP_WAIT_SECONDS = 10.0  # how long a timeout waits for the killed processes to have exited
+MAX_WAITED_PROCESSES = 1024
+
+
+class _Job:
+    """A Windows job object holding a check and every process it starts. A process tree walk (taskkill
+    /T) misses a process the check starts while the walk is under way; a job also holds that one, so
+    TerminateJobObject kills them all. The check is resumed only once it is in the job, so nothing it
+    starts is outside it. Where no job can be made (handle None), _stop falls back to taskkill /T.
+    Closing the handle kills nothing: what a check leaves running after it exits keeps running, as on
+    POSIX."""
+
+    def __init__(self, process: subprocess.Popen):
+        self.win32 = _win32()
+        self.handle = self.win32.kernel32.CreateJobObjectW(None, None)
+        if self.handle:
+            access = 0x0001 | 0x0100  # PROCESS_TERMINATE | PROCESS_SET_QUOTA, as AssignProcessToJobObject needs
+            target = self.win32.kernel32.OpenProcess(access, False, process.pid)
+            assigned = bool(target) and bool(self.win32.kernel32.AssignProcessToJobObject(self.handle, target))
+            if target:
+                self.win32.kernel32.CloseHandle(target)
+            if not assigned:
+                self.close()
+        try:
+            _resume(process.pid)
+        except OSError:
+            self.close()
+            raise
+
+    def terminate(self) -> bool:
+        """Kill every process in the job, then wait up to STOP_WAIT_SECONDS for each to have exited, so
+        that none still holds the check's output file open; False when there is no job or it could not
+        be terminated. TerminateJobObject returns before its processes are gone, and a process leaves the
+        job's list before its handles are closed, so the processes are opened before they are killed."""
+        if not self.handle:
+            return False
+        kernel32 = self.win32.kernel32
+        members = self._members()
+        try:
+            if not kernel32.TerminateJobObject(self.handle, 1):
+                return False
+            deadline = time.monotonic() + STOP_WAIT_SECONDS
+            for member in members:
+                kernel32.WaitForSingleObject(member, max(0, int((deadline - time.monotonic()) * 1000)))
+            return True
+        finally:
+            for member in members:
+                kernel32.CloseHandle(member)
+
+    def _members(self) -> list:
+        """Handles to wait on for the job's processes (at most MAX_WAITED_PROCESSES of them)."""
+        import ctypes
+
+        kernel32, listing = self.win32.kernel32, self.win32.ProcessIdList()
+        error_more_data = 234  # the list holds the first ones
+        if (not kernel32.QueryInformationJobObject(self.handle, 3, ctypes.byref(listing), ctypes.sizeof(listing),
+                                                   None)  # JobObjectBasicProcessIdList
+                and ctypes.get_last_error() != error_more_data):
+            return []
+        handles = []
+        for pid in listing.ids[:min(listing.listed, MAX_WAITED_PROCESSES)]:
+            handle = kernel32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+            if handle:
+                handles.append(handle)
+        return handles
+
+    def close(self) -> None:
+        if self.handle:
+            self.win32.kernel32.CloseHandle(self.handle)
+            self.handle = None
+
+
+@functools.cache
+def _win32() -> types.SimpleNamespace:
+    """kernel32, with the signatures of the functions _Job and _resume call, and the structures they use."""
+    import ctypes
+    from ctypes import wintypes
+
+    class ThreadEntry32(ctypes.Structure):  # THREADENTRY32
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+                    ("th32ThreadID", wintypes.DWORD), ("th32OwnerProcessID", wintypes.DWORD),
+                    ("tpBasePri", wintypes.LONG), ("tpDeltaPri", wintypes.LONG), ("dwFlags", wintypes.DWORD)]
+
+    class ProcessIdList(ctypes.Structure):  # JOBOBJECT_BASIC_PROCESS_ID_LIST, with room for the ones waited on
+        _fields_ = [("assigned", wintypes.DWORD), ("listed", wintypes.DWORD),
+                    ("ids", ctypes.c_size_t * MAX_WAITED_PROCESSES)]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.CreateJobObjectW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    kernel32.QueryInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
+                                                   wintypes.LPDWORD)
+    kernel32.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel32.CreateToolhelp32Snapshot.argtypes = (wintypes.DWORD, wintypes.DWORD)
+    kernel32.Thread32First.argtypes = (wintypes.HANDLE, ctypes.POINTER(ThreadEntry32))
+    kernel32.Thread32Next.argtypes = (wintypes.HANDLE, ctypes.POINTER(ThreadEntry32))
+    kernel32.OpenThread.restype = wintypes.HANDLE
+    kernel32.OpenThread.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.ResumeThread.restype = wintypes.DWORD
+    kernel32.ResumeThread.argtypes = (wintypes.HANDLE,)
+    return types.SimpleNamespace(kernel32=kernel32, ThreadEntry32=ThreadEntry32, ProcessIdList=ProcessIdList)
+
+
+def _resume(pid: int) -> None:
+    """Resume the suspended process `pid`: its one thread, found in a snapshot of the system's threads.
+    OSError when that fails."""
+    import ctypes
+
+    win32 = _win32()
+    kernel32 = win32.kernel32
+    snapshot = kernel32.CreateToolhelp32Snapshot(0x00000004, 0)  # TH32CS_SNAPTHREAD
+    if snapshot is None or snapshot == ctypes.c_void_p(-1).value:  # INVALID_HANDLE_VALUE
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        entry = win32.ThreadEntry32()
+        entry.dwSize = ctypes.sizeof(entry)
+        resumed = False
+        found = kernel32.Thread32First(snapshot, ctypes.byref(entry))
+        while found:
+            if entry.th32OwnerProcessID == pid:
+                thread = kernel32.OpenThread(0x0002, False, entry.th32ThreadID)  # THREAD_SUSPEND_RESUME
+                if not thread:
+                    raise ctypes.WinError(ctypes.get_last_error())
+                try:
+                    if kernel32.ResumeThread(thread) == 0xFFFFFFFF:
+                        raise ctypes.WinError(ctypes.get_last_error())
+                finally:
+                    kernel32.CloseHandle(thread)
+                resumed = True
+            found = kernel32.Thread32Next(snapshot, ctypes.byref(entry))
+        if not resumed:
+            raise OSError(f"no thread of process {pid} was found to resume")
+    finally:
+        kernel32.CloseHandle(snapshot)
+
+
+def _stop(process: subprocess.Popen, job: _Job | None) -> None:
+    """Kill the command and every process it started: its job's processes, else on Windows its process
+    tree, and on POSIX its process group."""
     try:
         if sys.platform == "win32":
-            # by full path: a bare name would be looked up in the current directory first
-            taskkill = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "taskkill.exe"
-            subprocess.run([str(taskkill), "/F", "/T", "/PID", str(process.pid)], capture_output=True)
+            if job is None or not job.terminate():
+                # by full path: a bare name would be looked up in the current directory first
+                taskkill = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "taskkill.exe"
+                subprocess.run([str(taskkill), "/F", "/T", "/PID", str(process.pid)], capture_output=True)
         else:
             os.killpg(process.pid, signal.SIGKILL)
     except OSError:

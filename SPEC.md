@@ -1875,7 +1875,8 @@ third party puts into the knowledge base, not an agent on this machine set on ru
   kblam's environment minus the variable the Jev API key is read from (`key_env`, §9). A check
   passes when it exits 0. It fails on any other exit or a signal, and on running past `[kb]
   recheck_timeout_seconds` (§9, default 600), when it and every process it started are killed
-  (`killpg`, or `taskkill /T` by full path on Windows). A string that cannot be split, or a program
+  (`killpg`; on Windows the check starts suspended in a job object of its own, which is terminated,
+  and `taskkill /T` by full path where no job can be made). A string that cannot be split, or a program
   that is not found, is reported without asking and counts as a failure, as does a program that
   cannot be started.
 - *Output.* A line as each approved check starts, and one with its result. For a failure, the last
