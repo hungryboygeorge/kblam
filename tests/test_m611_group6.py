@@ -106,6 +106,20 @@ def k14_line(kb, source_repo) -> str:
             f"--proponent NAME). K10 is checked separately.")
 
 
+def k14_line_open_use(kb, source_repo) -> str:
+    """The same K14 error where CU-0001 is already installed open for PROPONENT: the step it names is the
+    decision that approves that use, not a second `kblam use review`, which would settle nothing the open
+    one does not (SPEC §5.2.4)."""
+    text = (kb.root / FINDING).read_text(encoding="utf-8")
+    tag = f"<!-- verbatim: {m.TRACE}:3-3 -->"
+    line = next(i for i, row in enumerate(text.splitlines(), 1) if row.strip() == tag)
+    version = source_repo.blob(m.TRACE_PATH)[:12]
+    return (f"K14 {FINDING}:{line}: SC-0001 challenges this quoted assertion at {m.TRACE}@{version}:3-3; "
+            f"edit the finding or have this use reviewed (kblam review decide CU-0001 --status approved "
+            f"--by NAME --reason TEXT --expect D; its --by must not be its proponent (CU-0001's proponent "
+            f"is {PROPONENT})). K10 is checked separately.")
+
+
 def k14_after_confirmation(kb, source_repo) -> str:
     """What `review decide --status confirmed` prints after its own line when it leaves the K14 error: a
     decision that confirms a challenge lists the findings it newly makes fail K14 (SPEC §5.2.4)."""
@@ -255,7 +269,7 @@ def install_drafted_use(kb, source_repo) -> tuple[str, str]:
     edit(kb.root / staged("CU-0001"), **use_fields())
     with changes(kb, source_repo, {PATH["CU"], INDEX, REGISTRY, TREE_HASH, staged("CU-0001")}):
         run = m.kblam(kb, "put", str(kb.root / staged("CU-0001")))
-    check(run, code=0, out=f"kblam put: CU-0001 -> {PATH['CU']}\n{k14_line(kb, source_repo)}\n"
+    check(run, code=0, out=f"kblam put: CU-0001 -> {PATH['CU']}\n{k14_line_open_use(kb, source_repo)}\n"
                            "kblam put: done, but kblam validate still fails (1 error(s) listed above, "
                            "owned by other findings or records)\n")
     return "SC-0001", "CU-0001"
@@ -338,7 +352,8 @@ def test_a_use_proponent_cannot_approve_its_own_use(kb, source_repo):
     decide_refused(kb, source_repo, "CU-0001", "approved", by=PROPONENT,
                    err="kblam review decide: researcher-a is CU-0001's proponent; a closing decision needs "
                        "someone else\n")
-    validate(kb, source_repo, code=1, out=f"{k14_line(kb, source_repo)}\n{failed(1, 'findings/')}\n")
+    validate(kb, source_repo, code=1,
+             out=f"{k14_line_open_use(kb, source_repo)}\n{failed(1, 'findings/')}\n")
 
 
 def test_a_uses_creator_may_approve_it(kb, source_repo):
@@ -419,7 +434,7 @@ def test_a_staged_id_that_differs_from_the_file_name_is_refused(kb, source_repo)
     Hand edit (fixture setup): the staged `id` becomes SC-0009. Command: `kblam put
     .kblam/review-staging/SC-0001.yaml`. Exit 1, stderr "kblam put: .kblam/review-staging/SC-0001.yaml:
     id is 'SC-0009', but the file name's ID is SC-0001; the ID never changes. Set id back to SC-0001 in
-    .kblam/review-staging/SC-0001.yaml and put it again Load the kblam-write skill for how to fix this.",
+    .kblam/review-staging/SC-0001.yaml and put it again. Load the kblam-write skill for how to fix this.",
     stdout empty. Files: none (the staged file stays where it is). Validation afterwards: exit 0. A5."""
     path = new_challenge(kb, source_repo)
     edit(path, **{**challenge_fields(kb, source_repo), "id": "SC-0009"})
@@ -428,7 +443,7 @@ def test_a_staged_id_that_differs_from_the_file_name_is_refused(kb, source_repo)
     check(run, code=1,
           err="kblam put: .kblam/review-staging/SC-0001.yaml: id is 'SC-0009', but the file name's ID is "
               "SC-0001; the ID never changes. Set id back to SC-0001 in .kblam/review-staging/SC-0001.yaml "
-              "and put it again Load the kblam-write skill for how to fix this.\n")
+              "and put it again. Load the kblam-write skill for how to fix this.\n")
     assert not m.record_path(kb, "SC-0001").exists()
     validate(kb, source_repo, code=0, out="kblam validate: OK (0 findings)\n")
 
@@ -443,7 +458,7 @@ def test_a_first_put_refuses_a_changed_created_or_creator(kb, source_repo, field
     Command: `kblam put .kblam/review-staging/SC-0001.yaml`. Exit 1, stderr "kblam put: SC-0001: <field>
     is <the staged value>, but its allocation receipt has <the receipt's>. The ID, the created date, the
     creator, the proponent and the bindings are set at allocation: restore <field> and put it again, or
-    start again with a new record Load the kblam-write skill for how to fix this.", stdout empty. Files:
+    start again with a new record. Load the kblam-write skill for how to fix this.", stdout empty. Files:
     none. Validation afterwards: exit 0. A5: the identity fields are fixed at allocation."""
     path = new_challenge(kb, source_repo)
     edit(path, **{**challenge_fields(kb, source_repo), field: value})
@@ -452,7 +467,7 @@ def test_a_first_put_refuses_a_changed_created_or_creator(kb, source_repo, field
     check(run, code=1,
           err=f"kblam put: SC-0001: {field} is {shown}, but its allocation receipt has {receipt}. The ID, "
               f"the created date, the creator, the proponent and the bindings are set at allocation: "
-              f"restore {field} and put it again, or start again with a new record Load the kblam-write "
+              f"restore {field} and put it again, or start again with a new record. Load the kblam-write "
               f"skill for how to fix this.\n")
     validate(kb, source_repo, code=0, out="kblam validate: OK (0 findings)\n")
 
@@ -463,7 +478,7 @@ def test_a_first_put_refuses_a_changed_proponent(kb, source_repo):
     .kblam/review-staging/CT-0001.yaml`. Exit 1, stderr "kblam put: CT-0001: proponent is 'reviewer-c',
     but its allocation receipt has 'researcher-a'. The ID, the created date, the creator, the proponent
     and the bindings are set at allocation: restore proponent and put it again, or start again with a new
-    record Load the kblam-write skill for how to fix this.", stdout empty. Files: none. Validation
+    record. Load the kblam-write skill for how to fix this.", stdout empty. Files: none. Validation
     afterwards: exit 0. A5: who stands behind the claim is fixed when the task is bound."""
     kb.add("F-0001", "ratio", m.CLAIM)                                # fixture setup
     with changes(kb, source_repo, {staged("CT-0001"), RECEIPT.format("CT-0001")}):
@@ -476,7 +491,7 @@ def test_a_first_put_refuses_a_changed_proponent(kb, source_repo):
     check(run, code=1,
           err="kblam put: CT-0001: proponent is 'reviewer-c', but its allocation receipt has "
               "'researcher-a'. The ID, the created date, the creator, the proponent and the bindings are "
-              "set at allocation: restore proponent and put it again, or start again with a new record "
+              "set at allocation: restore proponent and put it again, or start again with a new record. "
               "Load the kblam-write skill for how to fix this.\n")
     validate(kb, source_repo, code=0, out="kblam validate: OK (1 findings)\n")
 
@@ -487,7 +502,7 @@ def test_a_task_edit_refuses_a_changed_proponent(kb, source_repo):
     then the copy's `proponent` is set to reviewer-c (fixture edit) and `kblam put` runs on it. Exit 1,
     stderr "kblam put: CT-0001: proponent is not a free field, so it must be put as installed. Only
     question, method, outcomes, controls, stop, expected_evidence change through an edit; run kblam task
-    edit CT-0001 again Load the kblam-write skill for how to fix this.", stdout empty. Files: none (the
+    edit CT-0001 again. Load the kblam-write skill for how to fix this.", stdout empty. Files: none (the
     edit-base copy stays staged). Validation afterwards: exit 0. A5: an edit changes the free fields
     only."""
     install_task(kb, source_repo)
@@ -500,7 +515,7 @@ def test_a_task_edit_refuses_a_changed_proponent(kb, source_repo):
     check(run, code=1,
           err="kblam put: CT-0001: proponent is not a free field, so it must be put as installed. Only "
               "question, method, outcomes, controls, stop, expected_evidence change through an edit; run "
-              "kblam task edit CT-0001 again Load the kblam-write skill for how to fix this.\n")
+              "kblam task edit CT-0001 again. Load the kblam-write skill for how to fix this.\n")
     validate(kb, source_repo, code=0,
              out="CT-0001 open replication of F-0001: Does an independent measurement establish the "
                  "claim?\n" + "kblam validate: OK (1 findings); 1 pending task(s)\n")
@@ -511,7 +526,7 @@ def test_a_missing_proponent_is_refused_at_put(kb, source_repo):
     receipt. Hand edit (fixture setup): the staged `proponent` key is removed. Command: `kblam put
     .kblam/review-staging/CT-0001.yaml`. Exit 1, stderr "kblam put: CT-0001: proponent is None, but its
     allocation receipt has 'researcher-a'. The ID, the created date, the creator, the proponent and the
-    bindings are set at allocation: restore proponent and put it again, or start again with a new record
+    bindings are set at allocation: restore proponent and put it again, or start again with a new record.
     Load the kblam-write skill for how to fix this.", stdout empty (a first put matches the receipt
     before it reads the field table, so a record carrying no proponent at all is refused there). Files:
     none. Validation afterwards: exit 0. A5."""
@@ -526,7 +541,7 @@ def test_a_missing_proponent_is_refused_at_put(kb, source_repo):
     check(run, code=1,
           err="kblam put: CT-0001: proponent is None, but its allocation receipt has 'researcher-a'. The "
               "ID, the created date, the creator, the proponent and the bindings are set at allocation: "
-              "restore proponent and put it again, or start again with a new record Load the kblam-write "
+              "restore proponent and put it again, or start again with a new record. Load the kblam-write "
               "skill for how to fix this.\n")
     validate(kb, source_repo, code=0, out="kblam validate: OK (1 findings)\n")
 

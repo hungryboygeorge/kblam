@@ -137,7 +137,8 @@ def schema_issues(rec: Record, *, staged: bool, committed=None) -> list[Issue]:
 
     `committed` answers whether git's last commit holds a copy of a record at its path that kblam reads
     as the record the file name gives, for the step an installed record's damage names (an `id` that is
-    missing, blank or not an ID, one that does not match the file name, and a file that did not parse):
+    missing, blank or not an ID, one that does not match the file name, a `status` its kind has no
+    vocabulary for, and a file that did not parse):
     a callable taking that path (kblam.gitdir.committed_record of the config). None is the answer outside
     a repository, so those messages then name no git command. A staged record's `id` errors name no step:
     its author can set the field. The step is named only for a file that sits directly in its kind's
@@ -181,8 +182,9 @@ def schema_issues(rec: Record, *, staged: bool, committed=None) -> list[Issue]:
             add(key, message)
             continue
         checker, argument = FIELD_CHECKS[key]
-        if checker is _check_id:
-            argument = committed    # _check_id's argument is the caller's answer about git, not a table value
+        if checker in (_check_id, _check_status):
+            # their argument is the caller's answer about git, not a table value
+            argument = committed
         checker(rec, key, key, data[key], staged, add, argument)
     return issues
 
@@ -347,8 +349,19 @@ def _check_enum(rec, top_key, prefix, value, staged, add, vocabulary):
         else f"{prefix}: {value!r} is not one of {', '.join(vocabulary)}")
 
 
-def _check_status(rec, top_key, prefix, value, staged, add, argument):
-    _check_enum(rec, top_key, prefix, value, staged, add, STATUSES[rec.kind])
+def _check_status(rec, top_key, prefix, value, staged, add, committed):
+    """A status of the record's kind (SPEC §5.2.2 Status). An installed record in its kind's folder names
+    the step for a status no decision can work from: the hooks deny writing a record by hand, so only git
+    can put the record back as it was committed."""
+    if isinstance(value, str) and value in STATUSES[rec.kind]:
+        return
+    if staged and _blank(value):
+        return
+    message = (f"{prefix}: required" if _missing(value)
+               else f"{prefix}: {value!r} is not one of {', '.join(STATUSES[rec.kind])}")
+    if not staged and in_kind_folder(rec):
+        message += f"; {restore_step(rec.path, committed)}"
+    add(top_key, message)
 
 
 def _check_hex64(rec, top_key, prefix, value, staged, add, argument):

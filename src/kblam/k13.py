@@ -76,7 +76,12 @@ def use_binding_problems(view, reader, rec: Record) -> list[str]:
     data = rec.data if isinstance(rec.data, dict) else None
     rid = rec.id or "this use"
     if rec.kind != "CU" or data is None:
-        return [f"{rid} did not parse as a use, so its bindings cannot hold; restore it from git"]
+        # The record's own file is what a repair means, so the step is the one an installed record's damage
+        # names (records.restore_step): the hooks deny an agent any write to it, and git's last commit holds
+        # the bytes only where it holds a copy kblam reads as the record the file name gives.
+        step = (records.restore_step(rec.path, partial(committed_record, view.cfg))
+                if records.in_kind_folder(rec) else "leave it as it is and tell the user")
+        return [f"{rid} did not parse as a use, so its bindings cannot hold; {step}"]
     problems: list[str] = []
     problems += _challenge_binding(view, reader, data)
     problems += _finding_binding(view, reader, data)
@@ -301,7 +306,8 @@ def _registry_issues(view, present: set[str], registered: set[str] | None) -> li
         issues.append(Issue(
             path, 0, "K13",
             f"{rec_id} is missing from {view.cfg.review_dir}/; records are never deleted or renamed; "
-            f"restore it from git", "error", rec_id))
+            + records.restore_step(path, partial(committed_record, view.cfg)),
+            "error", rec_id))
     return issues
 
 

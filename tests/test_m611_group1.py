@@ -257,7 +257,7 @@ def test_a_source_edited_above_the_assertion_before_the_put_is_refused(kb, sourc
         run = m.put(kb, staged)
 
     assert run.code == 1 and run.out == ""
-    assert run.err == f"kblam put: the source changed since kblam challenge new; run it again {POINTER}\n"
+    assert run.err == f"kblam put: the source changed since kblam challenge new; run it again. {POINTER}\n"
     assert staged.path.is_file() and not m.record_path(kb, staged.id).exists()
     assert m.registry(kb) is None
     assert source_repo.snapshot() == read_before
@@ -345,7 +345,7 @@ def test_a_first_put_refuses_an_assertion_narrowed_to_text_that_occurs_twice(kb,
     assert run.code == 1 and run.out == ""
     assert run.err == (
         f"kblam put: SC-0001: the assertion text occurs 2 times within lines 1-2; narrow it to one; "
-        f"widen or narrow the assertion's lines and put it again {POINTER}\n")
+        f"widen or narrow the assertion's lines and put it again. {POINTER}\n")
     assert staged.path.is_file() and not m.record_path(kb, staged.id).exists()
     assert m.registry(kb) is None
     assert source_repo.snapshot() == read_before
@@ -468,7 +468,7 @@ def test_narrowing_the_assertion_after_the_first_put_is_refused(kb, source_repo)
     assert run.err == (
         "kblam put: SC-0001: source is not a free field, so it must be put as installed. Only "
         "proposition, scope, classification, basis, usable, limits, linked_findings change through an "
-        f"edit; run kblam challenge edit SC-0001 again {POINTER}\n")
+        f"edit; run kblam challenge edit SC-0001 again. {POINTER}\n")
     assert copy.is_file()
     assert m.record_path(kb, staged.id).read_bytes() == installed_before
     assert source_repo.snapshot() == read_before
@@ -500,7 +500,7 @@ def test_a_first_put_refuses_a_wrong_assertion_sha256(kb, source_repo):
     assert run.code == 1 and run.out == ""
     assert run.err == (
         f"kblam put: SC-0001: assertion.sha256 is {ZERO64}, but the assertion's text hashes to "
-        f"{_sha256(m.LINE3)}; set it to null and put it again, and put writes it {POINTER}\n")
+        f"{_sha256(m.LINE3)}; set it to null and put it again, and put writes it. {POINTER}\n")
     assert staged.path.is_file() and not m.record_path(kb, staged.id).exists()
     assert m.registry(kb) is None
     assert source_repo.snapshot() == read_before

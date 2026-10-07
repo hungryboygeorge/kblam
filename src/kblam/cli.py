@@ -793,6 +793,9 @@ def _approve(cfg, args) -> int:
     check whose block it read, then that check runs."""
     if cfg.recheck_person_approval:
         if len(args.ids) == 1:
+            # The message names the one ID, so collect checks it first: an ID kblam has not looked at must
+            # get collect's own refusal rather than a step about a finding that is not there.
+            recheck.collect(cfg, args.ids)
             raise RecheckError(f"--approve is refused: kblam.toml sets recheck_person_approval = true, so only a "
                                f"person at a terminal approves a check: command. Ask the user to run kblam recheck "
                                f"{shown(args.ids[0])} at a terminal, which shows the command and asks them")
@@ -813,13 +816,15 @@ def _approve(cfg, args) -> int:
         raise RecheckError(f"{check.finding_id} cannot be approved: {check.problem}; it cannot run on this machine, "
                            f"so there is nothing to approve: leave the finding as it is and tell the user")
     digest = recheck.approval_digest(check)
+    # How the value given reads in a message: the digest as kblam reads it (a copied one may carry
+    # capitals or spaces), and "''" for an empty one, which would otherwise leave a gap in the sentence.
+    was_given = shown(given) or "''"
     if given != digest:
         state = recheck.approval_state(check, recheck.load_approvals(cfg), person_only=False)
         if state.approved:
             raise RecheckError(f"{check.finding_id} is already approved as it is now, so there is nothing to "
-                               f"approve, and {shown(args.approve)} is not the digest of its check: command and "
+                               f"approve, and {was_given} is not the digest of its check: command and "
                                f"files ({digest}). Run kblam recheck {check.finding_id} to run it")
-        was_given = shown(given) or "''"  # an empty one would otherwise leave a gap in the sentence
         print(f"kblam recheck: {check.finding_id} was not approved: {was_given} is not the digest of "
               f"its check: command and files as they are now: it was copied wrong, or the command or a file it "
               f"names changed since it was shown. Read the block below again, then approve the digest it "
@@ -1200,7 +1205,11 @@ def main(argv: list[str] | None = None) -> int:
                 return EXIT_INVALID
         return args.func(cfg, args)
     except (ConfigError, StoreError, LockError, JevUnavailable, ReviewError, ApprovalError, RecheckError) as exc:
-        pointer = f" {SKILL_POINTER}" if args.command == "put" and not isinstance(exc, ConfigError) else ""
+        # A put refusal's own sentence ends before the pointer, so a text that does not end one gets its
+        # period here rather than running the two sentences together.
+        pointer = ""
+        if args.command == "put" and not isinstance(exc, ConfigError):
+            pointer = ("" if str(exc).endswith((".", "?", "!")) else ".") + f" {SKILL_POINTER}"
         # A §5.2.5 command names all of its words ("kblam challenge new: ..."); the older ones keep
         # their single word, as they always have.
         command = getattr(args, "command_name", None) or args.command

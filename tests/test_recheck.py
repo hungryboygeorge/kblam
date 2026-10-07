@@ -460,6 +460,25 @@ def test_approving_an_already_approved_command_with_another_digest_is_refused(mk
     assert run(mkb, capsys, monkeypatch, "F-0001")[0] == 0 and ran(mkb) == ["F-0001"]  # the command it names
 
 
+@pytest.mark.parametrize(("value", "read_as"), [
+    (" ABCDEF012345 ", "abcdef012345"),            # capitals and spaces: the value kblam read and compared
+    ("", "''"),                                    # an empty one would otherwise leave a gap in the sentence
+])
+def test_the_already_approved_refusal_shows_the_value_it_compared(mkb, capsys, monkeypatch, value, read_as):
+    """The already-approved branch names the value kblam read, not the argument as typed: a digest pasted
+    in capitals or with spaces reads as its stripped lower-case form, and an empty one as two quotes."""
+    add_check(mkb, "F-0001", mark("F-0001"))
+    code, out, _ = run(mkb, capsys, monkeypatch)
+    assert run(mkb, capsys, monkeypatch, *approval_command(out))[0] == 0
+    (mkb.root / "ran-F-0001").unlink()
+    code, out, err = run(mkb, capsys, monkeypatch, "F-0001", "--approve", value)
+    assert (code, out) == (1, "") and ran(mkb) == []
+    check = recheck.collect(mkb.cfg, ["F-0001"])[0][0]
+    assert err == (f"kblam recheck: F-0001 is already approved as it is now, so there is nothing to approve, and "
+                   f"{read_as} is not the digest of its check: command and files "
+                   f"({recheck.approval_digest(check)}). Run kblam recheck F-0001 to run it\n")
+
+
 def test_approving_a_command_that_cannot_run_is_refused(mkb, capsys, monkeypatch):
     add_check(mkb, "F-0001", "kblam-no-such-program --version")
     code, out, err = run(mkb, capsys, monkeypatch, "F-0001", "--approve", "0" * 12)
@@ -519,6 +538,17 @@ def test_with_person_approval_the_prompt_stays_and_an_agent_may_not_approve(mkb,
     assert code == 0 and ran(mkb) == ["F-0001"]
     assert [a["approver"] for a in recheck.load_approvals(mkb.cfg)] == ["person"]
     assert log_lines(mkb)[-1]["approver"] == "person"
+
+
+def test_with_person_approval_an_id_kblam_has_not_looked_at_is_refused_by_collect(mkb, capsys, monkeypatch):
+    """The person-approval refusal names the one ID, so it checks that ID first: one kblam has not looked at
+    gets collect's own refusal rather than a step about a finding that is not there."""
+    person_only(mkb)
+    add_check(mkb, "F-0001", mark("F-0001"))
+    code, out, err = run(mkb, capsys, monkeypatch, "F-9999", "--approve", "0" * 12)
+    assert (code, out) == (1, "") and ran(mkb) == []
+    assert err == f"kblam recheck: F-9999 is not in {mkb.cfg.findings_dir}/\n"
+    assert "Ask the user to run kblam recheck F-9999" not in err
 
 
 def test_an_agent_approval_does_not_count_once_a_person_is_required(mkb, capsys, monkeypatch):

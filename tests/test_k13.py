@@ -639,13 +639,15 @@ def test_a_registered_id_without_a_record_is_an_error(kb):
     kb.write(f"{REVIEW}/challenges/.keep", "")
     kb.write(".kblam/review-ids", json.dumps(["SC-0001", "CT-0002"]) + "\n")
     issues = k13_issues(kb, index=False)
+    # The step is the one an installed record's damage names: git's copy where there is one, and here
+    # there is no repository, so the file is left for the user.
+    gone = ("records are never deleted or renamed; git's last commit does not hold a file at {path}, so "
+            "leave it as it is and tell the user")
     assert [(i.path, i.owner, i.message) for i in issues if i.owner] == [
         (f"{REVIEW}/challenges/SC-0001.yaml", "SC-0001",
-         "SC-0001 is missing from research-review/; records are never deleted or renamed; restore it from "
-         "git"),
+         "SC-0001 is missing from research-review/; " + gone.format(path=f"{REVIEW}/challenges/SC-0001.yaml")),
         (f"{REVIEW}/tasks/CT-0002.yaml", "CT-0002",
-         "CT-0002 is missing from research-review/; records are never deleted or renamed; restore it from "
-         "git")]
+         "CT-0002 is missing from research-review/; " + gone.format(path=f"{REVIEW}/tasks/CT-0002.yaml"))]
 
 
 def test_two_records_that_claim_one_id_are_an_error_on_each(kb):

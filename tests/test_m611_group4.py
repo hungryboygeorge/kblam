@@ -254,6 +254,17 @@ def same_bytes_message(source_repo, ordinal: int = 1) -> str:
             f"NAME). K10 is checked separately.")
 
 
+def same_bytes_open_use(source_repo, ordinal: int = 1, rec_id: str = "CU-0001") -> str:
+    """The same-bytes diagnostic where `rec_id` is already installed open for researcher-a: the step it
+    names is the decision that approves that use, not a second `kblam use review`, which would settle
+    nothing the open one does not (k14.USE_DECIDE)."""
+    version = source_repo.blob(m.TRACE_PATH)[:12]
+    return (f"SC-0001 challenges this quoted assertion at {m.TRACE}@{version}:3-3; edit the finding or "
+            f"have this use reviewed (kblam review decide {rec_id} --status approved --by NAME --reason "
+            f"TEXT --expect D; its --by must not be its proponent ({rec_id}'s proponent is "
+            f"researcher-a)). K10 is checked separately.")
+
+
 def stale_line(rec_id: str) -> str:
     """The line a finding put prints for a record it made stale (SPEC §5.2.4, §5.2.5)."""
     return (f"kblam put: {rec_id} is now stale (this put changed F-0001, which it is bound to); a "
@@ -323,7 +334,8 @@ def approved_use(kb, source_repo, sc_id: str = "SC-0001", finding_id: str = "F-0
     fill(staged, **cu_fields())
     put_record(kb, source_repo, staged, "CU-0001", out=text(
         f"kblam put: CU-0001 -> {REVIEW}/uses/CU-0001.yaml",
-        f"K14 {FINDING_PATH}:{excerpt_line(kb.root / FINDING_PATH)}: {same_bytes_message(source_repo)}",
+        f"K14 {FINDING_PATH}:{excerpt_line(kb.root / FINDING_PATH)}: "
+        f"{same_bytes_open_use(source_repo)}",
         "kblam put: done, but kblam validate still fails (1 error(s) listed above, owned by other "
         "findings or records)"))
     decide(kb, source_repo, "CU-0001", "approved", by="reviewer-b",

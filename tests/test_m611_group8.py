@@ -65,8 +65,8 @@ JEV_NOTE = ("kblam validate --record: [jev.thresholds] enables no Jev verdict, s
 STALE_INDEX = (f"K13 {INDEX}: INDEX.md differs from the generated review index; it is never edited by "
                f"hand. Run kblam review index to regenerate it")
 # SPEC §5.2.6: the report a registered ID with no record gets; line 0, so no line number is shown.
-MISSING = (f"{{rec_id}} is missing from {REVIEW}/; records are never deleted or renamed; restore it from "
-           f"git")
+MISSING = (f"{{rec_id}} is missing from {REVIEW}/; records are never deleted or renamed; git's last commit "
+           f"does not hold a file at {{path}}, so leave it as it is and tell the user")
 # SPEC §5.2.6 and §8 item 3: the note a write prints when tree.hash cannot advance.
 OUT_OF_BAND = (f"kblam review index: findings/ or {REVIEW}/ was changed outside kblam since kblam last "
                f"wrote it; tree.hash not advanced. Run kblam validate --record once the change is "
@@ -257,8 +257,10 @@ def forgot(rec_id: str) -> str:
 
 
 def missing(kb, rec_id: str) -> str:
-    """The K13 issue for a registered ID whose record is gone, displayed at its canonical path."""
-    return f"K13 {record_rel(kb, rec_id)}: {MISSING.format(rec_id=rec_id)}"
+    """The K13 issue for a registered ID whose record is gone, displayed at its canonical path: the step
+    is the one an installed record's damage names, and these fixtures hold no git copy of it."""
+    path = record_rel(kb, rec_id)
+    return f"K13 {path}: {MISSING.format(rec_id=rec_id, path=path)}"
 
 
 # --- a record deleted ------------------------------------------------------------------------------

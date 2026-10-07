@@ -1272,9 +1272,11 @@ def test_review_index_does_not_forget_a_deleted_record(ready):
     review_write.regenerate_review_index(ready.cfg)
 
     assert json.loads((ready.root / ".kblam/review-ids").read_text()) == ["SC-0001", "SC-0009"]
+    step = ("records are never deleted or renamed; git's last commit does not hold a file at {path}, so "
+            "leave it as it is and tell the user")
     assert [issue.message for issue in blocking(ready)] == [
-        "SC-0001 is missing from research-review/; records are never deleted or renamed; restore it "
-        "from git",
-        "SC-0009 is missing from research-review/; records are never deleted or renamed; restore it "
-        "from git",
+        "SC-0001 is missing from research-review/; "
+        + step.format(path="research-review/challenges/SC-0001.yaml"),
+        "SC-0009 is missing from research-review/; "
+        + step.format(path="research-review/challenges/SC-0009.yaml"),
     ]

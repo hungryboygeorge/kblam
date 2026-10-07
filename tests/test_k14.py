@@ -107,11 +107,16 @@ def use(kb, *, status: str = "approved", challenge: str = "SC-0001", fid: str = 
     return deciding("CU", data)
 
 
-def same_bytes_message(repo, blob: bool = True, ordinal: int = 1, lines: str = "3-3") -> str:
+def same_bytes_message(repo, blob: bool = True, ordinal: int = 1, lines: str = "3-3",
+                       open_use: str | None = None) -> str:
+    """The same-bytes error, with the step `open_use` (a use ID) makes it name: the decision that approves
+    that use rather than a second `kblam use review` for the same excerpt (k14.USE_DECIDE)."""
     version = repo.blob(TRACE_PATH)[:12] if blob else sha_of(TRACE_TEXT)[:12]
+    review = (f"kblam review decide {open_use} --status approved --by NAME --reason TEXT --expect D; its "
+              f"--by must not be its proponent ({open_use}'s proponent is researcher-a)"
+              if open_use else f"kblam use review SC-0001 F-0001 {ordinal} --by NAME --proponent NAME")
     return (f"SC-0001 challenges this quoted assertion at {TRACE}@{version}:{lines}; edit the finding or "
-            f"have this use reviewed (kblam use review SC-0001 F-0001 {ordinal} --by NAME --proponent NAME). "
-            f"K10 is checked separately.")
+            f"have this use reviewed ({review}). K10 is checked separately.")
 
 
 NEW_TEXT = "# a heading added above\n" + TRACE_TEXT      # another version of the source: every line moves
@@ -209,6 +214,25 @@ def test_a_current_approved_use_covers_the_excerpt(kb, source_repo):
     put(kb, "SC", sc(source_repo))
     add_finding(kb, "3", LINE3)
     put(kb, "CU", use(kb))
+    assert k14_of(kb) == []
+
+
+def test_an_open_use_makes_the_error_name_the_decide_that_approves_it(kb, source_repo):
+    """SPEC §5.2.4 K14: a second `kblam use review` for one excerpt settles nothing the open use does not,
+    so where an open use already names the excerpt the error names the decision that approves that use —
+    with a `--by` of its own — and running it clears the error."""
+    put(kb, "SC", sc(source_repo))
+    add_finding(kb, "3", LINE3)
+    data = use(kb, status="open")
+    put(kb, "CU", data)
+    assert [i.message for i in errors_of(k14_of(kb))] == [
+        same_bytes_message(source_repo, open_use="CU-0001")]
+
+    view = load_view(kb.cfg)
+    kb.write(view.review_index_path, generate_review_index(view))
+    assert cli.main(["--root", str(kb.root), "review", "decide", "CU-0001", "--status", "approved",
+                     "--by", "reviewer-b", "--reason", "the excerpt really is used for the printed bytes",
+                     "--expect", subject_digest("CU", data)]) == 0
     assert k14_of(kb) == []
 
 

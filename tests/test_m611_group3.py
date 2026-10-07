@@ -89,6 +89,17 @@ def same_bytes(path: str, version: str, *, lines: str = "3-3", ordinal: int = 1)
             f"NAME). K10 is checked separately.")
 
 
+def same_bytes_open_use(path: str, version: str, *, lines: str = "3-3", ordinal: int = 1,
+                        rec_id: str = "CU-0001") -> str:
+    """The same-bytes error where `rec_id` is already installed open for researcher-a: the step it names
+    is the decision that approves that use, not a second `kblam use review`, which would settle nothing
+    the open one does not (k14.USE_DECIDE)."""
+    return (f"SC-0001 challenges this quoted assertion at {path}@{version}:{lines}; edit the finding or "
+            f"have this use reviewed (kblam review decide {rec_id} --status approved --by NAME --reason "
+            f"TEXT --expect D; its --by must not be its proponent ({rec_id}'s proponent is "
+            f"researcher-a)). K10 is checked separately.")
+
+
 def trace_version(source_repo) -> str:
     """The trace's pinned version, as its diagnostics name it: the HEAD blob's first 12 hex digits."""
     return source_repo.blob(m.TRACE_PATH)[:12]
@@ -248,8 +259,9 @@ def test_a_current_approved_use_covers_the_excerpt_and_the_validation_is_clean(k
            done_but("review decide", 1))
 
     use = new_use(kb, source_repo, "SC-0001", 1, rec_id="CU-0001")
+    open_use_error = k14_line(same_bytes_open_use(m.TRACE, trace_version(source_repo)))
     ok_run(install(kb, source_repo, use, "research-review/uses/CU-0001.yaml"),
-           put_line("CU-0001", "uses"), error, done_but("put", 1))
+           put_line("CU-0001", "uses"), open_use_error, done_but("put", 1))
 
     approved = decide(kb, source_repo, "CU-0001", "approved", "--by", "reviewer-b",
                       "--reason", "the excerpt really is used only for the printed bytes")
@@ -542,6 +554,10 @@ def test_two_identical_tag_and_block_copies_are_separate_uses_by_ordinal(kb, sou
     version = trace_version(source_repo)
     first_error = k14_line(same_bytes(m.TRACE, version))
     second_error = k14_line(same_bytes(m.TRACE, version, ordinal=2), line=second_copy)
+    # Once a use for one of the two copies is open, that copy's error names the decision that approves it.
+    first_open_error = k14_line(same_bytes_open_use(m.TRACE, version))
+    second_open_error = k14_line(
+        same_bytes_open_use(m.TRACE, version, ordinal=2, rec_id="CU-0002"), line=second_copy)
 
     staged = new_challenge(kb, source_repo, m.TRACE)
     ok_run(install(kb, source_repo, staged, SC_RECORD), put_line("SC-0001", "challenges"))
@@ -559,7 +575,7 @@ def test_two_identical_tag_and_block_copies_are_separate_uses_by_ordinal(kb, sou
 
     use1 = new_use(kb, source_repo, "SC-0001", 1, rec_id="CU-0001")
     ok_run(install(kb, source_repo, use1, "research-review/uses/CU-0001.yaml"),
-           put_line("CU-0001", "uses"), first_error, second_error, done_but("put", 2))
+           put_line("CU-0001", "uses"), first_open_error, second_error, done_but("put", 2))
     ok_run(decide(kb, source_repo, "CU-0001", "approved", "--by", "reviewer-b",
                   "--reason", "the excerpt really is used only for the printed bytes"),
            f"kblam review decide: CU-0001 is now approved (subject digest "
@@ -572,7 +588,7 @@ def test_two_identical_tag_and_block_copies_are_separate_uses_by_ordinal(kb, sou
 
     use2 = new_use(kb, source_repo, "SC-0001", 2, rec_id="CU-0002")
     ok_run(install(kb, source_repo, use2, "research-review/uses/CU-0002.yaml"),
-           put_line("CU-0002", "uses"), second_error, done_but("put", 1))
+           put_line("CU-0002", "uses"), second_open_error, done_but("put", 1))
     ok_run(decide(kb, source_repo, "CU-0002", "approved", "--by", "reviewer-b",
                   "--reason", "the second copy is used for the printed bytes too"),
            f"kblam review decide: CU-0002 is now approved (subject digest "

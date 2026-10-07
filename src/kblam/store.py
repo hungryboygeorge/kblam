@@ -396,9 +396,19 @@ def stamp_dependency(finding: Finding, target_id: str, value: str, shown: str) -
 
 def rekey_dependency(finding: Finding, old_id: str, new_id: str, value: str, shown: str) -> bytes:
     """The finding's bytes with the depends_on entry `old_id` renamed `new_id` and set to `value`; no other byte
-    changes (kblam renumber, SPEC §7). `shown` is the file's path as messages should name it."""
+    changes (kblam renumber, SPEC §7). `shown` is the file's path as messages should name it.
+
+    A refusal names the way an agent may change the entry (the hooks deny writing an installed finding by
+    hand): the staged copy `kblam edit` writes, the entry on the key's own line, and `kblam put`, which is
+    what a re-key needs. A finding kblam cannot read as a finding cannot be staged at all, so its entry is
+    the user's to change."""
+    recorded = finding.meta["depends_on"][old_id]
     problem = (f"{shown}: could not change depends_on {old_id} to {new_id} without changing anything else; "
-               f"change that entry by hand to {new_id}: {value}")
+               f"kblam edit {finding.file_id} stages a copy, write the entry there on its key's own line as "
+               f"{old_id}: {recorded}, and kblam put that copy, which lets the renumber re-key it")
+    if not finding.ok:
+        problem = (f"{shown} cannot be read as a finding, so kblam cannot put its depends_on entry {old_id} "
+                   f"as {new_id}; leave it as it is and tell the user")
     data = _rewrite_entry(finding, finding.meta["depends_on"].lc.key(old_id), value, key=new_id)
     expected = plain_data(finding.meta)
     expected["depends_on"] = {(new_id if k == old_id else k): (value if k == old_id else v)
@@ -1004,18 +1014,23 @@ def _renumber(cfg: Config, source: Path) -> RenumberResult:
                          f"an ID never changes, and kblam renumber only settles an ID two findings share (K1)")
     links = _links(view, old_id)
     new_id = allocate_id(cfg)
-    peers: list[tuple[Finding, str | None]] | None = None  # None until a message needs them
+    # None until a message needs them: (the file, the reason kblam cannot renumber it, whether that reason
+    # is the damaged kblam.resolutions.jsonl, which blocks every file's renumber)
+    peers: list[tuple[Finding, str | None, bool]] | None = None
 
-    def unlinked_peers() -> list[tuple[Finding, str | None]]:
+    def unlinked_peers() -> list[tuple[Finding, str | None, bool]]:
         """Each other file with the ID that no review record links, with the reason kblam cannot renumber
-        it (None when it can: the first case's test, SPEC §7). Worked out once, when a message needs it."""
+        it (None when it can: the first case's test, SPEC §7) and whether the reason is the damaged
+        kblam.resolutions.jsonl. Worked out once, when a message needs it."""
         nonlocal peers
         if peers is None:
-            peers = [(k, _renumber_problem(cfg, view, k, new_id)) for k in kept if not links[k.path]]
+            refused = [(k, _renumber_refusal(cfg, view, k, new_id)) for k in kept if not links[k.path]]
+            peers = [(k, None if exc is None else str(exc), isinstance(exc, resolutions.ResolutionError))
+                     for k, exc in refused]
         return peers
 
     def other() -> str | None:
-        return next((k.path for k, problem in unlinked_peers() if problem is None), None)
+        return next((k.path for k, problem, _ in unlinked_peers() if problem is None), None)
 
     def mine_problem() -> str | None:
         """Why renumbering the selected file itself would refuse once the records that link it are retired
@@ -1108,15 +1123,23 @@ def _renumber_plan(cfg: Config, view: KBView, finding: Finding, kept: list[Findi
     return _RenumberPlan(new_path, data, new_fp, carried, rewrites, mentions)
 
 
-def _renumber_problem(cfg: Config, view: KBView, finding: Finding, new_id: str) -> str | None:
-    """The refusal renumbering `finding` would give, without its `kblam renumber:` prefix and without any
-    "renumber the other file instead" alternative; None when renumbering it would pass every precondition."""
+def _renumber_refusal(cfg: Config, view: KBView, finding: Finding, new_id: str) -> Exception | None:
+    """The refusal renumbering `finding` would give, as raised, without any "renumber the other file
+    instead" alternative; None when renumbering it would pass every precondition. The class is what tells a
+    damaged kblam.resolutions.jsonl (resolutions.ResolutionError) from a problem of the file's own."""
     kept = [f for f in view.findings if f.file_id == finding.file_id and f is not finding]
     try:
         _renumber_plan(cfg, view, finding, kept, new_id, lambda: None)
     except (StoreError, resolutions.ResolutionError) as exc:
-        return str(exc)
+        return exc
     return None
+
+
+def _renumber_problem(cfg: Config, view: KBView, finding: Finding, new_id: str) -> str | None:
+    """The refusal renumbering `finding` would give, without its `kblam renumber:` prefix and without any
+    "renumber the other file instead" alternative; None when renumbering it would pass every precondition."""
+    exc = _renumber_refusal(cfg, view, finding, new_id)
+    return None if exc is None else str(exc)
 
 
 # --- rm and renumber vs review records (SPEC §7 "`rm` and `renumber` vs review records") ----------------
@@ -1212,18 +1235,31 @@ def _stale_sentence(cfg: Config, recs: list, finding: Finding) -> str:
 def _adjudicator_sends(ids: list[str]) -> str:
     """Who settles a dead end and what an agent that is not the adjudicator does with it (SPEC §8.1): the
     adjudicator is the librarian when one is deployed and otherwise the coordinator, never the author of the
-    records concerned, and the other agent names the IDs to it and carries on."""
+    records concerned, and the other agent names the IDs to it and carries on. The coordinator's own records
+    have no adjudicator beside a deployed librarian, so the text names the user as the last resort."""
     return ("Settling this is the adjudicator's: the librarian when one is deployed, otherwise the "
             "coordinator, and never the author of the records involved. Send " + _and(ids)
-            + " to the coordinator or librarian, who decide them, and carry on.")
+            + " to the coordinator or librarian, who decide them, and carry on; where the coordinator "
+            "authored one of them and no librarian is deployed, tell the user.")
 
 
-def _retire_commands(recs: list, reason) -> str:
+def _retire_commands(recs: list, reason, command: str) -> str:
     """The commands that retire each of `recs`, in order, each with its current subject digest in full
     (`decisions.subject_digest`), which `--expect` takes: the adjudicator's retire step. `reason` gives the
-    `--reason` text of one record."""
-    return "; ".join(f"kblam review decide {rec.id} --status stale --by NAME --reason \"{reason(rec)}\" "
-                     f"--expect {decisions.subject_digest(rec.kind, rec.data)}" for rec in recs)
+    `--reason` text of one record. A record whose status is outside its kind's vocabulary is not one kblam
+    can decide from (`decisions.transition_problem`): no decision takes it anywhere, so instead of a command
+    that would refuse, its step is the record file's own line in `kblam validate`, then `command` again —
+    the command the refusal this text belongs to just refused (SPEC §7)."""
+    steps = []
+    for rec in recs:
+        if rec.status not in records.STATUSES.get(rec.kind, ()):
+            steps.append(f"{rec.id}'s status is not one kblam can decide from; run kblam validate and do what "
+                         f"its line for {rec.path} says, then run kblam {command} again")
+        else:
+            steps.append(f"kblam review decide {rec.id} --status stale --by NAME "
+                         f"--reason \"{reason(rec)}\" "
+                         f"--expect {decisions.subject_digest(rec.kind, rec.data)}")
+    return "; ".join(steps)
 
 
 def _independence_notes(recs: list) -> str:
@@ -1239,7 +1275,10 @@ def _independence_notes(recs: list) -> str:
                  for role in decisions.SELF_ROLES.get(rec.kind, ())
                  if isinstance(data.get(role), str) and data.get(role)]
         if roles:
-            notes.append(f" {rec.id} is {rec.status}, so its --by must not be " + _and(roles) + ".")
+            # One role reads "must not be its creator (…)", two read "must be neither … nor …".
+            must = (f"must not be {roles[0]}" if len(roles) == 1
+                    else "must be neither " + " nor ".join(roles))
+            notes.append(f" {rec.id} is {rec.status}, so its --by {must}.")
     return "".join(notes)
 
 
@@ -1253,21 +1292,32 @@ def _refile_steps(target: str, phrase: str) -> str:
             f"entry then names {target}; kblam task new {target} --kind KIND --by NAME --proponent NAME; and, "
             f"for a use, kblam use review SC-NNNN {target} ORDINAL --by NAME --proponent NAME, which stages "
             f"one only for a confirmed challenge's affected excerpt of {target}. Fill the staged record and "
-            f"put it (kblam put STAGED-PATH)")
+            f"put it (kblam put STAGED-PATH); a use covers its excerpt only once it is approved (K14), so an "
+            f"agent who is not its proponent runs kblam review decide CU-NNNN --status approved --by NAME "
+            f"--reason TEXT --expect D on it")
 
 
 def _selected_file_route(finding: Finding, problem: str) -> str:
     """What a renumber dead end says about the selected file itself (SPEC §7), when the renumber the route
     names would refuse for it once the records that link it are retired: the file's own problem, and the
-    step that makes the route runnable. The problems kblam writes for the file itself end with the step to
-    leave it and tell the user what to repair; the others (a damaged kblam.resolutions.jsonl, a dependent's
-    `depends_on` entry it cannot re-key) name what to repair in the problem, so the step is added without
-    naming a file."""
+    step that makes the route runnable. Every problem kblam writes here carries its own step: the ones for
+    the file itself and a damaged kblam.resolutions.jsonl end by telling the user to repair what they name,
+    and a dependent's `depends_on` entry kblam cannot re-key names the staged copy and the put that make the
+    entry re-keyable, so the step is the renumber again rather than a repair."""
     path = finding.path
-    step = ("" if "leave it as it is and tell the user" in problem
-            else " Leave it as it is and tell the user to repair what the line above names.")
-    return (f" Then kblam renumber {path} refuses for this file itself: {problem}.{step} Once it is "
-            f"repaired, run kblam renumber {path} again")
+    if "leave it as it is and tell the user" in problem:
+        return (f" Then kblam renumber {path} refuses for this file itself: {problem}. Once it is "
+                f"repaired, run kblam renumber {path} again")
+    return (f" Then kblam renumber {path} refuses for this file itself: {problem}. Then run kblam "
+            f"renumber {path} again")
+
+
+def _repair_log_step(paths: list[str]) -> str:
+    """The step out of the renumber dead end a damaged kblam.resolutions.jsonl leaves (SPEC §7): the log
+    blocks every file's renumber, so no record is retired for nothing — once the user repairs the log, the
+    files the log alone blocked renumber with no retirement at all. `paths` are those files, which are the
+    ones whose only problem is the damaged log."""
+    return ("Once it is repaired, run " + _and([f"kblam renumber {path}" for path in paths]) + " again")
 
 
 def _retire_then_renumber(finding: Finding, files: list[Finding], mine: list, sent: list[str],
@@ -1299,7 +1349,8 @@ def _retire_then_renumber(finding: Finding, files: list[Finding], mine: list, se
             + _refile_steps("NEW-ID", "the ID kblam renumber prints"))
     return (_adjudicator_sends(sent)
             + f" The adjudicator retires each record that links {finding.path} and is not retired: "
-            + _retire_commands(mine, reason) + "." + _independence_notes(mine) + bare + tail)
+            + _retire_commands(mine, reason, f"renumber {finding.path}") + "."
+            + _independence_notes(mine) + bare + tail)
 
 
 def _linked_removal(cfg: Config, view: KBView, finding: Finding, target: Finding, linked: list) -> str:
@@ -1322,7 +1373,8 @@ def _linked_removal(cfg: Config, view: KBView, finding: Finding, target: Finding
                 f"it; kblam never removes a finding a review record links. {cfg.findings_dir}/ is unchanged. "
                 + _adjudicator_sends([finding_id, target_id, *named])
                 + f" The adjudicator retires each record that links {finding_id} and is not retired: "
-                + _retire_commands(linked, lambda rec: f"{finding_id} merged into {target_id}")
+                + _retire_commands(linked, lambda rec: f"{finding_id} merged into {target_id}",
+                                   f"rm {finding_id} --merged-into {target_id}")
                 + "." + _independence_notes(linked)
                 + " " + _merge_route(f"Then merge {finding_id} into {target_id}, in one staged copy of "
                                      f"{target_id}", finding, target, _staged_copy(cfg, target))
@@ -1346,7 +1398,7 @@ def _linked_renumber(view: KBView, finding: Finding, links: dict[str, list],
     mine = links[finding.path]
     ids = [rec.id for rec in mine]
     head = f"{finding.path} holds {old_id}, which {_review_records(ids, 'link')}, so it keeps its ID"
-    ready = [f.path for f, problem in peers if problem is None]
+    ready = [f.path for f, problem, _ in peers if problem is None]
     if ready:
         if len(files) == 2:
             which = "the other finding with that ID"
@@ -1362,11 +1414,17 @@ def _linked_renumber(view: KBView, finding: Finding, links: dict[str, list],
                 f"kblam validate and every commit until this is settled. "
                 + _retire_then_renumber(finding, files, mine, [paths, *all_ids], own))
     if len(files) == 2:
-        (peer, problem), = peers
+        (peer, problem, _), = peers
         why = f"the other finding with that ID, {peer.path}, cannot be renumbered yet: {problem}"
     else:
         why = (f"the other finding{'s' if len(peers) > 1 else ''} with that ID that no review record links cannot "
-               f"be renumbered yet: " + "; ".join(f"{f.path}: {problem}" for f, problem in peers))
+               f"be renumbered yet: " + "; ".join(f"{f.path}: {problem}" for f, problem, _ in peers))
+    repairable = [f.path for f, _, log_blocked in peers if log_blocked]
+    if repairable:
+        # A damaged kblam.resolutions.jsonl blocks every file's renumber, so retiring the records that link
+        # the selected file would be for nothing: once the user repairs the log, the file the log alone
+        # blocks renumbers on its own (SPEC §7).
+        return f"{head}; {why}. " + _repair_log_step(repairable)
     return (f"{head}; {why}. "
             + _retire_then_renumber(finding, files, mine, [finding.path, *ids], own))
 

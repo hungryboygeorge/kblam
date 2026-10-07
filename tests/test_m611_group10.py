@@ -603,7 +603,7 @@ def test_two_process_edits_refuse_second_stale_edit_base(kb, source_repo, tmp_pa
                    {SC, HASH, receipt, ".kblam/review-staging/left/SC-0001.yaml"}, set())
     assert results == [m.Run(0, f"kblam put: SC-0001 -> {SC}\n", ""),
                        m.Run(1, "", "kblam put: SC-0001 changed since your edit; run kblam challenge "
-                                    "edit SC-0001 again Load the kblam-write skill for how to fix this.\n")]
+                                    "edit SC-0001 again. Load the kblam-write skill for how to fix this.\n")]
     assert right.read_bytes() == right_bytes
     assert data(m.record_path(kb, "SC-0001"))["proposition"] == "The left reviewer narrowed the proposition"
     assert not (kb.root / JOURNAL).exists()

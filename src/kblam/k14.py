@@ -12,6 +12,7 @@ from kblam.matching import ExcerptMatch
 from kblam.rules import Issue
 
 USE_REVIEW = "kblam use review {challenge} {finding} {ordinal} --by NAME --proponent NAME"
+USE_DECIDE = "kblam review decide {rid} --status approved --by NAME --reason TEXT --expect D"
 CHALLENGE_NEW = "kblam challenge new {path} --lines {lines} --by NAME"
 CHALLENGE_USES = "kblam challenge uses {challenge}"
 
@@ -51,7 +52,7 @@ def k14(view, reader) -> list[Issue]:
         if hit.kind == "range":
             issues.append(_at_excerpt(hit, _range_message(hit), "warning"))
         elif not covering.covers(hit):
-            issues.append(_at_excerpt(hit, _error_message(reader, hit), "error"))
+            issues.append(_at_excerpt(hit, _error_message(reader, hit, covering), "error"))
     issues += _reference_warnings(view, reader)
     return issues
 
@@ -212,20 +213,29 @@ class _CurrentUses:
         self._uses = [rec for rec in view.records if rec.kind == "CU" and isinstance(rec.data, dict)]
         self._current: dict[str, bool] = {}
 
+    def _names(self, rec: records.Record, hit: _Hit) -> bool:
+        """Whether the use records this challenge, finding and excerpt ordinal."""
+        data = rec.data
+        citation = data.get("citation")
+        return (data.get("challenge") == hit.info.rec.id and data.get("finding") == hit.finding.file_id
+                and isinstance(citation, dict) and citation.get("ordinal") == hit.match.ordinal)
+
     def covering(self, hit: _Hit) -> records.Record | None:
         """The current use that covers the excerpt, or None: the use `covers` would accept, kept so
         `challenge uses` can name it."""
         for rec in self._uses:
-            data = rec.data
-            citation = data.get("citation")
-            if (data.get("challenge") != hit.info.rec.id or data.get("finding") != hit.finding.file_id
-                    or not isinstance(citation, dict) or citation.get("ordinal") != hit.match.ordinal):
+            if not self._names(rec, hit):
                 continue
             if rec.path not in self._current:
                 self._current[rec.path] = k13.use_current(self.view, self.reader, rec)
             if self._current[rec.path]:
                 return rec
         return None
+
+    def open_for(self, hit: _Hit) -> records.Record | None:
+        """The open use naming this excerpt, or None: the use the K14 message names the approving decision
+        for, since staging a second use for one excerpt is not what covers it."""
+        return next((rec for rec in self._uses if rec.status == "open" and self._names(rec, hit)), None)
 
     def covers(self, hit: _Hit) -> bool:
         return self.covering(hit) is not None
@@ -255,10 +265,24 @@ def _range_text(numbers) -> str:
     return "-".join(str(n) for n in numbers)
 
 
-def _error_message(reader, hit: _Hit) -> str:
+def _review_step(hit: _Hit, covering: _CurrentUses) -> str:
+    """What "have this use reviewed" names (SPEC §5.2.4 K14): the use an author stages for the excerpt, or,
+    where an open use for that excerpt already exists, the decision that approves it — a second use for one
+    excerpt settles nothing the open one does not, and the decision needs a --by of its own."""
+    open_use = covering.open_for(hit)
+    if open_use is None:
+        return USE_REVIEW.format(challenge=hit.info.rec.id or "", finding=hit.finding.file_id,
+                                 ordinal=hit.match.ordinal)
+    proponent = open_use.data.get("proponent")
+    who = (f" ({open_use.id}'s proponent is {proponent})"
+           if isinstance(proponent, str) and proponent else "")
+    return (f"{USE_DECIDE.format(rid=open_use.id)}; its --by must not be its proponent{who}")
+
+
+def _error_message(reader, hit: _Hit, covering: _CurrentUses) -> str:
     info, match = hit.info, hit.match
     challenge = info.rec.id or ""
-    review = USE_REVIEW.format(challenge=challenge, finding=hit.finding.file_id, ordinal=match.ordinal)
+    review = _review_step(hit, covering)
     if hit.kind == "same":
         return MESSAGE_SAME_BYTES.format(challenge=challenge, source=_source_path(info),
                                          version=_version(info), lines=_range_text(_assertion(info)[1]),

@@ -141,10 +141,13 @@ def merge_text(records: str, one: str, stale: str = "") -> str:
 def adjudicator_route(sent: str, path: str, decides: str, note: str = "") -> str:
     """The adjudicator wording and the retire step: who settles a dead end, what an agent that is not the
     adjudicator sends it, and the commands that retire each record linking `path`; `note` is the
-    independence note of a record that is not open."""
+    independence note of a record that is not open. Where the coordinator authored one of the records and
+    no librarian is deployed, no agent is left who may decide them, so the sentence ends by telling the
+    user."""
     return (f"Settling this is the adjudicator's: the librarian when one is deployed, otherwise the "
             f"coordinator, and never the author of the records involved. Send {sent} to the coordinator or "
-            f"librarian, who decide them, and carry on. The adjudicator retires each record that links "
+            f"librarian, who decide them, and carry on; where the coordinator authored one of them and no "
+            f"librarian is deployed, tell the user. The adjudicator retires each record that links "
             f"{path} and is not retired: {decides}." + note)
 
 
@@ -156,7 +159,9 @@ def refile_text(target: str, phrase: str) -> str:
             f"entry then names {target}; kblam task new {target} --kind KIND --by NAME --proponent NAME; "
             f"and, for a use, kblam use review SC-NNNN {target} ORDINAL --by NAME --proponent NAME, which "
             f"stages one only for a confirmed challenge's affected excerpt of {target}. Fill the staged "
-            f"record and put it (kblam put STAGED-PATH)")
+            f"record and put it (kblam put STAGED-PATH); a use covers its excerpt only once it is approved "
+            f"(K14), so an agent who is not its proponent runs kblam review decide CU-NNNN --status "
+            f"approved --by NAME --reason TEXT --expect D on it")
 
 
 def retire_commands(kb, reason: str, *rec_ids: str) -> str:
@@ -257,10 +262,11 @@ def test_rm_dead_end_is_handed_to_the_adjudicator_in_full(kb):
 
 
 def test_rm_dead_end_names_each_record_once_and_its_independence(kb):
-    """A rejected record that is not open needs a `--by` other than its creator, so the refusal names the
-    role and its value; a record linking both findings is listed once."""
+    """A record that is not open needs a `--by` the independence rule does not forbid, so the refusal names
+    each role and its value: one role for a challenge, and a task's two (its creator and its proponent) with
+    "neither … nor …". A record linking both findings is listed once."""
     merge_pair(kb)
-    ct(kb, "CT-0003", MINE)
+    ct(kb, "CT-0003", MINE, status="confirmed")
     sc(kb, "SC-0004", "F-0012", "F-0020")
     install(kb, "SC", "SC-0002", linked_findings=["F-0012"], status="rejected", creator="reviewer-a")
     cu(kb, "CU-0001", "findings/motor/F-0020-motor.md", finding_id="F-0020", status="withdrawn",
@@ -268,7 +274,9 @@ def test_rm_dead_end_names_each_record_once_and_its_independence(kb):
     assert refused(kb, "rm", "F-0012", "--merged-into", "F-0020") == message("rm", dead_end_text(
         kb, "review records SC-0002, SC-0004, CT-0003 link", "review records SC-0004, CU-0001 link",
         "F-0012, F-0020, SC-0002, SC-0004, CT-0003 and CU-0001", ("SC-0002", "SC-0004", "CT-0003"),
-        note=" SC-0002 is rejected, so its --by must not be its creator (SC-0002's creator is reviewer-a)."))
+        note=" SC-0002 is rejected, so its --by must not be its creator (SC-0002's creator is reviewer-a)."
+             " CT-0003 is confirmed, so its --by must be neither its creator (CT-0003's creator is "
+             "reviewer-a) nor its proponent (CT-0003's proponent is researcher-a)."))
 
 
 
@@ -478,29 +486,36 @@ def repair(kb) -> None:
     (kb.root / "kblam.resolutions.jsonl").unlink(missing_ok=True)
 
 
-def own_problem_clause(path: str, problem: str, step: str = "") -> str:
+def own_problem_clause(path: str, problem: str) -> str:
     """The clause a renumber dead end prints when the selected file itself would refuse once the records
-    that link it are retired: its own problem, and the step to run again once the user has repaired it.
-    `step` is the leave-it sentence, added only when the problem does not carry one itself; every problem
-    kblam writes here does (the ones for the file itself, and a damaged kblam.resolutions.jsonl), so a
-    caller passes one only for a problem that does not."""
-    leave = f" {step}" if step else ""
-    return (f" Then kblam renumber {path} refuses for this file itself: {problem}.{leave} Once it is "
-            f"repaired, run kblam renumber {path} again.")
+    that link it are retired: its own problem, and the step that makes the route runnable. Every problem
+    kblam writes here carries its own step, so the clause adds none: one that tells the user what to
+    repair is followed by "Once it is repaired", and one that names kblam's own route by "Then"."""
+    if "leave it as it is and tell the user" in problem:
+        tail = f"Once it is repaired, run kblam renumber {path} again."
+    else:
+        tail = f"Then run kblam renumber {path} again."
+    return f" Then kblam renumber {path} refuses for this file itself: {problem}. {tail}"
 
 
-# What the clause adds for a problem that does not itself say to leave the file and tell the user.
-STEP_FROM_PROBLEM = "Leave it as it is and tell the user to repair what the line above names."
+def repair_log_text(path: str) -> str:
+    """The step out of the dead end a damaged kblam.resolutions.jsonl leaves: the log blocks every file's
+    renumber, so no record is retired for nothing, and repairing it frees every file it alone blocked."""
+    return f"Once it is repaired, run kblam renumber {path} again."
 
 
 def case_c_text(kb, reason: str, own: str = "", retire: tuple[str, ...] = ("CT-0003",),
-                sent: str = f"{MINE} and CT-0003") -> str:
+                sent: str = f"{MINE} and CT-0003", log_to: str | None = None) -> str:
     """Case C: every other file with the ID has a problem of its own, so the refusal names it and hands the
     dead end to the adjudicator, who retires the records linking the selected file and renumbers it. `own`
-    is the clause printed when the selected file itself has a problem too (a damaged
-    kblam.resolutions.jsonl is both files' problem)."""
-    return (f"{MINE} holds F-0012, which review record CT-0003 links, so it keeps its ID; the other finding "
-            f"with that ID, {THEIRS}, cannot be renumbered yet: {reason}. "
+    is the clause printed when the selected file itself has a problem too. `log_to` is the file to repair
+    instead, for the damaged kblam.resolutions.jsonl: it blocks every file's renumber, so the refusal
+    names no adjudicator route at all."""
+    head = (f"{MINE} holds F-0012, which review record CT-0003 links, so it keeps its ID; the other finding "
+            f"with that ID, {THEIRS}, cannot be renumbered yet: {reason}. ")
+    if log_to is not None:
+        return head + repair_log_text(log_to)
+    return (head
             + adjudicator_route(sent, MINE, retire_commands(kb, took_new_id(MINE, "two"), *retire))
             + (own if own else f" Then kblam renumber {MINE}, which prints the new ID."
                + refile_text("NEW-ID", "the ID kblam renumber prints") + "."))
@@ -511,14 +526,15 @@ def case_c_text(kb, reason: str, own: str = "", retire: tuple[str, ...] = ("CT-0
 def test_renumber_says_why_the_unlinked_file_cannot_be_renumbered_yet(kb, at_root, damage, shared):
     """Case C, for each reason: the other file's problem is named, the route through the adjudicator is
     given, and the file the user must repair is named. `shared` marks a damaged kblam.resolutions.jsonl,
-    which blocks the selected file's renumber too, so the route names that problem for this file as well
-    (the same problem text, which carries its own leave-it step, so the clause adds none)."""
+    which blocks the selected file's renumber too: retiring anything would be for nothing, since repairing
+    the log is what lets the other file renumber, so the refusal gives no adjudicator route and ends with
+    the repair and the renumber to run again."""
     same_id(kb)
     ct(kb, "CT-0003", MINE)
     reason = damage(kb)
     m.accept_tree(kb)
-    own = own_problem_clause(MINE, reason) if shared else ""
-    assert refused(kb, "renumber", kb.root / MINE) == message("renumber", case_c_text(kb, reason, own))
+    assert refused(kb, "renumber", kb.root / MINE) == message(
+        "renumber", case_c_text(kb, reason, log_to=THEIRS if shared else None))
 
     repair(kb)
     m.accept_tree(kb)
@@ -526,24 +542,39 @@ def test_renumber_says_why_the_unlinked_file_cannot_be_renumbered_yet(kb, at_roo
     assert (kb.findings / "motor" / "F-0013-motor.md").is_file()
 
 
+def rekey_problem(dependent: str, rec_id: str, fp: str) -> str:
+    """The reason renumbering the other file gives for a depends_on entry it cannot re-key: the entry's
+    value sits on a line of its own, and the step is the agent's route through kblam (the hooks deny a
+    hand edit of an installed finding)."""
+    return (f"{dependent}: could not change depends_on F-0012 to F-0031 without changing anything else; "
+            f"kblam edit {rec_id} stages a copy, write the entry there on its key's own line as "
+            f"F-0012: {fp}, and kblam put that copy, which lets the renumber re-key it")
+
+
 def test_renumber_says_when_a_dependent_of_the_unlinked_file_cannot_be_rekeyed(kb, at_root):
     """Case C, fifth reason: a depends_on entry meaning the other file that kblam cannot re-key without
-    changing anything else (its value on a line of its own)."""
+    changing anything else (its value on a line of its own). D49: the entry is made re-keyable through
+    kblam — the route the reason names — and the printed renumber then re-keys it as it prints."""
     same_id(kb)
     ct(kb, "CT-0003", MINE)
     theirs_fp = binding(kb, THEIRS)[0]
     dependent = "findings/pump/F-0030-pump.md"
-    kb.add("F-0030", "pump", CLAIM_C, topic="pump", extra=f"depends_on:\n  F-0012:\n    '{theirs_fp}'\n")
+    block = f"depends_on:\n  F-0012:\n    '{theirs_fp}'\n"
+    kb.add("F-0030", "pump", CLAIM_C, topic="pump", extra=block)
     renamed = "findings/motor/F-0031-motor.md"
     text = finding_text("F-0012", CLAIM_B, topic="motor").replace("id: F-0012", "id: F-0031")
     new_fp = fingerprint(parse_finding(renamed, text.encode()), "/")
     m.accept_tree(kb)
-    assert refused(kb, "renumber", kb.root / MINE) == message("renumber", case_c_text(kb, (
-        f"{dependent}: could not change depends_on F-0012 to F-0031 without changing anything else; "
-        f"change that entry by hand to F-0031: {new_fp}")))
+    assert refused(kb, "renumber", kb.root / MINE) == message("renumber", case_c_text(
+        kb, rekey_problem(dependent, "F-0030", theirs_fp)))
 
-    kb.add("F-0030", "pump", CLAIM_C, topic="pump", extra=f"depends_on:\n  F-0012: '{theirs_fp}'\n")
-    m.accept_tree(kb)
+    # The step as printed: stage the dependent, put the entry on the key's line, put the copy; the
+    # renumber then re-keys it without any retirement.
+    m.ok(m.kblam(kb, "edit", "F-0030"), "edit")
+    staged = kb.root / ".kblam/staging/F-0030-pump.md"
+    kb.write(".kblam/staging/F-0030-pump.md",
+             staged.read_text().replace(block, f"depends_on:\n  F-0012: '{theirs_fp}'\n"))
+    m.ok(m.kblam(kb, "put", ".kblam/staging/F-0030-pump.md"), "put")
     m.ok(m.kblam(kb, "renumber", THEIRS), "renumber")
     assert f"F-0031: {new_fp}".encode() in (kb.root / dependent).read_bytes()
 
@@ -923,6 +954,78 @@ def test_renumber_dead_end_names_the_selected_files_own_problem(kb, at_root):
         "both paths, CT-0003 and CU-0001", MINE, "two", ("CT-0003",), own=own))
 
 
+def test_renumber_dead_end_names_the_rekey_route_for_the_selected_file(kb, at_root):
+    """Case B with a dependent whose `depends_on` entry kblam cannot re-key: the selected file's own
+    problem names kblam's route (stage the dependent, put the entry on its key's own line, put the copy),
+    so the clause ends "Then run kblam renumber <path> again" and names no repair by the user. D49: the
+    printed edit and put make the entry re-keyable, the adjudicator retires the record that links the
+    selected file, and the printed renumber then re-keys the entry as it prints."""
+    same_id(kb)
+    ct(kb, "CT-0003", MINE)                      # links the selected file
+    cu(kb, "CU-0001", THEIRS)                    # links the other one, so every file is linked
+    mine_fp = binding(kb, MINE)[0]
+    dependent = "findings/pump/F-0030-pump.md"
+    block = f"depends_on:\n  F-0012:\n    '{mine_fp}'\n"
+    kb.add("F-0030", "pump", CLAIM_C, topic="pump", extra=block)
+    m.accept_tree(kb)
+    own = own_problem_clause(MINE, rekey_problem(dependent, "F-0030", mine_fp))
+    text = refused(kb, "renumber", MINE)
+    assert text == message("renumber", renumber_dead_end_text(
+        kb, "both findings", f"{MINE}, {THEIRS}", "review records CT-0003, CU-0001",
+        "both paths, CT-0003 and CU-0001", MINE, "two", ("CT-0003",), own=own))
+    assert "Leave the files as they are" not in text and "Once it is repaired" not in text
+
+    # The step as printed: stage the dependent, put the entry on its key's own line, and put the copy.
+    m.ok(m.kblam(kb, "edit", "F-0030"), "edit")
+    staged = kb.root / ".kblam/staging/F-0030-pump.md"
+    kb.write(".kblam/staging/F-0030-pump.md",
+             staged.read_text().replace(block, f"depends_on:\n  F-0012: '{mine_fp}'\n"))
+    m.ok(m.kblam(kb, "put", ".kblam/staging/F-0030-pump.md"), "put")
+
+    assert retire_as_printed(kb, text) == ["CT-0003"]
+    assert renumber_as_printed(kb, text, MINE) == "F-0031"
+    new_fp = binding(kb, "findings/calibration/F-0031-sensor.md")[0]
+    assert f"F-0031: {new_fp}".encode() in (kb.root / dependent).read_bytes()
+
+
+@needs_git
+def test_the_renumber_dead_end_routes_a_status_kblam_cannot_decide_through_validate(kb, at_root):
+    """D49 for a record whose status is outside its kind's vocabulary: no decision takes such a record
+    anywhere, so its retire step is kblam validate's own line for the record rather than a decide command,
+    and running what that line says — the git restore that puts the committed record back — leaves the
+    ordinary adjudicator route, with the decide for the restored record."""
+    same_id(kb)
+    ct(kb, "CT-0003", MINE)
+    cu(kb, "CU-0001", THEIRS)
+    m.accept_tree(kb)
+    git(kb, "init", "-q")
+    commit_all(kb, "the KB as kblam left it")
+    path = f"{kb.cfg.review_dir}/tasks/CT-0003.yaml"
+    sound = (kb.root / path).read_text(encoding="utf-8")   # read as text: git may restore CRLF line ends
+    fp, sha = binding(kb, MINE)
+    kb.write(path, record_text("CT", "CT-0003", finding="F-0012", claim_fingerprint=fp,
+                               base_file_sha256=sha, status="bogus"))          # the hand edit
+    m.accept_tree(kb)
+
+    text = refused(kb, "renumber", MINE)
+    assert (f"CT-0003's status is not one kblam can decide from; run kblam validate and do what its line "
+            f"for {path} says, then run kblam renumber {MINE} again") in text
+    assert DECIDE_RE.search(text) is None                  # no decision takes that status anywhere
+
+    line = next(line for line in m.validate(kb).out.splitlines() if line.startswith(f"K13 {path}:"))
+    restore = re.search(r"\((git restore --source=HEAD --staged --worktree [^)]+)\)", line)
+    assert restore is not None, line
+    assert restore.group(1) == f"git restore --source=HEAD --staged --worktree {path}"
+
+    git(kb, *restore.group(1).split()[1:])                 # the step that line names, run
+    assert (kb.root / path).read_text(encoding="utf-8") == sound
+
+    again = refused(kb, "renumber", MINE)                  # the renumber the step says to run again
+    assert "not one kblam can decide from" not in again
+    assert retire_as_printed(kb, again) == ["CT-0003"]     # the ordinary adjudicator route
+    assert renumber_as_printed(kb, again, MINE) == "F-0013"
+
+
 def test_renumber_dead_end_is_handed_to_the_adjudicator_in_full(kb, at_root):
     """Case B with two files and one SC: the whole text, byte for byte, including the bare-ID note."""
     same_id(kb)
@@ -979,24 +1082,27 @@ def test_renumber_dead_end_names_the_unlinked_files_problem_and_its_route(kb, at
 @pytest.mark.parametrize("damage", [damage_unreadable, damage_id_line, damage_no_id, damage_resolutions])
 def test_the_renumber_dead_end_with_a_damaged_other_file_runs_as_printed(kb, at_root, damage):
     """D49: the route runs whatever the damage is, and every file the user must repair is left to them.
-    For the three damages to the other file, the route runs straight away and the other file is left as it
-    is. A damaged kblam.resolutions.jsonl is both files' problem, so the text names it for the selected
-    file too: the retire step runs, the user repairs the log (the step the text names), and the printed
-    renumber then succeeds."""
+    For the three damages to the other file, the route runs straight away (the retire step first) and the
+    other file is left as it is. A damaged kblam.resolutions.jsonl blocks every file's renumber, so no
+    record is retired for nothing: the text gives no retire command, the user repairs the log (the step
+    the text names), and the renumber of the other file then succeeds."""
     same_id(kb)
     ct(kb, "CT-0003", MINE)
     damage(kb)
     m.accept_tree(kb)
     text = refused(kb, "renumber", MINE)
 
-    assert retire_as_printed(kb, text) == ["CT-0003"]
     if damage is damage_resolutions:
-        assert "refuses for this file itself" in text and "which prints the new ID" not in text
+        assert not DECIDE_RE.search(text) and "Once it is repaired" in text
         repair(kb)                                           # the user repairs it, as the text says
         m.accept_tree(kb)
     else:
+        assert retire_as_printed(kb, text) == ["CT-0003"]
         assert "leave it as it is and tell the user" in text     # the damaged file is left, per the text
-    assert renumber_as_printed(kb, text, MINE) == "F-0013"   # the command the text names, run again
+    # The renumber the text names, run again: the selected file keeps its ID when the log is the damage,
+    # since that route retires nothing.
+    which = THEIRS if damage is damage_resolutions else MINE
+    assert renumber_as_printed(kb, text, which) == "F-0013"
     if damage is not damage_resolutions:
         repair(kb)                                           # the user repairs the other file
         m.ok(m.kblam(kb, "index"), "index")

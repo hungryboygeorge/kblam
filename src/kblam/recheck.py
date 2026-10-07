@@ -196,10 +196,10 @@ def named_files(root: Path, argv: list[str]) -> dict[str, str]:
 
 def check_files(root: Path, argv: list[str], program: str | None) -> dict[str, str]:
     """Every repository file an approval of this command covers: the ones the arguments name, plus the
-    program file that would run when it is a regular file inside the repository. Windows resolves a bare
-    name through PATHEXT (`tools/run` runs `tools/run.exe`) and through every absolute PATH entry,
-    including one inside the repository, so without the second part the program that runs could change
-    without the approval changing (SPEC §7)."""
+    program file that would run when it is a regular file inside the repository: on Windows a name without
+    an extension runs the file PATHEXT completes, so `tools/run` runs `tools/run.exe`, and on any platform a
+    bare name may resolve through a PATH entry inside the repository. Without the second part the program
+    that runs could change without the approval changing (SPEC §7)."""
     files = named_files(root, argv)
     if program:
         try:

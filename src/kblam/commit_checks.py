@@ -196,8 +196,9 @@ def _resolutions_problem(cfg: Config) -> str | None:
                 f"lines {shown} are not JSON objects with the keys {keys}")
     return (f"the {RESOLUTIONS_NAME} this commit holds does not parse: {what}. Only kblam resolve writes it, one "
             f"resolution a line: put back the version kblam wrote (git restore --source=HEAD --staged --worktree -- "
-            f"{RESOLUTIONS_NAME} restores the last commit's), have the adjudicator resolve again any item that "
-            f"loses its resolution, and commit again")
+            f"{RESOLUTIONS_NAME} restores the last commit's, and drops every resolution kblam resolve appended "
+            f"since then), have the adjudicator resolve again each item whose resolution it dropped, and commit "
+            f"again")
 
 
 def _resolution(line: str) -> bool:

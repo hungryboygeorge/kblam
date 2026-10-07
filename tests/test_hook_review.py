@@ -729,7 +729,7 @@ def test_a_staged_id_changed_by_hand_names_setting_it_back(git_review_kb, commit
     assert (refused.code, refused.out) == (1, "")
     assert refused.err == (f"kblam put: .kblam/review-staging/SC-0001.yaml: id is 'SC-0009', but the file "
                            f"name's ID is SC-0001; the ID never changes. Set id back to SC-0001 in "
-                           f".kblam/review-staging/SC-0001.yaml and put it again {POINTER}\n")
+                           f".kblam/review-staging/SC-0001.yaml and put it again. {POINTER}\n")
     assert "git restore" not in refused.err
     assert (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").read_bytes() == before
 
@@ -760,7 +760,7 @@ def test_a_staged_id_that_is_missing_or_blank_names_setting_it_back(git_review_k
     assert (refused.code, refused.out) == (1, "")
     assert refused.err == (f"kblam put: .kblam/review-staging/SC-0001.yaml: the staged file has no id, "
                            f"but the file name's ID is SC-0001; the ID never changes. Set id back to "
-                           f"SC-0001 in .kblam/review-staging/SC-0001.yaml and put it again {POINTER}\n")
+                           f"SC-0001 in .kblam/review-staging/SC-0001.yaml and put it again. {POINTER}\n")
     assert "None" not in refused.err
     assert (kb.root / path).read_bytes() == before
 
@@ -793,7 +793,7 @@ def test_a_staged_id_and_an_installed_id_both_changed_by_hand_name_deleting_the_
                            f"name's ID is SC-0001; the ID never changes, and the installed record "
                            f"{REVIEW}/challenges/SC-0001.yaml does not read as SC-0001 either: it has id "
                            f"'SC-0008'. Delete .kblam/review-staging/SC-0001.yaml, run kblam validate and "
-                           f"do what its line for {REVIEW}/challenges/SC-0001.yaml says {POINTER}\n")
+                           f"do what its line for {REVIEW}/challenges/SC-0001.yaml says. {POINTER}\n")
 
     staged.unlink()                                      # the step it names: delete the staged copy
     restore = named_restore(m.validate(kb).out)          # and run the restore its line prints
@@ -830,7 +830,7 @@ def test_a_broken_installed_file_still_names_deleting_the_staged_copy(git_review
                            f"name's ID is SC-0001; the ID never changes, and the installed record "
                            f"{REVIEW}/challenges/SC-0001.yaml does not read as SC-0001 either. Delete "
                            f".kblam/review-staging/SC-0001.yaml, run kblam validate and do what its line "
-                           f"for {REVIEW}/challenges/SC-0001.yaml says {POINTER}\n")
+                           f"for {REVIEW}/challenges/SC-0001.yaml says. {POINTER}\n")
 
     staged.unlink()                                      # the step it names: delete the staged copy
     restore = named_restore(m.validate(kb).out)          # and run the restore its line prints
@@ -1002,7 +1002,7 @@ def test_a_staged_id_and_an_installed_id_with_no_id_name_deleting_the_staged_cop
                            f"name's ID is SC-0001; the ID never changes, and the installed record {path} "
                            f"does not read as SC-0001 either: it has no id. Delete "
                            f".kblam/review-staging/SC-0001.yaml, run kblam validate and do what its line "
-                           f"for {path} says {POINTER}\n")
+                           f"for {path} says. {POINTER}\n")
 
     staged.unlink()                                      # the step it names: delete the staged copy
     restore = named_restore(m.validate(kb).out)          # and run the restore its line prints

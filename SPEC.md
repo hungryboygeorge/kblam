@@ -416,7 +416,7 @@ are K13 errors.
 | `id` | string | matches the filename: an installed record whose `id` is missing, blank or not an ID, or that no longer parses, gets the same step a mismatch does, and only a file that sits directly in its kind's folder is the record its ID and file name give, so only such a file gets that step. Where git's last commit holds a copy of the file at its path that kblam reads as the record the file name gives, the step is "restore the record's file from git (git restore --source=HEAD --staged --worktree <path>), which puts back the file as git's last commit holds it and undoes any kblam put or decision made to it since; if one was, leave it as it is and tell the user instead" (HEAD is named for the index and the worktree, so a hand edit already `git add`ed is put back too). Where it does not, the step is "git's last commit does not hold a file at <path>, so leave it as it is and tell the user", with ", and records are never renamed" after `<path>` for a mismatched `id`. A staged record's `id` gets no step: its author can set the field. |
 | `created` | date | `YYYY-MM-DD`, set at allocation |
 | `creator` | name | who allocated the record (`--by`) |
-| `status` | string | in the kind's vocabulary (§5.2.3) |
+| `status` | string | in the kind's vocabulary (§5.2.3). An installed record in its kind's folder whose status is missing, blank or outside it gets the step the `id` row gives: kblam's hooks deny writing the file, and no decision takes a record from a status kblam cannot read, so the retire step of a refusal that names it is `kblam validate`'s line for the file (§7). |
 | `decisions` | list | decision entries, append-only (below); `[]` when allocated |
 
 CT and CU records also require `proponent`, a name: who stands behind the finding's claim.
@@ -816,7 +816,11 @@ it against each confirmed challenge whose key matches its source's:
   `K14 findings/<topic>/F-0012-….md:20: SC-0001 challenges this quoted assertion at
   resources/mx-docs/notes/full-scan-trace.md@<blob or sha256 prefix>:63-65; edit the finding or
   have this use reviewed (kblam use review SC-0001 F-0012 2 --by NAME --proponent NAME). K10 is
-  checked separately.` If no span intersects but a line tag's cited range overlaps
+  checked separately.` Where an open use already names that challenge, finding and excerpt, the
+  parenthesis names that use's approving decision instead, "kblam review decide CU-0001 --status
+  approved --by NAME --reason TEXT --expect D; its --by must not be its proponent (CU-0001's
+  proponent is researcher-a)", since a second use for one excerpt covers nothing the open one does
+  not. If no span intersects but a line tag's cited range overlaps
   `assertion.lines`, it is a **warning** (a candidate overlap to inspect).
 - **Different bytes** (the tag pins no version, and the working file is not the challenged
   version). If the excerpt's text contains the assertion text, or the assertion text contains the
@@ -1016,7 +1020,12 @@ A section with no records reads `None.`. Cells are escaped as in the findings in
   checkout in a source repository, ignores it; validation covers the bytes kblam read.
 - **Record-ID registry.** `.kblam/review-ids` is a JSON list of every record ID kblam has written
   or accepted. A registered ID with no record in the review root is a K13 error: "SC-0001 is
-  missing from research-review/; records are never deleted or renamed; restore it from git".
+  missing from research-review/; records are never deleted or renamed; restore the record's file
+  from git (git restore --source=HEAD --staged --worktree <the path the record should have>), which
+  puts back the file as git's last commit holds it and undoes any kblam put or decision made to it
+  since; if one was, leave it as it is and tell the user instead" — or, where git's last commit
+  holds no such copy, "… git's last commit does not hold a file at <path>, so leave it as it is and
+  tell the user".
   kblam creates the registry from the records present at its first write or `validate --record`
   after a clone, and on `init --update`; a clean new-clone bootstrap also creates it (§8), and a
   write creates it even when the bootstrap fails, since it does not depend on `tree.hash`. No
@@ -1489,25 +1498,25 @@ in the git history of the KB root on any ref (`git log --all`: local branches, r
 and tags), so an ID that was ever committed, including one `kblam rm` removed, is never issued
 again. Without git, or outside a repository, the history adds nothing. Two clones that allocate
 before they exchange commits can still pick the same ID; K1 reports the duplicate after the merge,
-and `kblam renumber` settles it, unless review records link both findings, or the linked one's
-peer cannot be renumbered (below). The slug is the title folded to ASCII and
-lowercased, each run of other characters turned into one `-`, trimmed of `-` at both ends and cut
-at a `-` to at most 60 characters (`finding` if nothing is left). The skeleton holds every required
-key, today's date in `verified`, and the `**Claim.**` marker.
+and `kblam renumber` settles it, unless review records link both findings, or the linked one's peer
+cannot be renumbered (below). The slug is the title folded to ASCII and lowercased, each run of
+other characters turned into one `-`, trimmed of `-` at both ends and cut at a `-` to at most 60
+characters (`finding` if nothing is left). The skeleton holds every required key, today's date in
+`verified`, and the `**Claim.**` marker.
 
 **`rm` and `renumber` vs review records** (user, 2026-10-05; retire, then act, user, 2026-10-07). A
 CT or CU links the file its binding identifies: both the v2 fingerprint and the full-file sha256
-match. If a
-binding matches no file with that ID (for example, after the finding was edited), it ambiguously
-links every same-ID file. An SC's `linked_findings` entry is a bare ID and links every file with
-that ID. Every status counts except `stale`: a retired record no longer keeps a finding's identity
-for deletion or renumbering, because it is retired only to settle the dead end a command reports,
-and its question is re-filed against the finding that remains. A record whose status is missing or
-damaged still links: nothing shows it was retired. A retired record whose link then dangles is
-reported as a warning at most (§5.2.4's severity table), so the removal or renumber it was retired
-for leaves `kblam validate` and the pre-commit hook passing. These commands never rewrite a record to
-follow a finding. Their messages cite no SPEC section, and every command a message names succeeds in the state
-the message describes, or after the step the message names first. Each list of records reads `review
+match. If a binding matches no file with that ID (for example, after the finding was edited), it
+ambiguously links every same-ID file. An SC's `linked_findings` entry is a bare ID and links every
+file with that ID. Every status counts except `stale`: a retired record no longer keeps a finding's
+identity for deletion or renumbering, because it is retired only to settle the dead end a command
+reports, and its question is re-filed against the finding that remains. A record whose status is
+missing or damaged still links: nothing shows it was retired. A retired record whose link then
+dangles is reported as a warning at most (§5.2.4's severity table), so the removal or renumber it
+was retired for leaves `kblam validate` and the pre-commit hook passing. These commands never
+rewrite a record to follow a finding. Their messages cite no SPEC section, and every command a
+message names succeeds in the state the message describes, or after the step the message names
+first. Each list of records reads `review
 record CT-0003 links` for one and `review records CT-0003, CU-0001 link` for several. In the examples
 F-0012 is the finding, F-0020 the target, CT-0003 and SC-0004 records that link F-0012, and CU-0001
 a record that links F-0020.
@@ -1570,7 +1579,8 @@ the merge. Its first sentences are:
 in its place: review record CU-0001 links it; kblam never removes a finding a review record links.
 findings/ is unchanged. Settling this is the adjudicator's: the librarian when one is deployed,
 otherwise the coordinator, and never the author of the records involved. Send F-0012, F-0020,
-CT-0003 and CU-0001 to the coordinator or librarian, who decide them, and carry on."
+CT-0003 and CU-0001 to the coordinator or librarian, who decide them, and carry on; where the
+coordinator authored one of them and no librarian is deployed, tell the user."
 
 The adjudicator's part follows: "The adjudicator retires each record that links F-0012 and is not
 retired: kblam review decide CT-0003 --status stale --by NAME --reason "F-0012 merged into F-0020"
@@ -1580,15 +1590,24 @@ record-ID order, each with its own digest.
 - `<digest>` is the record's current subject digest in full, which `kblam review decide --expect`
   takes: the command succeeds only against the record as it stands, and a digest that does not
   match refuses the decision.
+- A record whose status is outside its kind's vocabulary still links, and no decision can take it
+  from that status, so the retire step prints, in its place, "CT-0003's status is not one kblam can
+  decide from; run kblam validate and do what its line for research-review/tasks/CT-0003.yaml says,
+  then run kblam rm F-0012 --merged-into F-0020 again" — with the `renumber` command the refusal
+  that printed it belongs to.
 - The adjudicator's sentence is the same in every dead end: the librarian when one is deployed,
   otherwise the coordinator, and never the author of the records involved. An agent that is not
   the adjudicator sends the IDs the refusal names to the coordinator or the librarian and carries
   on; a refusal that names paths where a record list would go (renumber, below) sends those
-  instead.
+  instead. Where the coordinator authored one of the records and no librarian is deployed, no
+  agent is left who may decide them, so the sentence ends by telling the user.
 - A record the retire step decides that is not `open` needs a `--by` the independence rule does
   not forbid, so the refusal adds a note naming the role and its recorded value, for example
   "SC-0002 is rejected, so its `--by` must not be its creator (SC-0002's creator is reviewer-a)."
-  Retiring an open record needs no independence (§5.2.2).
+  Where the kind has two such roles (a task's creator and its proponent), the note reads "CT-0003 is
+  confirmed, so its `--by` must be neither its creator (CT-0003's creator is reviewer-a) nor its
+  proponent (CT-0003's proponent is researcher-a)." Retiring an open record needs no independence
+  (§5.2.2).
 - After the retire commands, the refusal gives the merge route: "Then merge F-0012 into F-0020, in
   one staged copy of F-0020: …", the route the other refusal gives with the two findings exchanged,
   including the sentence naming the records that edit makes stale, which here are the target's
@@ -1599,7 +1618,9 @@ record-ID order, each with its own digest.
   SOURCE-PATH --lines A-B --by NAME, whose free linked_findings entry then names F-0020; kblam task
   new F-0020 --kind KIND --by NAME --proponent NAME; and, for a use, kblam use review SC-NNNN
   F-0020 ORDINAL --by NAME --proponent NAME, which stages one only for a confirmed challenge's
-  affected excerpt of F-0020. Fill the staged record and put it (kblam put STAGED-PATH)."
+  affected excerpt of F-0020. Fill the staged record and put it (kblam put STAGED-PATH); a use
+  covers its excerpt only once it is approved (K14), so an agent who is not its proponent runs
+  kblam review decide CU-NNNN --status approved --by NAME --reason TEXT --expect D on it."
 - The final list names each record once, so a record that links both findings appears once.
 
 A rejected challenge and a withdrawn use are closed, not retired: neither is `stale`, so each still
@@ -1650,10 +1671,15 @@ ID.
   leave it as it is and tell the user to write this file's id line as id: F-0012"), no `id` key
   ("<other path> has no id key, so kblam cannot rewrite it; leave it as it is and tell the user to
   add its id line (id: F-0012)"), a damaged `kblam.resolutions.jsonl` ("kblam.resolutions.jsonl:1:
-  … leave it as it is and tell the user to repair kblam.resolutions.jsonl:1"), and a `depends_on`
-  entry in another finding that kblam cannot re-key ("<dependent>: could not change depends_on
-  F-0012 to F-0031 without changing anything else; change that entry by hand to F-0031:
-  <fingerprint>").
+  not JSON (Expecting value: line 1 column 1 (char 0)). Only kblam resolve writes
+  kblam.resolutions.jsonl, one resolution per line, and it never rewrites a line, so this one was
+  damaged by a merge or a hand edit. kblam never repairs a line and the file is not an agent's to
+  edit, so leave it as it is and tell the user to repair kblam.resolutions.jsonl:1; kblam will not
+  check findings against a resolution log it cannot read"), and a `depends_on` entry in another
+  finding that kblam cannot re-key ("<dependent>: could not change depends_on F-0012 to F-0031
+  without changing anything else; kblam edit <dependent ID> stages a copy, write the entry there on
+  its key's own line as F-0012: <fingerprint the entry records>, and kblam put that copy, which lets
+  the renumber re-key it").
 
 With three or more files sharing the ID (renumber handles any number), the first case applies when
 at least one other file can be renumbered; it names each such file, "Renumber the other findings
@@ -1663,19 +1689,25 @@ file is linked, with "all N findings" and "the N paths" for "both findings" and 
 third applies when no other file can be renumbered and at least one is unlinked; it names each
 unlinked file with its reason, "the other findings with that ID that no review record links cannot
 be renumbered yet: <path 2>: <reason 2>; <path 3>: <reason 3>", and then gives the route through
-the adjudicator for the selected file, as the case above does. All three name every file with the
-ID, and an SC that links the selected file adds the sentence about its bare `linked_findings` ID
-wherever the adjudicator's retire step is given.
+the adjudicator for the selected file, as the case above does. Where a damaged
+`kblam.resolutions.jsonl` is one of those reasons, it blocks every file's renumber and repairing it
+is what frees the file the log alone blocks, so no record is retired for nothing: the refusal ends
+"Once it is repaired, run kblam renumber <that path> again", naming each file whose only problem is
+the log, and gives no adjudicator route. All three name every file with the ID, and an SC that
+links the selected file adds the sentence about its bare `linked_findings` ID wherever the
+adjudicator's retire step is given.
 
 Renumber's refusals of the selected file itself (an unreadable finding, an `id` line it cannot
 rewrite, no `id` key) offer "renumber <other path> instead (kblam renumber <other path>)", naming a
 file that the first case's test passes, only when there is one; otherwise the refusal names the
 file's own problem and the step that makes the route runnable: "Then kblam renumber <path> refuses
 for this file itself: <problem>. Once it is repaired, run kblam renumber <path> again". A problem
-that does not itself say to leave the file and tell the user is followed by "Leave it as it is and
-tell the user to repair what the line above names." before that last sentence. The problem is the
-refusal renumber would give for the selected file once the records that link it are retired, so the
-route names no command that would still refuse for it.
+that names kblam's own route instead of a repair — a dependent's `depends_on` entry the renumber
+cannot re-key — ends "Then run kblam renumber <path> again" instead: the step the problem names is
+the agent's, staging that dependent and putting the copy, and no repair by the user is involved.
+Every problem printed here carries its own step. The problem is the refusal renumber would give for
+the selected file once the records that link it are retired, so the route names no command that
+would still refuse for it.
 
 A renumber that goes ahead also rewrites each other finding whose `depends_on` entry it re-keys,
 and that changes the finding's bytes: a CT or CU whose binding matched the finding before is stale
@@ -1702,8 +1734,8 @@ current fingerprint (below, "Stamping"), so the entry reads as a dependency on t
 finding once it is put; a mention that named a finding which keeps the old ID is correct as it is.
 
 A closed task's command adds `--evidence PROVENANCE:PATH:LOCATOR`. `rm` makes no record stale: it
-refuses a finding any record links and one another finding depends on, so besides the removed file
-it rewrites only `INDEX.md`, which no record binds.
+refuses a finding any record that is not retired links and one another finding depends on, so
+besides the removed file it rewrites only `INDEX.md`, which no record binds.
 
 **`put`** (M2, M5).
 - It takes a finding file from anywhere outside the KB root, normally a staged one, and refuses
@@ -1826,8 +1858,9 @@ third party puts into the knowledge base, not an agent on this machine set on ru
 - *Approval.* An approval covers the finding ID, the sha256 of the `check:` string exactly as
   written, and the sha256 of every regular file inside the repository that the command names: an
   argument, the value of an `--option=value` argument, the program when it is given as a path, or the
-  program file that runs, when it is inside the repository (Windows resolves a bare name through
-  PATHEXT and through every absolute PATH entry, so `tools/run` runs `tools/run.exe`). So a changed
+  program file that runs, when it is inside the repository (on Windows a name without an extension
+  runs the file PATHEXT completes, so `tools/run` runs `tools/run.exe`, and on any platform a bare
+  name may resolve through a PATH entry inside the repository). So a changed
   command or a changed script needs approving again, and the reason given names what changed. Code
   the command reaches without naming it (a module its script imports, the project that `uv run`
   syncs) is not pinned. Approvals are JSON lines (ID, digests, time, approver) in the
@@ -2043,8 +2076,8 @@ protected as well: items 1 and 2 deny writes and removals there, with the reason
 (kblam recheck's approvals) denied. That folder holds the check: commands approved on this machine,
 and only kblam recheck writes it: an agent approves a command by running kblam recheck with
 --approve and the digest of the block printed for it, and a person approves one at a terminal; when
-kblam.toml sets recheck_person_approval = true, only a person approves one, at a
-terminal. An agent never writes that file itself." plus the skill pointer.
+kblam.toml sets recheck_person_approval = true, only a person approves one, at a terminal. An agent
+never writes that file itself." plus the skill pointer.
 
 **Committed state (user, 2026-09-26).** `.kblam/` is never committed. A pull writes tracked files
 over ignored ones, so a commit holding files there would replace every clone's `tree.hash`, review

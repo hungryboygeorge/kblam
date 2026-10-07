@@ -35,7 +35,9 @@ SC_RECEIPT = ".kblam/review-receipts/SC-0001.json"
 ROOT_MESSAGE = ("the review root changed from research-review to research-notes in kblam.toml; "
                 "schema 1 fixes it at init")
 MISSING_MESSAGE = ("K13 research-notes/challenges/SC-0001.yaml: SC-0001 is missing from "
-                   "research-notes/; records are never deleted or renamed; restore it from git\n")
+                   "research-notes/; records are never deleted or renamed; git's last commit does not hold "
+                   "a file at research-notes/challenges/SC-0001.yaml, so leave it as it is and tell the "
+                   "user\n")
 INIT_PATHS = {"kblam.toml", "findings/INDEX.md", REVIEW_INDEX, ".gitattributes", ".gitignore",
               ".claude/rules/kblam-findings.md", ".claude/skills/kblam-write/SKILL.md",
               ".claude/settings.json", "CLAUDE.md", ".git/hooks/pre-commit", TREE_HASH,
@@ -219,7 +221,7 @@ def test_format_2_root_change_refuses_every_mutation(kb, source_repo, monkeypatc
     else:
         expected_out = ""
         command = " ".join(argv[:2]) if argv[0] in {"review", "challenge"} else argv[0]
-    pointer = f" {SKILL_POINTER}" if argv[0] == "put" else ""
+    pointer = f". {SKILL_POINTER}" if argv[0] == "put" else ""   # the refusal ends its sentence first
     permitted = ({".kblam/pairs.sqlite"} if name == "finding-put" else
                  {".kblam/pairs.sqlite", ".kblam/review.jsonl"}
                  if name in {"record", "forget-missing"} else set())

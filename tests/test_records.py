@@ -340,9 +340,12 @@ def test_proponent_is_a_name_in_both_kinds():
 
 @pytest.mark.parametrize("kind,value", [("SC", "approved"), ("CT", "approved"), ("CU", "rejected")])
 def test_status_is_the_kinds_vocabulary(kind, value):
+    """A status its kind has no vocabulary for is the same damage as a bad `id` line: no decision takes
+    the record anywhere from it, and the hooks deny an agent a hand edit, so the message names the step
+    for the record's file (git's, or leave it and tell the user)."""
     rec = parse(kind, status=value)
-    assert rows(rec) == [expect(kind, "K13", f"status: {value!r} is not one of " + ", ".join(STATUSES[kind]),
-                                rec, "status")]
+    assert rows(rec) == [expect(kind, "K13", f"status: {value!r} is not one of " + ", ".join(STATUSES[kind])
+                                + f"; {left_alone(rec)}", rec, "status")]
 
 
 # --- blank values and staging -------------------------------------------------------------------

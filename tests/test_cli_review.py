@@ -397,7 +397,7 @@ def test_a_record_put_without_its_receipt_is_refused_with_the_pointer(kb, capsys
     assert run(kb, "put", str(staged)) == 1
     assert capsys.readouterr().err == \
         (f"kblam put: SC-0001 has no allocation receipt in {RECEIPTS}/; a first put needs the one kblam "
-         f"challenge new, kblam task new or kblam use review wrote. Draft a new challenge and put that "
+         f"challenge new, kblam task new or kblam use review wrote. Draft a new challenge and put that. "
          f"{SKILL_POINTER}\n")
     assert staged.is_file() and not (kb.root / CHALLENGES).exists()
 
@@ -553,7 +553,8 @@ def test_forget_missing_drops_the_gone_ids_and_record_alone_does_not(kb, source_
     text = capsys.readouterr().out
     assert text.splitlines() == [
         f"K13 {CHALLENGES}/SC-0002.yaml: SC-0002 is missing from {REVIEW}/; records are never deleted or "
-        f"renamed; restore it from git",
+        f"renamed; git's last commit does not hold a file at {CHALLENGES}/SC-0002.yaml, so leave it as it "
+        f"is and tell the user",
         "kblam validate: 1 error(s) in research-review/; tree.hash not recorded",
     ]
     assert registry_ids(kb) == ["SC-0001", "SC-0002"]
