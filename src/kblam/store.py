@@ -1166,7 +1166,7 @@ def _linked_removal(cfg: Config, view: KBView, finding: Finding, target: Finding
     # the copy `kblam edit` stages when none is staged yet: it copies the installed file's own name
     fresh = display_path(cfg, cfg.staging_dir / finding.name)
     if not staged:
-        one = f"kblam edit {finding_id} stages one at {fresh}"
+        one = f"run kblam edit {finding_id}, which stages one at {fresh}"
     elif len(staged) == 1:
         one = f"your staged copy is {staged[0]}"
     else:

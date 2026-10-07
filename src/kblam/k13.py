@@ -389,14 +389,18 @@ def _reference_issues(rec: Record, key: str, label: str, ref: FileRef, resolved:
 
 def _state_message(rec: Record, ref: FileRef, resolved: Resolved) -> str:
     """What a stale or unavailable reference says (SPEC §5.2.3 Evaluation): never "the source now says".
-    Each one names the step the kblam-write skill gives: restore the bytes the record was written
-    against, or retire the record (_retire_step) and file a new one."""
+    Each one names the step the kblam-write skill gives, and the file it puts back: restore the bytes the
+    record was written against at the reference's own path (a reference is available again once that file
+    holds them, whether the record pins them by a commit or by a snapshot), or retire the record
+    (_retire_step) and file a new one. A refused path is not a str, so that one names no file."""
+    rid = rec.id or "this record"
     if resolved.state is State.STALE:
-        return f"the source changed since {rec.id or 'this record'} was written; restore the original bytes, " \
-               f"or {_retire_step(rec)}"
+        return (f"the source changed since {rid} was written; restore {ref.path} to the bytes {rid} was "
+                f"written against, or {_retire_step(rec)}")
     if resolved.message == sources.MESSAGE_MISSING and isinstance(ref.path, str):
-        return f"the working file {ref.path} is missing; restore the original bytes, or {_retire_step(rec)}"
-    return f"the pinned version is not present; restore the pinned bytes, or {_retire_step(rec)}"
+        return f"the working file {ref.path} is missing; restore it, or {_retire_step(rec)}"
+    where = f" of {ref.path}" if isinstance(ref.path, str) else ""
+    return f"the pinned version is not present; restore the pinned bytes{where}, or {_retire_step(rec)}"
 
 
 def _retire_step(rec: Record) -> str:

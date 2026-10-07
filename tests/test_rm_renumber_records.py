@@ -125,7 +125,7 @@ def merge_text(records: str, one: str, stale: str = "") -> str:
 
 
 # What the refusal names as the one staged copy to work in, per staged-copy state.
-EDIT_FRESH = "kblam edit F-0012 stages one at .kblam/staging/F-0012-sensor.md"
+EDIT_FRESH = "run kblam edit F-0012, which stages one at .kblam/staging/F-0012-sensor.md"
 ONE_STAGED = "your staged copy is .kblam/staging/F-0012-sensor.md"
 SEVERAL_STAGED = ("keep one of your staged copies .kblam/staging/F-0012-other.md, "
                   ".kblam/staging/F-0012-sensor.md and delete the others, and work in that copy")

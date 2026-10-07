@@ -412,7 +412,7 @@ are K13 errors.
 | Key | Type | Rule |
 |---|---|---|
 | `schema` | integer | `1`. Any other value is a K13 error, "unsupported schema version N". |
-| `id` | string | matches the filename (`git restore <path>` where git holds it; otherwise leave it and tell the user) |
+| `id` | string | matches the filename (`git restore --source=HEAD --staged --worktree <path>` where git holds it; otherwise leave it and tell the user) |
 | `created` | date | `YYYY-MM-DD`, set at allocation |
 | `creator` | name | who allocated the record (`--by`) |
 | `status` | string | in the kind's vocabulary (§5.2.3) |
@@ -629,10 +629,14 @@ decisions: []
   bytes in which the assertion's sha256, occurrence and uniqueness are checked. A stale or
   unavailable source is reported as "the source changed since SC-0001 was written", "the working
   file <path> is missing" or "the pinned version is not present", never as "the source now says …",
-  and each of those ends with the step: restore the original or pinned bytes, or retire the record
-  and file a new one (`kblam review decide <ID> --status stale --by NAME --reason TEXT --expect D`).
-  A judgement never carries from one version to another: a changed source needs a new challenge, and
-  the old one is retired (`decide --status stale`).
+  and each of those ends with the step: restore the bytes the record was written against at the file
+  the reference reads, or retire the record and file a new one (`kblam review decide <ID> --status
+  stale --by NAME --reason TEXT --expect D`). The step names that file: "restore <path> to the bytes
+  SC-0001 was written against", "restore it" where the line already names it, or "restore the pinned
+  bytes of <path>". A reference is available again once that file holds those bytes, whether the
+  record pins them by a commit or by a snapshot. A judgement never carries from one version to
+  another: a changed source needs a new challenge, and the old one is retired (`decide --status
+  stale`).
 - **Basis.** A basis entry with the source's canonical key and no pin of its own is read at the
   source's pin, and its `sha256` must equal `source.sha256`, so checking out another commit does
   not make it stale. Any other entry resolves on its own. An open challenge already needs at least
@@ -1501,14 +1505,14 @@ is staged, its refusal is:
 
 "kblam rm: F-0012 cannot be removed: review record CT-0003 links it, and kblam never removes a
 finding a review record links. findings/ is unchanged. Merge the other way, in one staged copy of
-F-0012: kblam edit F-0012 stages one at .kblam/staging/F-0012-sensor.md. If F-0020 gives a quantity
-F-0012 lacks, kblam rm F-0020 --merged-into F-0012 is refused for it: add only that quantity to that
-copy, leave F-0012's claim as it is installed, and kblam put it; that put leaves nothing staged, so
-kblam edit F-0012 stages the next copy to work in. Add what F-0020 states that F-0012 does not yet
-(its detail and quantities) to the copy you are working in, run kblam rm F-0020 --merged-into
-F-0012, then kblam put that copy (a put of F-0012 that states F-0020's fact is refused while F-0020
-is installed). The edit makes CT-0003 stale until a reviewer rechecks and rebinds it; kblam put
-prints the kblam review rebind command for it."
+F-0012: run kblam edit F-0012, which stages one at .kblam/staging/F-0012-sensor.md. If F-0020 gives
+a quantity F-0012 lacks, kblam rm F-0020 --merged-into F-0012 is refused for it: add only that
+quantity to that copy, leave F-0012's claim as it is installed, and kblam put it; that put leaves
+nothing staged, so kblam edit F-0012 stages the next copy to work in. Add what F-0020 states that
+F-0012 does not yet (its detail and quantities) to the copy you are working in, run kblam rm F-0020
+--merged-into F-0012, then kblam put that copy (a put of F-0012 that states F-0020's fact is
+refused while F-0020 is installed). The edit makes CT-0003 stale until a reviewer rechecks and
+rebinds it; kblam put prints the kblam review rebind command for it."
 
 - The last sentence names the CT and CU records that the put of the edited F-0012 will list as made
   stale (§5.2.4): those whose binding matches F-0012 and whose status is neither `stale` nor
@@ -1519,8 +1523,8 @@ prints the kblam review rebind command for it."
   also `--evidence`, and a closed record a reviewer independent of it (§5.2.2), and the put prints
   the full command for each record.
 - The refusal names one staged copy of F-0012 to work in, for the state it finds: with none staged,
-  "kblam edit F-0012 stages one at <fresh>", where `<fresh>` is the repository-relative path of the
-  copy `kblam edit` would stage (it copies the installed file's own name), for example
+  "run kblam edit F-0012, which stages one at <fresh>", where `<fresh>` is the repository-relative
+  path of the copy `kblam edit` would stage (it copies the installed file's own name), for example
   `.kblam/staging/F-0012-sensor.md`; with one staged, "your staged copy is <staged path>"; with
   several, "keep one of your staged copies <path 1>, <path 2> and delete the others, and work in
   that copy". Every later step that needs a copy says "the copy you are working in", and `kblam edit
@@ -2075,10 +2079,10 @@ exits 0; the decision travels only in the JSON on stdout (desk-hooks H4–H6).
      "kblam: findings/ was changed outside kblam put, and the knowledge base fails kblam validate:".
      It lists the failures, then the fix sentence. With the review root folder:
      "Fix each failure through kblam. A finding: kblam edit <id>, change the staged copy, kblam put
-     it. A record: run the kblam command its failure line names; or change a free field with kblam
-     challenge edit or kblam task edit and kblam put it; or, when the line names no command, restore
-     the record's file from git. Never write under findings/ or research-review/ directly. Once the
-     tree is clean, kblam validate --record accepts the change."
+     it. A record: do what its failure line says (the kblam command it names, a restore from git, or
+     leaving it and telling the user); or change a free field with kblam challenge edit or kblam task
+     edit and kblam put it. Never write under findings/ or research-review/ directly. Once the tree
+     is clean, kblam validate --record accepts the change."
      Without it: "Fix each failure through kblam (kblam edit <id>, change the staged copy, kblam put
      it); never write under findings/ directly. Once the tree is clean, kblam validate --record
      accepts the change." Either way it ends with the skill pointer.
@@ -3210,8 +3214,9 @@ exemption included)
   target states that the survivor does not yet, run `kblam rm <target> --merged-into <survivor>`,
   then put the copy. Where the removed finding gives a quantity the survivor lacks, `rm` refuses it,
   so that route is named first: put the copy with the quantity added and the survivor's claim left
-  as it is, remove the target, edit the survivor again, and put (§7). The refusal for a linked
-  finding names the same order (direction: user, 2026-10-05; order: lead, 2026-10-06).
+  as it is, edit the survivor again, add what the target states, remove the target, and put (§7).
+  The refusal for a linked finding names the same order (direction: user, 2026-10-05; order: lead,
+  2026-10-06).
 - **kblam is run by agents (user, 2026-10-06).** The adjudicator and the record reviewers are
   agents; only a `kblam.toml` change (with `kblam approve-config`) and `kblam recheck`'s approval
   of a command need a person (§8, §8.3).

@@ -44,8 +44,8 @@ OK = "kblam validate: OK (0 findings)"
 OK_ONE = "kblam validate: OK (1 findings)"
 FAILED = "kblam validate: 1 error(s) in research-review/"
 # The step every stale or unavailable reference message ends with (SPEC §5.2.3 Evaluation).
-RETIRE = ("; restore the original bytes, or retire the record and file a new one (kblam review decide "
-          f"{SC} --status stale --by NAME --reason TEXT --expect D)")
+RETIRE = (f"; restore {m.EVIDENCE_PATH} to the bytes {SC} was written against, or retire the record and "
+          f"file a new one (kblam review decide {SC} --status stale --by NAME --reason TEXT --expect D)")
 # The exact paths each of the group's commands may change: the staging command writes the staged record
 # and its allocation receipt; the put installs the record, the review index, the registry and tree.hash
 # and removes the staged file; a decision rewrites the record, the index and tree.hash.

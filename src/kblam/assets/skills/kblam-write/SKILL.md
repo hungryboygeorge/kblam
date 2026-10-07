@@ -207,11 +207,11 @@ the excerpt stays a K14 error until a use is reviewed or rebound, or the excerpt
 | K13 | a file under `{{review_root}}/` that is not a record or the generated `INDEX.md` ("`{{review_root}}/` holds only SC-, CT- and CU- records in their kind's folder"), or a record or `INDEX.md` that is a symlink | remove the stray file, or replace the link with the file itself |
 | K13 | "INDEX.md is missing; run kblam review index", or "INDEX.md differs from the generated review index", because a hand edit or a new record left it behind | `kblam review index` |
 | K13 | a schema error: an unknown or missing key, a wrong type, a bad path or hash, a blank required field, an assertion that no longer matches its source | the diagnostic names the field or the file: fix the staged record and put it again |
-| K13 | an ID claimed by two files, or a record whose `id` differs from its file name | restore the right file from git; records are never renamed |
+| K13 | an ID claimed by two files, or a record whose `id` differs from its file name | restore the record's file from git (`git restore --source=HEAD --staged --worktree <path>`) when the line says so; when it says git does not hold the file, leave it as it is and tell the user |
 | K13 | a registered record missing from `{{review_root}}/`: `records are never deleted or renamed` | restore it from git |
 | K13 | a decided record was changed by hand: the last decision's `bind` no longer matches the record's subject digest | restore the record from git; a decided record cannot be edited |
 | K13 | `the source changed since kblam challenge new; run it again`: the staged record's source no longer holds the bytes `challenge new` captured | start that record again against the bytes you now mean to challenge (`kblam challenge new`) |
-| K13 | a source, basis or decision-evidence reference of an installed record is stale or unavailable: "the source changed since SC-0001 was written", "the pinned version is not present" | a warning while the record is open and an error once it is effective: restore the original or pinned bytes, or retire the record and file a new one |
+| K13 | a source, basis or decision-evidence reference of an installed record is stale or unavailable: "the source changed since SC-0001 was written", "the working file <path> is missing", "the pinned version is not present" | a warning while the record is open and an error once it is effective: restore the file the reference reads to the bytes the record was written against ("restore <path> to the bytes SC-0001 was written against", "restore it" where the line already names it, "restore the pinned bytes of <path>"), or retire the record and file a new one |
 | K13 | a decision the transition table refuses, or one that is not independent: `a closing decision needs someone else` | `--by` must differ from a challenge's `creator`, a task's `creator` and `proponent`, or a use's `proponent` |
 | K14 | `SC-0001 challenges this quoted assertion at` ...: the excerpt quotes an assertion a confirmed challenge covers | edit the finding, or have its use reviewed (`kblam use review SC-0001 F-0012 2 --by NAME --proponent NAME`) |
 | K14 | the excerpt quotes the assertion text of another version: `was judged on` one version `and this excerpt quotes its assertion text from another version of that file` | challenge that version too (`kblam challenge new`), or have this use reviewed |
@@ -286,7 +286,7 @@ write raised, with a written reason. An author sends the item IDs to the librari
   one staged copy of A (`kblam edit A` if none is staged; with several, keep one and delete the
   others). When B gives a quantity A lacks, `kblam rm B --merged-into A` is refused for it: leave
   A's claim as it is installed in that copy, add the quantity with its value and unit, put the copy,
-  then `kblam rm B --merged-into A`, then `kblam edit A` again and work in the copy it prints. Add
+  then `kblam edit A` again and work in the copy it prints. Add
   what B states that A does not yet (its detail and quantities) to the copy you are working in,
   `kblam rm B --merged-into A`, then `kblam put <staged file>`; remove B before the put, not after,
   because a put of A that states B's fact is refused while B is installed, by K9 ("claim duplicates

@@ -374,9 +374,9 @@ def test_pre_tool_use_on_a_review_path_imports_only_the_hook_code(kb):
 
 
 STOP_FIX = ("Fix each failure through kblam. A finding: kblam edit <id>, change the staged copy, kblam put it. "
-            "A record: run the kblam command its failure line names; or change a free field with kblam challenge "
-            "edit or kblam task edit and kblam put it; or, when the line names no command, restore the record's "
-            f"file from git. Never write under findings/ or {REVIEW}/ directly. Once the tree is clean, kblam "
+            "A record: do what its failure line says (the kblam command it names, a restore from git, or leaving "
+            "it and telling the user); or change a free field with kblam challenge edit or kblam task edit and "
+            f"kblam put it. Never write under findings/ or {REVIEW}/ directly. Once the tree is clean, kblam "
             "validate --record accepts the change.")
 
 
@@ -498,7 +498,7 @@ def blocked_parts(kb, monkeypatch, capsys) -> tuple[list[str], str, str]:
 
 
 def test_the_fix_sentence_names_kblam_review_index_for_a_deleted_review_index(review_kb, monkeypatch, capsys):
-    """D49 for the fix sentence's "run the kblam command its failure line names": the review root's
+    """D49 for the fix sentence's "do what its failure line says (the kblam command it names)": the review root's
     INDEX.md deleted out of band blocks the stop with a K13 line that names kblam review index; running
     that, then kblam validate --record, leaves the hook silent."""
     kb = review_kb
@@ -545,9 +545,10 @@ def test_the_fix_sentence_names_a_restore_from_git_for_a_record_line_that_names_
         git_review_kb, monkeypatch, capsys):
     """D49 for a K13 record line that names no kblam command, the id/file-name mismatch: git holds the
     record's file at its path, so the line names the git restore that puts the recorded `id` back, and
-    the PreToolUse hook allows that command. kblam put refuses a staged copy whose ID was put back (the
-    ID is not a free field), so the restore is what does; kblam validate --record then leaves the hook
-    silent."""
+    the PreToolUse hook allows that command. The hand edit is `git add`ed first: the restore names HEAD
+    for the index and the worktree, so the staged hand edit is put back too (a plain `git restore` would
+    leave it). kblam put refuses a staged copy whose ID was put back (the ID is not a free field), so
+    the restore is what does; kblam validate --record then leaves the hook silent."""
     kb = git_review_kb
     kb.add("F-0001", "motor", E1)
     kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
@@ -555,10 +556,11 @@ def test_the_fix_sentence_names_a_restore_from_git_for_a_record_line_that_names_
     git(kb.root, "add", "-A")
     git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
     kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0009"))   # the hand edit
+    git(kb.root, "add", "-A")                            # an agent stages the hand edit before restoring
 
     failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
 
-    restore = f"git restore {REVIEW}/challenges/SC-0001.yaml"
+    restore = f"git restore --source=HEAD --staged --worktree {REVIEW}/challenges/SC-0001.yaml"
     assert failures == [f"K13 {REVIEW}/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file "
                         f"name's ID (SC-0001); restore the record's file from git ({restore})"]
     assert (fix, pointer) == (STOP_FIX, POINTER)
@@ -566,13 +568,16 @@ def test_the_fix_sentence_names_a_restore_from_git_for_a_record_line_that_names_
     # the command the line names, run by an agent: the hook allows it, and it is what puts the ID back
     assert call("PreToolUse", tool(kb, "Bash", command=restore), monkeypatch, capsys) == (0, None, "")
 
-    # the route the old sentence offered instead: a staged copy and kblam put cannot fix this line
+    # the free-field route the fix sentence names cannot fix this line: the ID is not a free field
     staged = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())
     staged.write_bytes(record_text("SC", "SC-0001").encode())
     refused = m.kblam(kb, "put", str(staged))
     assert refused.code != 0 and "id is not a free field" in refused.out + refused.err
 
-    git(kb.root, "restore", f"{REVIEW}/challenges/SC-0001.yaml")   # the restore the sentence names
+    git(kb.root, *restore.split()[1:])                   # the restore the line names, as it prints
+    assert "id: SC-0001" in (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").read_text(encoding="utf-8")
+    assert subprocess.run(["git", "-C", str(kb.root), "diff", "--cached", "--quiet"],
+                          capture_output=True).returncode == 0   # the staged hand edit is gone too
     assert m.validate(kb, "--record").code == 0
     assert call("Stop", stop(kb), monkeypatch, capsys) == (0, None, "")
 

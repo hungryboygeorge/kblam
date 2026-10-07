@@ -40,8 +40,8 @@ TRACE = m.TRACE
 README = "evidence/2026-09-22-ratio/README.md"
 SNAPSHOT = "snapshots/full-scan-trace.md"
 # The step every stale or unavailable reference message ends with (SPEC §5.2.3 Evaluation).
-RETIRE_PINNED = ("; restore the pinned bytes, or retire the record and file a new one (kblam review decide "
-                 "SC-0001 --status stale --by NAME --reason TEXT --expect D)")
+RETIRE_PINNED = (f"; restore the pinned bytes of {TRACE}, or retire the record and file a new one (kblam "
+                 "review decide SC-0001 --status stale --by NAME --reason TEXT --expect D)")
 
 # A second version of the trace: line 3 (the line the challenges below quote) holds other text, so a
 # challenge whose assertion is checked against the wrong version is an occurrence error, not a pass.

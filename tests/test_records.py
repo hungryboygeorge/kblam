@@ -237,7 +237,8 @@ def test_id_must_match_the_file_name():
                                 "never renamed, so leave it as it is and tell the user", rec, "id")]
     tracked = [i.message for i in schema_issues(rec, staged=False, tracked=lambda path: True)]
     assert tracked == ["id: 'SC-0002' does not match the file name's ID (SC-0001); restore the record's "
-                       "file from git (git restore research-review/challenges/SC-0001.yaml)"]
+                       "file from git (git restore --source=HEAD --staged --worktree "
+                       "research-review/challenges/SC-0001.yaml)"]
 
 
 @pytest.mark.parametrize("value,message", [("X-0001", "id: 'X-0001' is not an ID"),

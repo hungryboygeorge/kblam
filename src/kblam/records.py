@@ -239,12 +239,16 @@ def _check_id(rec, top_key, prefix, value, staged, add, tracked):
 
 def _id_step(rec: Record, tracked) -> str:
     """What fixes a record file whose `id` does not match its file name (SPEC §5.2.4 K13). Where git
-    holds a file at the record's path, restoring it puts the recorded `id` back. Where it does not — a
-    record renamed or copied by hand — no command an agent may run puts the record back under the name
-    its ID gives: kblam's hooks deny removing a record file, and git cannot move a file it never held.
-    `tracked` is the caller's answer (kblam.gitdir.tracked_file); None means no repository can answer."""
+    holds a file at the record's path, restoring it puts the recorded `id` back. The restore names HEAD
+    for both the index and the worktree, so a hand edit already `git add`ed is put back too (a plain
+    `git restore <path>` restores the index version, so the added hand edit would survive). Where git
+    does not hold a file at the record's path — a record renamed or copied by hand — no command an agent
+    may run puts the record back under the name its ID gives: kblam's hooks deny removing a record file,
+    and git cannot move a file it never held. `tracked` is the caller's answer
+    (kblam.gitdir.tracked_file); None means no repository can answer."""
     if tracked is not None and tracked(rec.path):
-        return f"restore the record's file from git (git restore {rec.path})"
+        return (f"restore the record's file from git "
+                f"(git restore --source=HEAD --staged --worktree {rec.path})")
     return (f"git does not hold a file at {rec.path}, and records are never renamed, so leave it as it "
             f"is and tell the user")
 
