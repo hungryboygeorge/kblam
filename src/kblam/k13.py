@@ -7,10 +7,12 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, replace
 from datetime import date
+from functools import partial
 from pathlib import PurePosixPath
 
 from kblam import decisions, matching, paths, receipts, records, registry, sources, treehash
 from kblam.finding import fingerprint, normalise_newlines
+from kblam.gitdir import committed_file
 from kblam.records import Record
 from kblam.review_index import generate_review_index
 from kblam.rules import Issue
@@ -282,7 +284,7 @@ def _record_issues(view, reader, rec: Record) -> list[Issue]:
     """The structure of one record file, then the checks its kind and status add. A file that is no
     record, and a record whose data did not parse or whose status is malformed, get structure errors
     only (SPEC §5.2.4 Severity table)."""
-    schema = records.schema_issues(rec, staged=False)
+    schema = records.schema_issues(rec, staged=False, committed=partial(committed_file, view.cfg))
     issues = [_owned(issue, rec) for issue in schema]
     issues += [_owned(issue, rec) for issue in decisions.decision_issues(rec)]
     issues += _identity_issues(view, rec, schema, trust_state=reader.trust_state)
@@ -386,12 +388,25 @@ def _reference_issues(rec: Record, key: str, label: str, ref: FileRef, resolved:
 
 
 def _state_message(rec: Record, ref: FileRef, resolved: Resolved) -> str:
-    """What a stale or unavailable reference says (SPEC §5.2.3 Evaluation): never "the source now says"."""
+    """What a stale or unavailable reference says (SPEC §5.2.3 Evaluation): never "the source now says".
+    Each one names the step the kblam-write skill gives, and the file it puts back: restore the bytes the
+    record was written against at the reference's own path (a reference is available again once that file
+    holds them, whether the record pins them by a commit or by a snapshot), or retire the record
+    (_retire_step) and file a new one. A refused path is not a str, so that one names no file."""
+    rid = rec.id or "this record"
     if resolved.state is State.STALE:
-        return f"the source changed since {rec.id or 'this record'} was written"
+        return (f"the source changed since {rid} was written; restore {ref.path} to the bytes {rid} was "
+                f"written against, or {_retire_step(rec)}")
     if resolved.message == sources.MESSAGE_MISSING and isinstance(ref.path, str):
-        return f"the working file {ref.path} is missing"
-    return "the pinned version is not present"
+        return f"the working file {ref.path} is missing; restore it, or {_retire_step(rec)}"
+    where = f" of {ref.path}" if isinstance(ref.path, str) else ""
+    return f"the pinned version is not present; restore the pinned bytes{where}, or {_retire_step(rec)}"
+
+
+def _retire_step(rec: Record) -> str:
+    """The way out of a reference that can no longer be restored: retire the record, which is the only
+    thing that clears the reference (a stale record is never reopened), and file a new one."""
+    return f"retire the record and file a new one ({RETIRE.format(rid=rec.id or 'SC-NNNN')})"
 
 
 def _probe(resolved: Resolved, assertion) -> tuple[int, tuple[int, int]] | str | None:

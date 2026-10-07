@@ -57,22 +57,51 @@ def kblam_git_dir(cfg: Config) -> Path | None:
     return common / KBLAM_GIT_DIR if common is not None else None
 
 
-def tracked_state(cfg: Config) -> list[str]:
-    """The paths under `.kblam/` that git tracks or is about to commit (the index lists both), relative
-    to the repository root. [] outside a git work tree and whenever git cannot answer: this guards
-    against someone else's state, and must not stop kblam on a machine where git is missing."""
+def _ls_files(cfg: Config, root: str) -> list[str]:
+    """The files git tracks under `root` (the index lists what a commit would hold), repository-relative.
+    [] outside a git work tree and whenever git cannot answer: this guards against someone else's state,
+    and must not stop kblam on a machine where git is missing."""
     if git_common_dir(cfg.repo_root) is None:
         return []
     import subprocess  # only here: the hooks' fast path never calls this
 
     try:
-        done = subprocess.run(["git", "--literal-pathspecs", "ls-files", "-z", "--", STATE_DIR],
+        done = subprocess.run(["git", "--literal-pathspecs", "ls-files", "-z", "--", root],
                               cwd=cfg.repo_root, capture_output=True, timeout=GIT_TIMEOUT)
     except (OSError, subprocess.TimeoutExpired):
         return []
     if done.returncode != 0:
         return []
     return [p for p in done.stdout.decode("utf-8", "replace").split("\0") if p]
+
+
+def tracked_state(cfg: Config) -> list[str]:
+    """The paths under `.kblam/` that git tracks or is about to commit (the index lists both), relative
+    to the repository root. [] outside a git work tree and whenever git cannot answer: this guards
+    against someone else's state, and must not stop kblam on a machine where git is missing."""
+    return _ls_files(cfg, STATE_DIR)
+
+
+def committed_file(cfg: Config, path: str) -> bool:
+    """Whether git's last commit holds a file at the repository-relative `path`: what `git restore
+    --source=HEAD <path>` needs. The last commit is read, not the index, because a restore from HEAD
+    puts the committed file back and deletes a file that only the index holds, so a `git add` that was
+    never committed must not be answered with that command. False outside a git work tree and whenever
+    git cannot answer: an unborn HEAD (no commit yet) and a missing git both count as not holding it.
+    The listing is asked for NUL-terminated (-z), where every path is literal: without it git quotes a
+    path outside ASCII (core.quotePath), and a quoted path never equals the one asked for."""
+    if git_common_dir(cfg.repo_root) is None:
+        return False
+    import subprocess  # only here: the hooks' fast path never calls this
+
+    try:
+        done = subprocess.run(["git", "--literal-pathspecs", "ls-tree", "-z", "--name-only", "HEAD", "--", path],
+                              cwd=cfg.repo_root, capture_output=True, timeout=GIT_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if done.returncode != 0:
+        return False
+    return path in [p for p in done.stdout.decode("utf-8", "replace").split("\0") if p]
 
 
 def tracked_state_problem(tracked: list[str]) -> str:

@@ -178,9 +178,9 @@ def record_after_write_v2(cfg: Config, clean_before: bool, command: str, *, crea
               file=sys.stderr)
     elif recorded is None:
         print(f"kblam {command}: there is no .kblam/tree.hash (a new clone, or .kblam/ was deleted), and the "
-              f"tree as it was before this write fails kblam validate, so kblam did not record it; tree.hash "
-              f"not advanced. Run kblam validate, fix anything it lists, then run kblam validate --record.",
-              file=sys.stderr)
+              f"tree as it was before this write fails kblam validate, so kblam did not record tree.hash for "
+              f"it; the write itself is done. Run kblam validate, fix anything it lists, then run kblam "
+              f"validate --record.", file=sys.stderr)
     elif recorded[0] == 1:
         print(f"kblam {command}: .kblam/tree.hash is in the old format; tree.hash not advanced. "
               f"Run kblam validate --record once the tree validates.", file=sys.stderr)

@@ -346,7 +346,9 @@ def test_a_renamed_record_is_missing_and_the_forget_drop_stands(kb, source_repo)
     alone, then the pair cache and open-item file, then the registry alone (the drop), and nothing else —
     the two reads change nothing, in the KB or the source repository. Diagnostics: the stale-index issue,
     the missing-record issue on research-review/challenges/SC-0001.yaml, and the K13 issue on the renamed
-    file's `id` line, "id: 'SC-0001' does not match the file name's ID (SC-0002)", then "kblam validate:
+    file's `id` line, "id: 'SC-0001' does not match the file name's ID (SC-0002); git's last commit does
+    not hold a file at research-review/challenges/SC-0002.yaml, and records are never renamed, so leave it
+    as it is and tell the user", then "kblam validate:
     3 error(s) in research-review/"; `review index` exits 0 with its one line and the out-of-band note on stderr;
     `validate --record` exits 1, writes no record and still lists SC-0001 in the registry; `validate
     --record --forget-missing` exits 1, prints "forgot SC-0001 (no record in research-review/)", empties
@@ -360,7 +362,9 @@ def test_a_renamed_record_is_missing_and_the_forget_drop_stands(kb, source_repo)
     renamed = old.with_name("SC-0002.yaml")               # fixture edit: a rename, in place
     old.rename(renamed)
     mismatch = (f"K13 {CHALLENGES}/SC-0002.yaml:{key_line(renamed, 'id')}: id: 'SC-0001' does not match "
-                f"the file name's ID (SC-0002)")
+                f"the file name's ID (SC-0002); git's last commit does not hold a file at "
+                f"{CHALLENGES}/SC-0002.yaml, and records are never renamed, so leave it as it is and tell "
+                f"the user")
 
     read(kb, source_repo, "validate", code=1, out="\n".join([
         STALE_INDEX,

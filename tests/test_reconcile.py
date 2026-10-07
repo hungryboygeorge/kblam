@@ -18,6 +18,12 @@ from conftest import dump_record, record_data, record_text
 from test_approval import git, gkb  # noqa: F401 (gkb is a fixture)
 
 CLAIM = "The media tray reports its type through two contact pins read at load time."
+# The step every stale or unavailable reference message ends with (SPEC §5.2.3 Evaluation).
+def retire_pinned(path: str) -> str:
+    """The step a "the pinned version is not present" message ends with, naming the file the record reads
+    (SPEC §5.2.3 Evaluation)."""
+    return (f"; restore the pinned bytes of {path}, or retire the record and file a new one (kblam review "
+            f"decide SC-0001 --status stale --by NAME --reason TEXT --expect D)")
 
 
 @pytest.mark.parametrize("args", [
@@ -193,7 +199,10 @@ def test_untrusted_validation_never_opens_state_references(kb, monkeypatch, loca
             "--evidence PROVENANCE:PATH:LOCATOR")
     else:
         assert issue.code == "K13"
-        expected = ("basis[0]: " if location == "basis" else "") + "the pinned version is not present"
+        where = ("evidence/missing-assertion.txt" if location == "snapshot"
+                 else ".kblam/foreign-evidence.txt")
+        expected = (("basis[0]: " if location == "basis" else "")
+                    + "the pinned version is not present" + retire_pinned(where))
         assert issue.message == expected
 
 

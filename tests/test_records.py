@@ -56,6 +56,13 @@ def expect(kind: str, code: str, message: str, rec=None, key: str | None = None,
     return (code, message, rec_id, record_path(kind, rec_id), line_of(rec, key) if key else 0)
 
 
+def left_alone(rec) -> str:
+    """The step an installed record's damage names where git's last commit holds no file at its path:
+    schema_issues is called here without git's answer (`committed` is None), so no restore is named."""
+    return (f"git's last commit does not hold a file at {rec.path}, so leave it as it is and tell the "
+            f"user")
+
+
 def code_of(kind: str, key: str) -> str:
     """An independent expectation of the §5.2.2/§5.2.3 split, including proponent as common."""
     common = ("schema", "id", "created", "creator", "status", "decisions", "proponent")
@@ -140,21 +147,21 @@ def test_a_file_name_that_is_not_an_id_gives_no_id_or_kind(name):
 def test_not_utf8():
     rec = parse("SC", body=b"\xff\xfe\x00 not utf-8 \x80")
     assert rec.data is None and rec.meta is None and rec.error == "not UTF-8"
-    assert rows(rec) == [expect("SC", "K13", "not UTF-8")]
+    assert rows(rec) == [expect("SC", "K13", f"not UTF-8; {left_alone(rec)}")]
 
 
 @pytest.mark.parametrize("text", ["schema: 1\nid: [unclosed\n", "schema: 1\n\tid: SC-0001\n"])
 def test_invalid_yaml(text):
     rec = parse("SC", body=text)
     assert rec.data is None and rec.error.startswith("not valid YAML: ")
-    assert rows(rec) == [expect("SC", "K13", rec.error)]
+    assert rows(rec) == [expect("SC", "K13", f"{rec.error}; {left_alone(rec)}")]
 
 
 @pytest.mark.parametrize("text", ["", "- schema\n- 1\n", "just a scalar\n", "null\n"])
 def test_not_a_yaml_mapping(text):
     rec = parse("SC", body=text)
     assert rec.data is None and rec.error == "not a YAML mapping"
-    assert rows(rec) == [expect("SC", "K13", "not a YAML mapping")]
+    assert rows(rec) == [expect("SC", "K13", f"not a YAML mapping; {left_alone(rec)}")]
 
 
 def test_crlf_and_a_bom_parse_like_lf():
@@ -196,7 +203,10 @@ DROPPED = [(kind, key) for kind in ("SC", "CT", "CU") for key in KEYS[kind]]
 def test_missing_top_level_key(kind, key):
     rec = parse(kind, **{key: DROP})
     code = code_of(kind, key)
-    assert rows(rec) == [expect(kind, code, f"missing key {key!r}")]
+    message = f"missing key {key!r}"
+    if key == "id":
+        message += f"; {left_alone(rec)}"          # an installed record's missing `id` names a step
+    assert rows(rec) == [expect(kind, code, message)]
 
 
 def test_issues_are_reported_in_field_order_with_unknown_keys_first():
@@ -228,9 +238,19 @@ def test_missing_schema_key_is_reported_and_the_rest_still_checked():
 
 
 def test_id_must_match_the_file_name():
+    """The step names the command that works in the state: git's last commit holds the record's file, so
+    the restore puts it back, and where it does not (a hand rename, a copy, a file only `git add`ed) has
+    no step an agent may run."""
     rec = parse("SC", "SC-0001", id="SC-0002")
-    assert rows(rec) == [expect("SC", "K13", "id: 'SC-0002' does not match the file name's ID (SC-0001)",
+    assert rows(rec) == [expect("SC", "K13",
+                                "id: 'SC-0002' does not match the file name's ID (SC-0001); git's last "
+                                "commit does not hold a file at research-review/challenges/SC-0001.yaml, "
+                                "and records are never renamed, so leave it as it is and tell the user",
                                 rec, "id")]
+    committed = [i.message for i in schema_issues(rec, staged=False, committed=lambda path: True)]
+    assert committed == ["id: 'SC-0002' does not match the file name's ID (SC-0001); restore the record's "
+                       "file from git (git restore --source=HEAD --staged --worktree "
+                       "research-review/challenges/SC-0001.yaml)"]
 
 
 @pytest.mark.parametrize("value,message", [("X-0001", "id: 'X-0001' is not an ID"),
@@ -238,8 +258,12 @@ def test_id_must_match_the_file_name():
                                            (5, "id: 5 is not an ID"),
                                            (None, "id: required")])
 def test_id_syntax(value, message):
+    """An installed record's bad `id` names the step that fixes the file (its file name's ID stands, so
+    its author cannot put a corrected copy); the same errors in a staged record name no step."""
     rec = parse("SC", id=value)
-    assert rows(rec) == [expect("SC", "K13", message, rec, "id")]
+    assert rows(rec) == [expect("SC", "K13", f"{message}; {left_alone(rec)}", rec, "id")]
+    staged = [] if value is None else [expect("SC", "K13", message, rec, "id")]
+    assert rows(rec, staged=True) == staged
 
 
 def test_created_accepts_a_date_object_and_an_iso_string():

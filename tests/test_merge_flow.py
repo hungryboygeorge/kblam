@@ -27,8 +27,8 @@ A_PATH = "findings/calibration/F-0012-lamp.md"
 POINTER = "Load the kblam-write skill for how to fix this."
 # The merge sentence `kblam rm`'s refusal for a linked finding gives, with no copy staged: the quantity
 # route first, one staged copy, and the removal before the put.
-MERGE = ("Merge the other way, in one staged copy of F-0012: kblam edit F-0012 stages one at "
-         f"{STAGED}. If F-0020 gives a quantity F-0012 lacks, kblam rm F-0020 --merged-into F-0012 is "
+MERGE = ("Merge the other way, in one staged copy of F-0012: run kblam edit F-0012, which stages one "
+         f"at {STAGED}. If F-0020 gives a quantity F-0012 lacks, kblam rm F-0020 --merged-into F-0012 is "
          "refused for it: add only that quantity to that copy, leave F-0012's claim as it is installed, "
          "and kblam put it; that put leaves nothing staged, so kblam edit F-0012 stages the next copy to "
          "work in. Add what F-0020 states that F-0012 does not yet (its detail and quantities) to the "
@@ -153,8 +153,8 @@ def test_the_merge_removes_the_duplicate_and_then_puts_after_k9(kb):
 
 def test_the_merge_moves_a_quantity_the_target_lacks_in_two_puts(jkb):
     """The skill's quantity route, run literally: the rm is refused for B's quantity, so A goes in first
-    with only that quantity added and its claim left as it is; then the rm, then a fresh `kblam edit A`
-    with the rest of B's detail."""
+    with only that quantity added and its claim left as it is; then a fresh `kblam edit A` with the rest
+    of B's detail, and the one rm the text names after that."""
     pair(jkb, quantity=True)
     jkb.fake.relations[(B_CLAIM, A_NEW)] = ("same_fact", 0.93, 0.91)
     refused = m.kblam(jkb, "rm", "F-0020", "--merged-into", "F-0012")
@@ -167,9 +167,9 @@ def test_the_merge_moves_a_quantity_the_target_lacks_in_two_puts(jkb):
     staged = m.ok(m.kblam(jkb, "edit", "F-0012"), "edit").out.strip()   # "kblam edit A": none staged
     add_quantity(jkb.root / staged)                     # the quantity, A's claim left as it is
     assert m.ok(m.kblam(jkb, "put", staged), "put").code == 0
-    m.ok(m.kblam(jkb, "rm", "F-0020", "--merged-into", "F-0012"), "rm")
     again = m.ok(m.kblam(jkb, "edit", "F-0012"), "edit").out.strip()    # "kblam edit A again"
     restate(jkb.root / again)                           # the rest of B's detail
+    m.ok(m.kblam(jkb, "rm", "F-0020", "--merged-into", "F-0012"), "rm")  # the one rm the text names
     assert m.ok(m.kblam(jkb, "put", again), "put").code == 0
     assert m.validate(jkb).code == 0
     assert items_output(jkb) == "kblam items: no open review, rejected or unchecked items\n"

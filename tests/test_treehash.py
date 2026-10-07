@@ -20,8 +20,8 @@ CLAIM_D = "The fan controller holds its duty cycle at 40% until the case reaches
 WARNING = ("findings/ or research-review/ was changed outside kblam since kblam last wrote it; "
            "tree.hash not advanced. Run kblam validate --record once the change is validated.")
 MISSING = ("there is no .kblam/tree.hash (a new clone, or .kblam/ was deleted), and the tree as it was before "
-           "this write fails kblam validate, so kblam did not record it; tree.hash not advanced. Run kblam "
-           "validate, fix anything it lists, then run kblam validate --record.")
+           "this write fails kblam validate, so kblam did not record tree.hash for it; the write itself is "
+           "done. Run kblam validate, fix anything it lists, then run kblam validate --record.")
 OLD_FORMAT = (".kblam/tree.hash is in the old format; tree.hash not advanced. "
               "Run kblam validate --record once the tree validates.")
 
@@ -164,6 +164,7 @@ def test_bootstrap_refuses_a_tree_that_fails_the_rules(kb, capsys):
     kb.write("findings/tray/F-0003-tray.md", finding_text("F-0003", CLAIM_C, topic="tray"))  # K7 again
     result = put(kb.cfg, kb.write(".kblam/staging/F-0004-fan.md", finding_text("F-0004", CLAIM_D, topic="fan")))
     assert result.ok and not result.recorded and read_recorded(kb.cfg) is None
+    assert (kb.findings / "fan" / "F-0004-fan.md").is_file()   # the write itself is done
     assert f"kblam put F-0004-fan.md: {MISSING}" in capsys.readouterr().err
     assert not checked(kb, "F-0001")
 

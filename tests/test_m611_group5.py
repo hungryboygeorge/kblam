@@ -43,6 +43,9 @@ TREE_HASH = ".kblam/tree.hash"
 OK = "kblam validate: OK (0 findings)"
 OK_ONE = "kblam validate: OK (1 findings)"
 FAILED = "kblam validate: 1 error(s) in research-review/"
+# The step every stale or unavailable reference message ends with (SPEC §5.2.3 Evaluation).
+RETIRE = (f"; restore {m.EVIDENCE_PATH} to the bytes {SC} was written against, or retire the record and "
+          f"file a new one (kblam review decide {SC} --status stale --by NAME --reason TEXT --expect D)")
 # The exact paths each of the group's commands may change: the staging command writes the staged record
 # and its allocation receipt; the put installs the record, the review index, the registry and tree.hash
 # and removes the staged file; a decision rewrites the record, the index and tree.hash.
@@ -509,7 +512,7 @@ def test_another_basis_file_changed_is_a_warning_while_the_challenge_is_open(kb,
 
     exactly(read(kb, source_repo, "validate"), "\n".join([
         f"K13 warning {CHALLENGE}:{key_line(kb, SC, 'basis')}: basis[1]: the source changed since "
-        f"SC-0001 was written",
+        f"SC-0001 was written{RETIRE}",
         OK,
     ]) + "\n", "validate")
     exactly(read(kb, source_repo, "challenge", "show", SC), "\n".join([
@@ -561,7 +564,7 @@ def test_another_basis_file_changed_is_an_error_once_the_challenge_is_confirmed(
 
     issue = "\n".join([
         f"K13 {CHALLENGE}:{key_line(kb, SC, 'basis')}: basis[1]: the source changed since SC-0001 "
-        f"was written",
+        f"was written{RETIRE}",
         FAILED,
     ]) + "\n"
     exactly(read(kb, source_repo, "validate"), issue, "validate", code=1)

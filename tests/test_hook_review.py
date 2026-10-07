@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -20,7 +21,9 @@ from pathlib import Path
 import pytest
 
 import m611_helpers as m
-from conftest import KBLAM_TOML, NO_EMBEDDINGS, PROMPT_TOML, finding_text, record_text
+from conftest import DROP, KBLAM_TOML, NO_EMBEDDINGS, PROMPT_TOML, finding_text, record_text
+from kblam import records
+from kblam.finding import yaml_rt
 from test_check import E1, jkb  # noqa: F401 (jkb is a fixture, and hkb is built on it)
 from test_fresh_clone import git
 from test_hook import POINTER, STATE_TAIL, blocked, call, denied, hkb, stop, tool  # noqa: F401 (hkb too)
@@ -371,10 +374,10 @@ def test_pre_tool_use_on_a_review_path_imports_only_the_hook_code(kb):
 # --- Stop over the review root ---------------------------------------------------------------------
 
 
-STOP_FIX = ("Fix each failure through kblam: a finding with kblam edit <id>, a change to the staged copy and "
-            "kblam put; a record as its failure line says, with the kblam command it names, a change to a free "
-            "field through kblam challenge edit or kblam task edit and kblam put, or a restore of the record's "
-            f"file from git. Never write under findings/ or {REVIEW}/ directly. Once the tree is clean, kblam "
+STOP_FIX = ("Fix each failure through kblam. A finding: kblam edit <id>, change the staged copy, kblam put it. "
+            "A record: do what its failure line says (the kblam command it names, a restore from git, or leaving "
+            "it and telling the user); or change a free field with kblam challenge edit or kblam task edit and "
+            f"kblam put it. Never write under findings/ or {REVIEW}/ directly. Once the tree is clean, kblam "
             "validate --record accepts the change.")
 
 
@@ -394,8 +397,33 @@ def test_stop_blocks_on_a_record_changed_out_of_band(review_kb, monkeypatch, cap
                      f"kblam validate:")
     assert failures == [f"K13 {REVIEW}/INDEX.md: INDEX.md is missing; run kblam review index",
                         f"K13 {REVIEW}/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file name's "
-                        f"ID (SC-0001)"]
+                        f"ID (SC-0001); git's last commit does not hold a file at {REVIEW}/challenges/"
+                        f"SC-0001.yaml, and records are never renamed, so leave it as it is and tell the user"]
     assert (fix, pointer) == (STOP_FIX, POINTER)
+
+
+def test_the_free_field_route_the_fix_sentence_names_clears_the_block(review_kb, monkeypatch, capsys):
+    """D49 for the fix sentence's free-field route: a free field of an installed SC changed by hand fails
+    K13, Stop blocks, and kblam challenge edit, the fix in the staged copy, kblam put and kblam validate
+    --record clear it: the next Stop is silent."""
+    review_kb.add("F-0001", "motor", E1)
+    review_kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", proposition=""))
+
+    code, answer, _ = call("Stop", stop(review_kb), monkeypatch, capsys)
+    assert code == 0
+    assert any("proposition: required" in line for line in blocked(answer).split("\n"))
+    assert blocked(answer).split("\n")[-2:] == [STOP_FIX, POINTER]
+
+    edit = m.kblam(review_kb, "challenge", "edit", "SC-0001")
+    assert edit.code == 0 and edit.err == ""
+    staged = Path(edit.out.strip())
+    data = yaml_rt().load(staged.read_bytes().decode("utf-8"))
+    data["proposition"] = "The printed byte equality follows from the printed byte values"
+    staged.write_bytes(records.dump(data))
+
+    assert m.put_ok(review_kb, staged).code == 0
+    assert m.validate(review_kb, "--record").code == 0
+    assert call("Stop", stop(review_kb), monkeypatch, capsys) == (0, None, "")
 
 
 def test_stop_loop_guard_names_both_roots(review_kb, monkeypatch, capsys):
@@ -470,8 +498,23 @@ def blocked_parts(kb, monkeypatch, capsys) -> tuple[list[str], str, str]:
     return failures, fix, pointer
 
 
+def record_edit(path: Path, **fields) -> None:
+    """Change a record file's top-level fields by hand, as its author or an editor would, re-dumped as
+    kblam dumps a record (a fixture edit: outside the CLI and outside any bracket)."""
+    data = yaml_rt().load(path.read_bytes().decode("utf-8"))
+    data.update(fields)
+    path.write_bytes(records.dump(data))
+
+
+def named_restore(text: str) -> str:
+    """The `git restore …` command inside the K13 line for an id mismatch, as that line prints it."""
+    match = re.search(r"\((git restore --source=HEAD --staged --worktree [^)]+)\)", text)
+    assert match is not None, text
+    return match.group(1)
+
+
 def test_the_fix_sentence_names_kblam_review_index_for_a_deleted_review_index(review_kb, monkeypatch, capsys):
-    """D49 for the fix sentence's "run the kblam command its failure line names": the review root's
+    """D49 for the fix sentence's "do what its failure line says (the kblam command it names)": the review root's
     INDEX.md deleted out of band blocks the stop with a K13 line that names kblam review index; running
     that, then kblam validate --record, leaves the hook silent."""
     kb = review_kb
@@ -516,10 +559,14 @@ def test_the_fix_sentence_names_kblam_edit_and_put_for_a_hand_edited_finding(rev
 
 def test_the_fix_sentence_names_a_restore_from_git_for_a_record_line_that_names_no_command(
         git_review_kb, monkeypatch, capsys):
-    """D49 for a K13 record line that names no kblam command, the id/file-name mismatch: kblam put
-    refuses a staged copy whose ID was put back (the ID is not a free field, so the old sentence's "a
-    staged copy and kblam put" cannot fix it), and restoring the record's file from git is what does;
-    kblam validate --record then leaves the hook silent."""
+    """D49 for a K13 record line that names no kblam command, the id/file-name mismatch: git's last
+    commit holds the record's file at its path, so the line names the git restore that puts the recorded
+    `id` back, and the PreToolUse hook allows that command. The hand edit is `git add`ed first: the
+    restore names HEAD for the index and the worktree, so the staged hand edit is put back too (a plain
+    `git restore` would leave it). kblam challenge edit will not even stage a copy while the installed
+    `id` is the bad one (the ID is not a free field, so put could never accept that copy): it names the
+    check that fixes the file instead, so the restore is the way back to editing. After it, a fresh edit
+    and put work, and kblam validate --record leaves the hook silent."""
     kb = git_review_kb
     kb.add("F-0001", "motor", E1)
     kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
@@ -527,19 +574,465 @@ def test_the_fix_sentence_names_a_restore_from_git_for_a_record_line_that_names_
     git(kb.root, "add", "-A")
     git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
     kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0009"))   # the hand edit
+    git(kb.root, "add", "-A")                            # an agent stages the hand edit before restoring
 
     failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
 
+    restore = f"git restore --source=HEAD --staged --worktree {REVIEW}/challenges/SC-0001.yaml"
     assert failures == [f"K13 {REVIEW}/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file "
-                        f"name's ID (SC-0001)"]
+                        f"name's ID (SC-0001); restore the record's file from git ({restore})"]
     assert (fix, pointer) == (STOP_FIX, POINTER)
 
-    # the route the old sentence offered instead: a staged copy and kblam put cannot fix this line
-    staged = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())
-    staged.write_bytes(record_text("SC", "SC-0001").encode())
-    refused = m.kblam(kb, "put", str(staged))
-    assert refused.code != 0 and "id is not a free field" in refused.out + refused.err
+    # the command the line names, run by an agent: the hook allows it, and it is what puts the ID back
+    assert call("PreToolUse", tool(kb, "Bash", command=restore), monkeypatch, capsys) == (0, None, "")
 
-    git(kb.root, "restore", f"{REVIEW}/challenges/SC-0001.yaml")   # the restore the sentence names
+    # the free-field route the fix sentence names cannot fix this line: the edit command refuses the bad
+    # installed `id` outright, staging nothing, rather than hand over a copy put could only refuse
+    refused = m.kblam(kb, "challenge", "edit", "SC-0001")
+    assert (refused.code, refused.out) == (1, "")
+    assert refused.err == (f"kblam challenge edit: the installed record {REVIEW}/challenges/SC-0001.yaml "
+                           f"has id 'SC-0009', but its file name's ID is SC-0001, so kblam will not stage a "
+                           f"copy of it. Run kblam validate and do what its line for {REVIEW}/challenges/"
+                           f"SC-0001.yaml says; once it is fixed, run kblam challenge edit SC-0001 again\n")
+    assert not (kb.root / ".kblam/review-staging/SC-0001.yaml").exists()
+
+    git(kb.root, *restore.split()[1:])                   # the restore the line names, as it prints
+    assert "id: SC-0001" in (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").read_text(encoding="utf-8")
+    assert subprocess.run(["git", "-C", str(kb.root), "diff", "--cached", "--quiet"],
+                          capture_output=True).returncode == 0   # the staged hand edit is gone too
+
+    staged = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())   # the edit command again
+    record_edit(staged, proposition="The printed byte equality follows from the printed byte values, "
+                                    "restated")                              # a free-field change
+    assert m.put_ok(kb, staged).code == 0
     assert m.validate(kb, "--record").code == 0
     assert call("Stop", stop(kb), monkeypatch, capsys) == (0, None, "")
+
+
+def test_the_id_mismatch_of_a_renamed_record_names_no_step_an_agent_may_run(
+        git_review_kb, monkeypatch, capsys):
+    """D49 for the same line where git's last commit holds no file at the record's path (a hand rename):
+    no command an agent may run puts the record back under the name its ID gives. The PreToolUse hook
+    denies `mv` of a record file (it removes one and writes under the review root), and `git mv` cannot
+    move a file git never held, so the line says to leave it as it is and tell the user; the renamed file
+    stays as it is."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
+    renamed = f"{REVIEW}/challenges/SC-0002.yaml"                  # fixture edit: a rename, in place
+    (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").rename(kb.root / renamed)
+
+    failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
+
+    assert (f"K13 {renamed}:2: id: 'SC-0001' does not match the file name's ID (SC-0002); git's last "
+            f"commit does not hold a file at {renamed}, and records are never renamed, so leave it as it "
+            f"is and tell the user") in failures
+    assert (fix, pointer) == (STOP_FIX, POINTER)
+
+    # the rename an agent would run: the hook denies it (a record file's removal, a review-root write)
+    rename = f"mv {renamed} {REVIEW}/challenges/SC-0001.yaml"
+    assert denied(call("PreToolUse", tool(kb, "Bash", command=rename), monkeypatch, capsys)[1])
+
+    # and git cannot move a file it never held: the path stays untracked and the file stays where it is
+    assert subprocess.run(["git", "-C", str(kb.root), "mv", renamed, f"{REVIEW}/challenges/SC-0001.yaml"],
+                          capture_output=True).returncode != 0
+    assert (kb.root / renamed).is_file()
+    assert not (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").exists()
+
+
+def test_the_id_mismatch_of_a_record_git_added_but_never_committed_names_no_restore(
+        git_review_kb, monkeypatch, capsys):
+    """D49: the restore the line names reads HEAD, so it is named only where HEAD holds the file. A record
+    kblam put and someone `git add`ed, with no commit (a commit the pre-commit hook refused, say), then
+    hand-edited: git's last commit does not hold it, so the line says to leave it as it is and tell the
+    user. The restore would delete it from the index and the worktree, and no commit could bring it back.
+    The record file is still there afterwards, and the line names no git restore."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")                       # the record is in the index; no commit holds it
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0009"))   # the hand edit
+
+    failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
+
+    assert (f"K13 {REVIEW}/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file name's ID "
+            f"(SC-0001); git's last commit does not hold a file at {REVIEW}/challenges/SC-0001.yaml, and "
+            f"records are never renamed, so leave it as it is and tell the user") in failures
+    assert (fix, pointer) == (STOP_FIX, POINTER)
+    assert not any("git restore" in line for line in failures)    # the command that would delete it
+    assert (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").is_file()   # so the record is still there
+
+
+def test_the_id_mismatch_under_an_unborn_head_names_no_restore(review_kb, monkeypatch, capsys):
+    """D49 for the same line in a repository with no commit yet (a KB initialized but never committed):
+    the record `git add`ed and hand-edited. There is no HEAD for `git restore --source=HEAD` to read, so
+    the line says to leave it as it is and tell the user; the record file is still there afterwards."""
+    kb = review_kb
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(kb.root.parent / "no-global-gitconfig"))
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(kb.root.parent))
+    kb.write(".gitignore", ".kblam/\n")
+    git(kb.root, "init", "-q")                      # no commit: HEAD is unborn
+    kb.add("F-0001", "motor", E1)
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")                       # the record is in the index; HEAD holds nothing
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0009"))   # the hand edit
+
+    failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
+
+    assert (f"K13 {REVIEW}/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file name's ID "
+            f"(SC-0001); git's last commit does not hold a file at {REVIEW}/challenges/SC-0001.yaml, and "
+            f"records are never renamed, so leave it as it is and tell the user") in failures
+    assert (fix, pointer) == (STOP_FIX, POINTER)
+    assert not any("git restore" in line for line in failures)
+    assert (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").is_file()
+
+
+@pytest.mark.parametrize("commit", [False, True], ids=["in the index only", "committed"])
+def test_a_staged_id_changed_by_hand_names_setting_it_back(git_review_kb, commit):
+    """D49 for put's id refusal where the installed record is sound: only the staged file's `id` was
+    changed by hand, so setting the file-name ID back in it is the whole fix, and the refusal names that
+    step. The line is chosen by reading the installed record, never by git state: a record that is only
+    `git add`ed (a restore from HEAD would delete it) and a committed one give the same line, with no
+    restore in it. The installed record file is unchanged, and the step the refusal names is run: put
+    then exits 0."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    if commit:
+        git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
+    before = (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").read_bytes()
+
+    staged = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())
+    record_edit(staged, id="SC-0009")                    # the hand edit: the staged ID alone
+
+    refused = m.kblam(kb, "put", str(staged))
+
+    assert (refused.code, refused.out) == (1, "")
+    assert refused.err == (f"kblam put: .kblam/review-staging/SC-0001.yaml: id is 'SC-0009', but the file "
+                           f"name's ID is SC-0001; the ID never changes. Set id back to SC-0001 in "
+                           f".kblam/review-staging/SC-0001.yaml and put it again {POINTER}\n")
+    assert "git restore" not in refused.err
+    assert (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").read_bytes() == before
+
+    record_edit(staged, id="SC-0001")                    # the step the refusal names, run
+    assert m.put_ok(kb, staged).code == 0
+
+
+@pytest.mark.parametrize("damage", ["the id line removed", "the id blanked"])
+def test_a_staged_id_that_is_missing_or_blank_names_setting_it_back(git_review_kb, damage):
+    """D49 for put's id refusal where the STAGED copy's own `id` is gone (a hand edit that deleted the
+    line or emptied it): the refusal names the staged file as having no id — never Python's None — and
+    keeps the step the installed record chooses, which for a sound installed record is setting the
+    file-name ID back in the staged copy. Running that step (adding the line back) puts the copy."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    path = f"{REVIEW}/challenges/SC-0001.yaml"
+    kb.write(path, record_text("SC", "SC-0001"))
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
+    before = (kb.root / path).read_bytes()
+
+    staged = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())
+    staged.write_bytes(_unreadable("SC", "SC-0001", damage).encode("utf-8"))   # the staged hand edit
+
+    refused = m.kblam(kb, "put", str(staged))
+
+    assert (refused.code, refused.out) == (1, "")
+    assert refused.err == (f"kblam put: .kblam/review-staging/SC-0001.yaml: the staged file has no id, "
+                           f"but the file name's ID is SC-0001; the ID never changes. Set id back to "
+                           f"SC-0001 in .kblam/review-staging/SC-0001.yaml and put it again {POINTER}\n")
+    assert "None" not in refused.err
+    assert (kb.root / path).read_bytes() == before
+
+    record_edit(staged, id="SC-0001")                    # the step the refusal names, run
+    assert m.put_ok(kb, staged).code == 0
+
+
+def test_a_staged_id_and_an_installed_id_both_changed_by_hand_name_deleting_the_staged_copy(
+        git_review_kb):
+    """D49 for put's id refusal where the installed record's `id` was hand-edited too (a copy staged
+    before the hand edit, or staged by hand): setting the staged `id` back would only meet put's next
+    refusal ("id is not a free field"), so the refusal names the real way out — delete the staged copy
+    that would carry the bad ID, run kblam validate and do what its line for the installed file says.
+    Following it, a fresh edit and put work and kblam validate --record is clean."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
+
+    staged = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())  # staged while it was sound
+    record_edit(staged, id="SC-0009")                                      # the staged hand edit
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0008"))   # the installed one
+
+    refused = m.kblam(kb, "put", str(staged))
+
+    assert (refused.code, refused.out) == (1, "")
+    assert refused.err == (f"kblam put: .kblam/review-staging/SC-0001.yaml: id is 'SC-0009', but the file "
+                           f"name's ID is SC-0001; the ID never changes, and the installed record "
+                           f"{REVIEW}/challenges/SC-0001.yaml has id 'SC-0008' too. Delete "
+                           f".kblam/review-staging/SC-0001.yaml, run kblam validate and do what its line "
+                           f"for {REVIEW}/challenges/SC-0001.yaml says {POINTER}\n")
+
+    staged.unlink()                                      # the step it names: delete the staged copy
+    restore = named_restore(m.validate(kb).out)          # and run the restore its line prints
+    git(kb.root, *restore.split()[1:])
+
+    fresh = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())   # a fresh edit
+    record_edit(fresh, proposition="The printed byte equality follows from the printed byte values, "
+                                   "restated")                              # a free-field change
+    assert m.put_ok(kb, fresh).code == 0
+    assert m.validate(kb, "--record").code == 0
+
+
+def test_a_broken_installed_file_still_names_deleting_the_staged_copy(git_review_kb):
+    """D49 for put's id refusal where the installed file cannot be read as a record at all (hand-damaged
+    YAML, say): its own `id` cannot be named, so the refusal takes the same delete-and-check step, without
+    the "has id … too" clause. The step is run to the end: the staged copy goes, the restore kblam
+    validate's line for the file prints puts the recorded bytes back, and then the edit command and a
+    put with a free-field change succeed."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
+
+    staged = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())
+    record_edit(staged, id="SC-0009")                    # the hand edit: the staged ID
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", "id: [unterminated\n")   # the broken installed file
+
+    refused = m.kblam(kb, "put", str(staged))
+
+    assert (refused.code, refused.out) == (1, "")
+    assert refused.err == (f"kblam put: .kblam/review-staging/SC-0001.yaml: id is 'SC-0009', but the file "
+                           f"name's ID is SC-0001; the ID never changes, and the installed record "
+                           f"{REVIEW}/challenges/SC-0001.yaml does not read as SC-0001 either. Delete "
+                           f".kblam/review-staging/SC-0001.yaml, run kblam validate and do what its line "
+                           f"for {REVIEW}/challenges/SC-0001.yaml says {POINTER}\n")
+
+    staged.unlink()                                      # the step it names: delete the staged copy
+    restore = named_restore(m.validate(kb).out)          # and run the restore its line prints
+    git(kb.root, *restore.split()[1:])
+
+    fresh = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())
+    record_edit(fresh, proposition="The printed byte equality follows from the printed byte values, "
+                                   "restated")          # a free-field change
+    assert m.put_ok(kb, fresh).code == 0
+    assert m.validate(kb, "--record").code == 0
+
+
+@pytest.mark.parametrize("kind, rec_id, word, folder", [
+    ("SC", "SC-0001", "challenge", "challenges"),
+    ("CT", "CT-0001", "task", "tasks"),
+])
+def test_either_edit_command_refuses_an_index_only_record_and_leaves_it_alone(
+        git_review_kb, kind, rec_id, word, folder):
+    """D49 for the same refusal where git's last commit holds no file at the record's path: the record was
+    `git add`ed and never committed, so kblam validate's line says to leave it as it is and tell the user
+    (the restore would delete it). Both edit commands — kblam challenge edit and kblam task edit, so this
+    is not SC-only — refuse the same way, staging nothing, and the record file is byte-identical
+    afterwards."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "the knowledge base")
+    path = f"{REVIEW}/{folder}/{rec_id}.yaml"
+    kb.write(path, record_text(kind, rec_id))
+    git(kb.root, "add", "-A")                       # the record is in the index; no commit holds it
+    kb.write(path, record_text(kind, rec_id.replace("0001", "0009")))   # the hand edit
+    before = (kb.root / path).read_bytes()
+
+    refused = m.kblam(kb, word, "edit", rec_id)
+
+    assert (refused.code, refused.out) == (1, "")
+    assert refused.err == (f"kblam {word} edit: the installed record {path} has id "
+                           f"{rec_id.replace('0001', '0009')!r}, but its file name's ID is {rec_id}, so "
+                           f"kblam will not stage a copy of it. Run kblam validate and do what its line "
+                           f"for {path} says; once it is fixed, run kblam {word} edit {rec_id} again\n")
+    assert not (kb.root / f".kblam/review-staging/{rec_id}.yaml").exists()
+    assert (kb.root / path).read_bytes() == before
+
+    out = m.validate(kb).out
+    assert (f"K13 {path}:2: id: '{rec_id.replace('0001', '0009')}' does not match the file name's ID "
+            f"({rec_id}); git's last commit does not hold a file at {path}, and records are never "
+            f"renamed, so leave it as it is and tell the user") in out
+
+
+# --- D49: the three ways an installed record file is damaged by hand --------------------------------
+#
+# An installed record is kblam's file: the hooks deny editing it (test_hook_review's file-tool group), so
+# damage to one comes from an editor or a checkout outside kblam. Three of those damage the file so that
+# kblam cannot read it as the record its ID and file name give: the `id` key removed, its value blanked,
+# or the file no longer valid YAML. `kblam validate`'s line for each ends with the step §5.2.2's `id` row
+# gives (git's last commit holds the file -> the restore; otherwise leave it and tell the user), and the
+# line's step is run here (D49).
+
+
+def _unreadable(kind: str, rec_id: str, damage: str) -> str:
+    """A record's bytes as a hand edit left them, in one of the three damages named below."""
+    if damage == "the id line removed":
+        return record_text(kind, rec_id, id=DROP)
+    if damage == "the id blanked":
+        return record_text(kind, rec_id, id=None)
+    return "schema: 1\nid: [unterminated\n"           # not valid YAML
+
+
+DAMAGED = [
+    # the damage, and the diagnostic the K13 line for the file opens with (the rule's own words)
+    ("the id line removed", f"{REVIEW}/challenges/SC-0001.yaml: missing key 'id'"),
+    ("the id blanked", f"{REVIEW}/challenges/SC-0001.yaml:2: id: required"),
+    ("broken YAML", f"{REVIEW}/challenges/SC-0001.yaml: not valid YAML:"),
+]
+
+
+@pytest.mark.parametrize("damage, head", DAMAGED)
+def test_damage_to_a_committed_record_names_a_restore_an_agent_can_run(
+        git_review_kb, monkeypatch, capsys, damage, head):
+    """D49: git's last commit holds the record's file, so each damage's K13 line ends with the git
+    restore that puts the recorded bytes back. The command is copied from the line, the PreToolUse hook
+    allows it, and running it makes the record editable again: a fresh edit, a free-field change and put
+    exit 0, kblam validate --record is clean, and the next Stop is silent."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    path = f"{REVIEW}/challenges/SC-0001.yaml"
+    sound = record_text("SC", "SC-0001")
+    kb.write(path, sound)
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
+
+    kb.write(path, _unreadable("SC", "SC-0001", damage))          # the hand damage
+
+    failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
+    line = next(line for line in failures if line.startswith(f"K13 {path}:"))
+    restore = f"git restore --source=HEAD --staged --worktree {path}"
+
+    assert (fix, pointer) == (STOP_FIX, POINTER)
+    assert line.startswith(f"K13 {head}")
+    assert line.endswith(f"; restore the record's file from git ({restore})")
+    assert named_restore(line) == restore
+
+    assert call("PreToolUse", tool(kb, "Bash", command=restore), monkeypatch, capsys) == (0, None, "")
+    git(kb.root, *restore.split()[1:])                            # the command the line prints, run
+    assert (kb.root / path).read_text(encoding="utf-8") == sound
+
+    staged = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())
+    record_edit(staged, proposition="The printed byte equality follows from the printed byte values, "
+                                    "restated")                    # a free-field change
+    assert m.put_ok(kb, staged).code == 0
+    assert m.validate(kb, "--record").code == 0
+    assert call("Stop", stop(kb), monkeypatch, capsys) == (0, None, "")
+
+
+@pytest.mark.parametrize("damage, head", DAMAGED)
+def test_damage_to_an_index_only_record_names_no_restore(
+        git_review_kb, monkeypatch, capsys, damage, head):
+    """D49 for the same three damages where git's last commit holds no file at the record's path: the
+    record was written by hand and `git add`ed, never committed, so the restore would delete it. The line
+    says to leave it as it is and tell the user, names no git command, and the damaged file stays
+    byte-identical."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "the knowledge base")
+    path = f"{REVIEW}/challenges/SC-0001.yaml"
+    kb.write(path, record_text("SC", "SC-0001"))
+    git(kb.root, "add", "-A")                                     # the record is in the index; no commit holds it
+    kb.write(path, _unreadable("SC", "SC-0001", damage))
+    before = (kb.root / path).read_bytes()
+
+    failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
+    line = next(line for line in failures if line.startswith(f"K13 {path}:"))
+
+    assert (fix, pointer) == (STOP_FIX, POINTER)
+    assert line.startswith(f"K13 {head}")
+    assert line.endswith(f"; git's last commit does not hold a file at {path}, so leave it as it is and "
+                         f"tell the user")
+    assert "git restore" not in line
+    assert (kb.root / path).read_bytes() == before                # the file is left as it is
+
+
+@pytest.mark.parametrize("damage", ["the id line removed", "the id blanked"])
+def test_a_staged_id_and_an_installed_id_with_no_id_name_deleting_the_staged_copy(
+        git_review_kb, damage):
+    """D49 for put's id refusal where the installed record's own `id` was removed or blanked by hand: the
+    refusal says the installed record has no id (never Python's None) and names the same way out as for an
+    installed id that differs. Following it — delete the staged copy, run the restore kblam validate's
+    line prints — a fresh edit and put with a free-field change succeed."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    path = f"{REVIEW}/challenges/SC-0001.yaml"
+    kb.write(path, record_text("SC", "SC-0001"))
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
+
+    staged = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())  # staged while it was sound
+    record_edit(staged, id="SC-0009")                                      # the staged hand edit
+    kb.write(path, _unreadable("SC", "SC-0001", damage))                   # the installed one, damaged
+
+    refused = m.kblam(kb, "put", str(staged))
+
+    assert (refused.code, refused.out) == (1, "")
+    assert refused.err == (f"kblam put: .kblam/review-staging/SC-0001.yaml: id is 'SC-0009', but the file "
+                           f"name's ID is SC-0001; the ID never changes, and the installed record {path} "
+                           f"has no id either. Delete .kblam/review-staging/SC-0001.yaml, run kblam "
+                           f"validate and do what its line for {path} says {POINTER}\n")
+
+    staged.unlink()                                      # the step it names: delete the staged copy
+    restore = named_restore(m.validate(kb).out)          # and run the restore its line prints
+    git(kb.root, *restore.split()[1:])
+
+    fresh = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())   # a fresh edit
+    record_edit(fresh, proposition="The printed byte equality follows from the printed byte values, "
+                                   "restated")                              # a free-field change
+    assert m.put_ok(kb, fresh).code == 0
+    assert m.validate(kb, "--record").code == 0
+
+
+@pytest.mark.parametrize("kind, rec_id, word, folder", [
+    ("SC", "SC-0001", "challenge", "challenges"),
+    ("CT", "CT-0001", "task", "tasks"),
+])
+def test_either_edit_command_refuses_an_installed_record_with_no_id(
+        git_review_kb, kind, rec_id, word, folder):
+    """D49 for the same refusal where the installed record's `id` key was removed by hand: the refusal
+    names the record as having no id (never Python's None), the check that fixes the file and the command
+    to run again once it is fixed. Following it, the restore kblam validate's line prints puts the
+    recorded bytes back and the edit command stages the copy."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    path = f"{REVIEW}/{folder}/{rec_id}.yaml"
+    kb.write(path, record_text(kind, rec_id))
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
+    kb.write(path, record_text(kind, rec_id, id=DROP))            # the hand damage: no id
+    before = (kb.root / path).read_bytes()
+
+    refused = m.kblam(kb, word, "edit", rec_id)
+
+    assert (refused.code, refused.out) == (1, "")
+    assert refused.err == (f"kblam {word} edit: the installed record {path} has no id, but its file "
+                           f"name's ID is {rec_id}, so kblam will not stage a copy of it. Run kblam "
+                           f"validate and do what its line for {path} says; once it is fixed, run kblam "
+                           f"{word} edit {rec_id} again\n")
+    assert not (kb.root / f".kblam/review-staging/{rec_id}.yaml").exists()
+    assert (kb.root / path).read_bytes() == before
+
+    restore = named_restore(m.validate(kb).out)                   # the step the refusal leads to
+    git(kb.root, *restore.split()[1:])
+    assert m.kblam(kb, word, "edit", rec_id).code == 0            # the command it says to run again

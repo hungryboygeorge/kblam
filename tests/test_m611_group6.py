@@ -418,16 +418,17 @@ def test_a_staged_id_that_differs_from_the_file_name_is_refused(kb, source_repo)
     """Start: SC-0001 staged and filled by reviewer-a with its allocation receipt, no records installed.
     Hand edit (fixture setup): the staged `id` becomes SC-0009. Command: `kblam put
     .kblam/review-staging/SC-0001.yaml`. Exit 1, stderr "kblam put: .kblam/review-staging/SC-0001.yaml:
-    id is 'SC-0009', but the file name's ID is SC-0001; the ID never changes Load the kblam-write skill
-    for how to fix this.", stdout empty. Files: none (the staged file stays where it is). Validation
-    afterwards: exit 0. A5."""
+    id is 'SC-0009', but the file name's ID is SC-0001; the ID never changes. Set id back to SC-0001 in
+    .kblam/review-staging/SC-0001.yaml and put it again Load the kblam-write skill for how to fix this.",
+    stdout empty. Files: none (the staged file stays where it is). Validation afterwards: exit 0. A5."""
     path = new_challenge(kb, source_repo)
     edit(path, **{**challenge_fields(kb, source_repo), "id": "SC-0009"})
     with changes(kb, source_repo, set()):
         run = m.kblam(kb, "put", str(path))
     check(run, code=1,
           err="kblam put: .kblam/review-staging/SC-0001.yaml: id is 'SC-0009', but the file name's ID is "
-              "SC-0001; the ID never changes Load the kblam-write skill for how to fix this.\n")
+              "SC-0001; the ID never changes. Set id back to SC-0001 in .kblam/review-staging/SC-0001.yaml "
+              "and put it again Load the kblam-write skill for how to fix this.\n")
     assert not m.record_path(kb, "SC-0001").exists()
     validate(kb, source_repo, code=0, out="kblam validate: OK (0 findings)\n")
 
@@ -550,16 +551,18 @@ def test_a_proponent_outside_the_name_pattern_is_refused(kb, source_repo):
 
 
 def test_a_hand_changed_id_is_a_k13_error(kb, source_repo):
-    """Start: SC-0001 installed open by reviewer-a. Hand edit (fixture setup): the record's `id` becomes
-    SC-0009 while its file name does not. Command: `kblam validate`. Exit 1, "K13
-    research-review/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file name's ID (SC-0001)"
-    and no other error. Files: none (validate is read-only). A5: a record's ID matches its file (§5.2.4
-    K13)."""
+    """Start: SC-0001 installed open by reviewer-a, in a KB that is no git repository. Hand edit (fixture
+    setup): the record's `id` becomes SC-0009 while its file name does not. Command: `kblam validate`.
+    Exit 1, "K13 research-review/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file name's
+    ID (SC-0001); git's last commit does not hold a file at research-review/challenges/SC-0001.yaml, and
+    records are never renamed, so leave it as it is and tell the user" and no other error. Files: none
+    (validate is read-only). A5: a record's ID matches its file (§5.2.4 K13)."""
     install_challenge(kb, source_repo)
     edit(m.record_path(kb, "SC-0001"), id="SC-0009")
     validate(kb, source_repo, code=1,
              out=f"K13 {PATH['SC']}:{key_line(kb, 'SC-0001', 'id')}: id: 'SC-0009' does not match the file "
-                 f"name's ID (SC-0001)\n{failed(1)}\n")
+                 f"name's ID (SC-0001); git's last commit does not hold a file at {PATH['SC']}, and "
+                 f"records are never renamed, so leave it as it is and tell the user\n{failed(1)}\n")
 
 
 def test_a_hand_changed_proponent_on_a_decided_task_is_a_k13_error(kb, source_repo):

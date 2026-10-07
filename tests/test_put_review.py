@@ -287,8 +287,8 @@ def test_a_missing_tree_hash_with_a_failing_record_leaves_a_put_unrecorded(kb, c
     assert read_recorded(kb.cfg) is None
     assert capsys.readouterr().err == (
         "kblam put F-0002-motor.md: there is no .kblam/tree.hash (a new clone, or .kblam/ was deleted), and the "
-        "tree as it was before this write fails kblam validate, so kblam did not record it; tree.hash not "
-        "advanced. Run kblam validate, fix anything it lists, then run kblam validate --record.\n")
+        "tree as it was before this write fails kblam validate, so kblam did not record tree.hash for it; the "
+        "write itself is done. Run kblam validate, fix anything it lists, then run kblam validate --record.\n")
 
 
 def test_a_missing_tree_hash_without_records_is_bootstrapped_as_format_2(kb, capsys):

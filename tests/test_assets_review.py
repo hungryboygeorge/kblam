@@ -270,5 +270,5 @@ def test_the_skill_and_the_template_place_a_cited_source_repository_in_evidence_
     assert "only a person changes `kblam.toml`, so ask the user to add it" in skill
     assert "ask the user to add its folder, or `resources`, to `[kb] evidence_roots`" in skill   # the K2 row
     template = one_line(init._asset(TEMPLATE).decode("utf-8"))
-    assert ("# A finding citing a file in a source repository under resources/ needs that folder, or "
-            "resources/, added here.") in template
+    assert ('# A finding citing a source repository under resources/ needs that folder, or "resources", '
+            "here.") in template

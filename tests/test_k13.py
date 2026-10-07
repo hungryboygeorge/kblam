@@ -19,12 +19,14 @@ from kblam import decisions, matching, records, rules, sources, writes
 from kblam.cli import main
 from kblam.decisions import subject_digest
 from kblam.finding import fingerprint, yaml_rt
+from kblam.gitdir import committed_file
 from kblam.k13 import _use_blocking_issues, challenge_info, k13, use_binding_problems, use_current
 from kblam.review_index import generate_review_index
 from kblam.sources import SourceReader
 from kblam.treehash import format_line
 from kblam.view import load_view
 
+from test_approval import commit, git, gkb  # noqa: F401  (gkb is a fixture)
 from test_k14 import LINE3, add_finding, quoted, use as quoted_use
 
 REVIEW = "research-review"
@@ -42,6 +44,21 @@ REAL_FINDING_MATCHES = matching.finding_matches
 
 # The CU binding row's advice, as it prints for the fixture's CU-0001 (SPEC §5.2.5 `review rebind`).
 REBIND_FIX = "run kblam review rebind CU-0001 --by NAME --reason TEXT --expect D"
+
+
+def retire(rec_id: str, path: str = TRACE, *, pinned: bool = False) -> str:
+    """The step a stale or unavailable reference message ends with (SPEC §5.2.3 Evaluation): restore the
+    bytes the record was written against at `path`, or retire it and file a new one."""
+    restore = (f"restore the pinned bytes of {path}" if pinned
+               else f"restore {path} to the bytes {rec_id} was written against")
+    return (f"; {restore}, or retire the record and file a new one (kblam review decide {rec_id} "
+            f"--status stale --by NAME --reason TEXT --expect D)")
+
+
+def retire_missing(rec_id: str) -> str:
+    """The same step where the message already names the file: "restore it"."""
+    return (f"; restore it, or retire the record and file a new one (kblam review decide {rec_id} "
+            f"--status stale --by NAME --reason TEXT --expect D)")
 RETIRE_USE_FIX = "kblam review decide CU-0001 --status stale --by NAME --reason TEXT --expect D"
 NEW_USE_FIX = (f"retire this use ({RETIRE_USE_FIX}); if the finding still quotes the assertion, make "
                "sure kblam validate verifies that excerpt as a text match (fix the excerpt or its "
@@ -360,8 +377,8 @@ def test_availability_row_level_by_status(kb_ready, source_repo, status):
     expected = {"open": ["warning", "warning"], "confirmed": ["error", "error"]}.get(status, [])
     assert [level for level, _message in found] == expected
     assert [message for _level, message in found] == [
-        "the source changed since SC-0001 was written",
-        "basis[0]: the source changed since SC-0001 was written"][:len(expected)]
+        "the source changed since SC-0001 was written" + retire("SC-0001"),
+        "basis[0]: the source changed since SC-0001 was written" + retire("SC-0001")][:len(expected)]
 
 
 @pytest.mark.parametrize("status", records.STATUSES["CU"])
@@ -1561,7 +1578,8 @@ def test_a_confirmed_challenge_needs_its_basis_available(kb_ready, source_repo):
                            basis=[basis(), {**ref("evidence/gone.md", gone), "locator": "the manifest",
                                             "role": "counterevidence", "provenance": "observed"}]))
     found = messages_of(kb_ready)
-    assert found == [("error", "basis[1]: the working file evidence/gone.md is missing")]
+    assert found == [("error", "basis[1]: the working file evidence/gone.md is missing"
+                               + retire_missing("SC-0001"))]
 
 
 def allocation(kb, data: dict) -> None:
@@ -1625,7 +1643,9 @@ def test_absent_or_partial_allocation_proves_no_identity_change(kb_ready, source
     ("proponent", None, "missing key 'proponent'"),
     ("proponent", 7, "proponent: 7 is not a name"),
     ("proponent", "not a name", "proponent: 'not a name' is not a name"),
-    ("id", "CT-0009", "id: 'CT-0009' does not match the file name's ID (CT-0001)"),
+    ("id", "CT-0009", "id: 'CT-0009' does not match the file name's ID (CT-0001); git's last commit does "
+                      "not hold a file at research-review/tasks/CT-0001.yaml, and records are never renamed, "
+                      "so leave it as it is and tell the user"),
 ])
 def test_invalid_identity_has_only_its_schema_error(kb_ready, source_repo, field, value, message):
     data = ct(kb_ready)
@@ -1640,6 +1660,20 @@ def test_invalid_identity_has_only_its_schema_error(kb_ready, source_repo, field
     assert [(i.code, i.path, i.line, i.level, i.owner, i.message)
             for i in k13_issues(kb_ready)] == [
                 ("K13", path, rec.key_line(field), "error", "CT-0001", message)]
+
+
+def test_committed_file_answers_for_a_path_git_would_quote(gkb):
+    """The id/file-name line names its git restore only where git's last commit holds the record's path
+    (kblam.gitdir.committed_file). git quotes a path outside ASCII in `ls-tree` output unless it is asked
+    for NUL-terminated records (-z, core.quotePath), and a quoted path never equals the one asked about,
+    so a record at such a path would be told no restore is possible. Read from a real repository: the
+    plain listing quotes résumé.yaml, and committed_file answers True for it."""
+    (gkb.root / "résumé.yaml").write_bytes(b"schema: 1\n")
+    commit(gkb, "a path outside ASCII")
+
+    assert git(gkb, "ls-tree", "--name-only", "HEAD", "--", "résumé.yaml").stdout != \
+        "résumé.yaml".encode("utf-8") + b"\n"                # git's quoting, the reason for -z
+    assert committed_file(gkb.cfg, "résumé.yaml") is True
 
 
 @pytest.mark.parametrize("status", ["stale", "rejected", "outside-the-vocabulary"])
@@ -2005,6 +2039,123 @@ def test_the_retire_command_the_pin_message_names_runs(kb_ready, source_repo, ca
     assert record_of(load_view(kb_ready.cfg), "SC-0001").status == "stale"
 
 
+# --- D49: the step each stale or unavailable reference message ends with ---------------------------
+#
+# Each of the three messages names the same way out: restore the bytes the record was written against,
+# or retire the record and file a new one. The tests reach the state that prints the message, take the
+# retire command from the printed text, and run it: retiring is what clears the reference, because the
+# availability row reports nothing at a retired status (SPEC §5.2.4 Severity).
+
+
+def other_basis(path: str = "evidence/2026-09-22-ratio/README.md", sha: str = SHA) -> dict:
+    """A second basis entry, off the source itself, so its reference resolves on its own."""
+    return {**ref(path, sha), "locator": "the manifest", "role": "counterevidence",
+            "provenance": "observed"}
+
+
+def retired(kb_ready, message: str, capsys) -> None:
+    """The K13 error `message` on the record, the retire command the same output prints, run on that
+    state, and a clean validate afterwards."""
+    assert run(kb_ready, "validate") == 1
+    out = capsys.readouterr().out
+    assert message in out, out
+    assert run(kb_ready, *printed_command(out, "kblam review decide", challenge_binding(kb_ready))) == 0
+    capsys.readouterr()
+    assert run(kb_ready, "validate") == 0
+    assert record_of(load_view(kb_ready.cfg), "SC-0001").status == "stale"
+
+
+def test_the_stale_reference_message_names_the_retire_command_that_runs(kb_ready, source_repo, capsys):
+    """D49 for "the source changed since SC-0001 was written": a confirmed challenge whose second basis
+    file holds other bytes than the record's sha256 reports the K13 error with its step, and the retire
+    command the same output names runs on that state and leaves a clean tree."""
+    put(kb_ready, "SC", sc("confirmed", repo=source_repo, basis=[basis(), other_basis(sha="a" * 64)]))
+    retired(kb_ready, "basis[1]: the source changed since SC-0001 was written"
+            + retire("SC-0001", "evidence/2026-09-22-ratio/README.md"), capsys)
+
+
+def test_the_missing_reference_message_names_the_retire_command_that_runs(kb_ready, source_repo, capsys):
+    """D49 for "the working file <path> is missing": a confirmed challenge whose second basis file is
+    gone reports the K13 error with its step, and the retire command the same output names runs on that
+    state and leaves a clean tree."""
+    put(kb_ready, "SC", sc("confirmed", repo=source_repo, basis=[basis(), other_basis()]))
+    (kb_ready.root / "evidence/2026-09-22-ratio/README.md").unlink()
+    retired(kb_ready, "basis[1]: the working file evidence/2026-09-22-ratio/README.md is missing"
+            + retire_missing("SC-0001"), capsys)
+
+
+def test_the_pinned_reference_message_names_the_retire_command_that_runs(kb_ready, source_repo, capsys):
+    """D49 for "the pinned version is not present": a confirmed challenge pinned by snapshot, whose
+    snapshot and working bytes are both gone, reports the K13 error for the source and its basis entry
+    with the step, and the retire command the same output names runs on that state and leaves a clean
+    tree."""
+    dirty = TRACE_TEXT + "Row 104: bytes 0x41 0x42\n"
+    source_repo.write(TRACE_PATH, dirty)
+    copy = "evidence/2026-09-28-trace-copy/trace.md"
+    kb_ready.write(copy, dirty)
+    put(kb_ready, "SC", sc("confirmed", source=source(sha=hashlib.sha256(dirty.encode("utf-8")).hexdigest(),
+                                                      snapshot=copy)))
+    (kb_ready.root / copy).unlink()
+    source_repo.write(TRACE_PATH, dirty + "Row 105: bytes 0x51 0x52\n")
+    message = "the pinned version is not present" + retire("SC-0001", TRACE, pinned=True)
+    assert run(kb_ready, "validate") == 1
+    out = capsys.readouterr().out
+    lines = [line for line in out.splitlines() if line.endswith(message)]
+    assert len(lines) == 2 and lines[1].endswith(f"basis[0]: {message}"), out
+    assert run(kb_ready, *printed_command(out, "kblam review decide", challenge_binding(kb_ready))) == 0
+    capsys.readouterr()
+    assert run(kb_ready, "validate") == 0
+    assert record_of(load_view(kb_ready.cfg), "SC-0001").status == "stale"
+
+
+def open_warning(kb_ready, message: str, capsys) -> None:
+    """The K13 warning `message` on an open record, the retire command the same output prints, run on
+    that state, and a clean validate afterwards. The reference row is a warning while the record is
+    open (SPEC §5.2.3 Evaluation), so `kblam validate` exits 0; `kblam review decide --status stale` is
+    allowed from `open` for every kind (SPEC §5.2.2 Status changes), so the step runs as printed."""
+    assert run(kb_ready, "review", "index") == 0          # the fixture wrote the record by hand
+    capsys.readouterr()
+    assert run(kb_ready, "validate") == 0
+    out = capsys.readouterr().out
+    assert message in out, out
+    assert run(kb_ready, *printed_command(out, "kblam review decide", challenge_binding(kb_ready))) == 0
+    capsys.readouterr()
+    assert run(kb_ready, "validate") == 0
+    assert record_of(load_view(kb_ready.cfg), "SC-0001").status == "stale"
+
+
+def test_an_open_records_stale_reference_names_the_retire_command_that_runs(kb_ready, source_repo, capsys):
+    """D49 for "the source changed since SC-0001 was written" on an OPEN challenge: the row is a warning
+    (exit 0), and the retire command the same output names runs on that state and leaves a clean tree."""
+    put(kb_ready, "SC", sc("open", basis=[basis(), other_basis(sha="a" * 64)]))
+    open_warning(kb_ready, "basis[1]: the source changed since SC-0001 was written"
+                 + retire("SC-0001", "evidence/2026-09-22-ratio/README.md"), capsys)
+
+
+def test_an_open_records_missing_reference_names_the_retire_command_that_runs(kb_ready, source_repo, capsys):
+    """D49 for "the working file <path> is missing" on an OPEN challenge: the row is a warning (exit 0),
+    and the retire command the same output names runs on that state and leaves a clean tree."""
+    put(kb_ready, "SC", sc("open", basis=[basis(), other_basis()]))
+    (kb_ready.root / "evidence/2026-09-22-ratio/README.md").unlink()
+    open_warning(kb_ready, "basis[1]: the working file evidence/2026-09-22-ratio/README.md is missing"
+                 + retire_missing("SC-0001"), capsys)
+
+
+def test_an_open_records_pinned_reference_names_the_retire_command_that_runs(kb_ready, source_repo, capsys):
+    """D49 for "the pinned version is not present" on an OPEN challenge: an open record may carry a
+    snapshot pin, the row is a warning (exit 0), and the retire command the same output names runs on
+    that state and leaves a clean tree."""
+    dirty = TRACE_TEXT + "Row 104: bytes 0x41 0x42\n"
+    source_repo.write(TRACE_PATH, dirty)
+    copy = "evidence/2026-09-28-trace-copy/trace.md"
+    kb_ready.write(copy, dirty)
+    put(kb_ready, "SC", sc("open", source=source(sha=hashlib.sha256(dirty.encode("utf-8")).hexdigest(),
+                                                 snapshot=copy)))
+    (kb_ready.root / copy).unlink()
+    source_repo.write(TRACE_PATH, dirty + "Row 105: bytes 0x51 0x52\n")
+    open_warning(kb_ready, "the pinned version is not present" + retire("SC-0001", TRACE, pinned=True), capsys)
+
+
 def test_the_new_challenge_command_the_pin_message_names_pins_a_committed_source(
         kb_ready, source_repo, capsys):
     """Where the owning worktree's HEAD holds the source's bytes, the message's first branch runs as
@@ -2073,7 +2224,7 @@ def test_a_stale_decision_evidence_reference_is_a_warning_while_open(kb_ready, s
                                         "provenance": "observed"}]}]
     put(kb_ready, "CU", data)
     assert messages_of(kb_ready) == [("warning", "decisions[0].evidence[0]: the working file "
-                                                 "evidence/gone.md is missing")]
+                                                 "evidence/gone.md is missing" + retire_missing("CU-0001"))]
 
 
 def test_a_missing_decision_evidence_reference_is_nothing_once_retired(kb_ready, source_repo):
@@ -2093,7 +2244,7 @@ def test_a_confirmed_challenges_decision_evidence_is_checked(kb_ready, source_re
     data["decisions"][0]["bind"] = subject_digest("SC", data)
     put(kb_ready, "SC", data)
     assert messages_of(kb_ready) == [("error", "decisions[0].evidence[0]: the working file "
-                                               "evidence/gone.md is missing")]
+                                               "evidence/gone.md is missing" + retire_missing("SC-0001"))]
 
 
 @pytest.mark.parametrize("kind,status", [("SC", "rejected"), ("SC", "stale"), ("CU", "withdrawn"),
@@ -2131,7 +2282,7 @@ def test_the_effective_decisions_missing_evidence_is_reported(kb_ready, source_r
                                          "provenance": "observed"}]
     put(kb_ready, "CU", data)
     assert messages_of(kb_ready) == [("error", "decisions[0].evidence[0]: the working file "
-                                               "evidence/gone.md is missing")]
+                                               "evidence/gone.md is missing" + retire_missing("CU-0001"))]
 
 
 @pytest.mark.parametrize("status", records.STATUSES["CT"])
