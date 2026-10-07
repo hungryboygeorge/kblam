@@ -25,6 +25,15 @@ STAGED = ".kblam/staging/F-0012-lamp.md"
 B_PATH = "findings/motor/F-0020-lamp.md"
 A_PATH = "findings/calibration/F-0012-lamp.md"
 POINTER = "Load the kblam-write skill for how to fix this."
+# The merge sentence `kblam rm`'s refusal for a linked finding gives, with no copy staged: the quantity
+# route first, one staged copy, and the removal before the put.
+MERGE = ("Merge the other way, in one staged copy of F-0012: kblam edit F-0012 stages one at "
+         f"{STAGED}. If F-0020 gives a quantity F-0012 lacks, kblam rm F-0020 --merged-into F-0012 is "
+         "refused for it: add only that quantity to that copy, leave F-0012's claim as it is installed, "
+         "and kblam put it; that put leaves nothing staged, so kblam edit F-0012 stages the next copy to "
+         "work in. Add what F-0020 states that F-0012 does not yet (its detail and quantities) to the "
+         "copy you are working in, run kblam rm F-0020 --merged-into F-0012, then kblam put that copy (a "
+         "put of F-0012 that states F-0020's fact is refused while F-0020 is installed)")
 
 
 def pair(kb, *, quantity: bool = False) -> None:
@@ -46,14 +55,15 @@ def edit_a(kb, old: str, new: str, *, quantity: str = "") -> str:
     return staged
 
 
-def staged_text(kb, staged: str) -> str:
-    return (kb.root / staged).read_text(encoding="utf-8")
+def add_quantity(path) -> None:
+    """Add B's quantity to a staged copy of A, leaving its claim as it is installed: the put the skill's
+    quantity route names first, which needs the quantity in A before the removal."""
+    path.write_bytes(path.read_text(encoding="utf-8").replace("verified:", QUANTITY + "verified:", 1).encode("utf-8"))
 
 
-def restage(kb, staged: str, old: str, new: str) -> None:
-    """Rewrite the staged copy in place (a refused put leaves it where it is)."""
-    path = kb.root / staged
-    path.write_bytes(staged_text(kb, staged).replace(old, new, 1).encode("utf-8"))
+def restate(path, old: str = A_CLAIM, new: str = A_NEW) -> None:
+    """State B's fact in a staged copy of A: the put the merge names last."""
+    path.write_bytes(path.read_text(encoding="utf-8").replace(old, new, 1).encode("utf-8"))
 
 
 def open_items(kb) -> list:
@@ -142,13 +152,11 @@ def test_the_merge_removes_the_duplicate_and_then_puts_after_k9(kb):
 
 
 def test_the_merge_moves_a_quantity_the_target_lacks_in_two_puts(jkb):
-    """B's quantity A lacks refuses the rm, so A goes in first with only that quantity added and its
-    claim left as it is; then the rm, then the claim."""
+    """The skill's quantity route, run literally: the rm is refused for B's quantity, so A goes in first
+    with only that quantity added and its claim left as it is; then the rm, then a fresh `kblam edit A`
+    with the rest of B's detail."""
     pair(jkb, quantity=True)
     jkb.fake.relations[(B_CLAIM, A_NEW)] = ("same_fact", 0.93, 0.91)
-    staged = edit_a(jkb, A_CLAIM, A_NEW, quantity=QUANTITY)
-    assert m.kblam(jkb, "put", staged).code == 4
-
     refused = m.kblam(jkb, "rm", "F-0020", "--merged-into", "F-0012")
     assert refused.code == 1
     assert refused.err == (
@@ -156,11 +164,13 @@ def test_the_merge_moves_a_quantity_the_target_lacks_in_two_puts(jkb):
         f"with the same name, value and unit; move it into F-0012 first (kblam edit F-0012), or keep "
         f"F-0020. findings/ is unchanged. {POINTER}\n")
 
-    restage(jkb, staged, A_NEW, A_CLAIM)                      # the claim back as it was, quantity kept
+    staged = m.ok(m.kblam(jkb, "edit", "F-0012"), "edit").out.strip()   # "kblam edit A": none staged
+    add_quantity(jkb.root / staged)                     # the quantity, A's claim left as it is
     assert m.ok(m.kblam(jkb, "put", staged), "put").code == 0
     m.ok(m.kblam(jkb, "rm", "F-0020", "--merged-into", "F-0012"), "rm")
-    staged2 = edit_a(jkb, A_CLAIM, A_NEW)                     # the rest of B's detail
-    assert m.ok(m.kblam(jkb, "put", staged2), "put").code == 0
+    again = m.ok(m.kblam(jkb, "edit", "F-0012"), "edit").out.strip()    # "kblam edit A again"
+    restate(jkb.root / again)                           # the rest of B's detail
+    assert m.ok(m.kblam(jkb, "put", again), "put").code == 0
     assert m.validate(jkb).code == 0
     assert items_output(jkb) == "kblam items: no open review, rejected or unchecked items\n"
     assert sorted(p.name for p in jkb.findings.rglob("*.md")) == ["F-0012-lamp.md", "INDEX.md"]
@@ -170,10 +180,9 @@ def test_the_merge_moves_a_quantity_the_target_lacks_in_two_puts(jkb):
 
 
 def sequence(kb, staged: str, claim: str) -> str:
-    """The commands the rm refusal names, in its order: add F's detail to the staged copy it named,
-    `kblam rm F-0020 --merged-into F-0012`, `kblam put <staged file>`. Returns the put's output."""
-    path = kb.root / staged
-    path.write_bytes(path.read_text(encoding="utf-8").replace(A_CLAIM, claim, 1).encode("utf-8"))
+    """The commands the rm refusal names, in its order: add what F-0020 states to the copy it named,
+    `kblam rm F-0020 --merged-into F-0012`, `kblam put <that copy>`. Returns the put's output."""
+    restate(kb.root / staged, A_CLAIM, claim)
     removed = m.ok(m.kblam(kb, "rm", "F-0020", "--merged-into", "F-0012"), "rm")
     assert f"kblam rm: removed F-0020 ({B_PATH}), merged into F-0012" in removed.out
     return m.ok(m.kblam(kb, "put", staged), "put").out
@@ -202,13 +211,7 @@ def test_the_linked_rm_sequence_succeeds_for_a_k9_duplicate(kb):
     """K9 variant: A's edited claim is B's claim, so the put the old text named first was refused while B
     was installed. The sequence the refusal now names removes B first, and doing exactly that succeeds."""
     ct, err = linked(kb)
-    assert ("Merge the other way: kblam edit F-0012 and add to the staged copy "
-            f"{STAGED} what F-0020 states that F-0012 does not yet (its detail and quantities), then kblam "
-            f"rm F-0020 --merged-into F-0012, then kblam put {STAGED} (a put of F-0012 that states F-0020's "
-            f"fact is refused while F-0020 is installed). If F-0020 gives a quantity F-0012 lacks, kblam rm "
-            f"refuses it: put {STAGED} with that quantity added and its claim left as it is, then kblam rm "
-            f"F-0020 --merged-into F-0012, then kblam edit F-0012 again, state F-0020's fact in its claim, "
-            f"and put {STAGED}.") in err
+    assert MERGE in err
     staged = m.ok(m.kblam(kb, "edit", "F-0012"), "edit").out.strip()   # "kblam edit F-0012"
     finish(kb, ct, sequence(kb, staged, A_NEW_K9))
 
@@ -217,7 +220,7 @@ def test_the_linked_rm_sequence_succeeds_for_a_same_fact_duplicate(jkb):
     """Jev variant: Jev reads A's edited claim as B's fact, so the put the old text named first exited 4
     while B was installed. The removal comes first now, so the put never meets the verdict."""
     ct, err = linked(jkb)
-    assert "then kblam rm F-0020 --merged-into F-0012, then kblam put" in err
+    assert "run kblam rm F-0020 --merged-into F-0012, then kblam put that copy" in err
     jkb.fake.relations[(B_CLAIM, A_NEW)] = ("same_fact", 0.93, 0.91)
     staged = m.ok(m.kblam(jkb, "edit", "F-0012"), "edit").out.strip()
     finish(jkb, ct, sequence(jkb, staged, A_NEW))
@@ -227,6 +230,6 @@ def test_the_linked_rm_sequence_succeeds_for_a_new_detail(kb):
     """The common case: A's edited claim adds B's detail without stating B's fact, so nothing is refused;
     the one sequence still removes B before the put."""
     ct, err = linked(kb)
-    assert "then kblam rm F-0020 --merged-into F-0012, then kblam put" in err
+    assert "run kblam rm F-0020 --merged-into F-0012, then kblam put that copy" in err
     staged = m.ok(m.kblam(kb, "edit", "F-0012"), "edit").out.strip()
     finish(kb, ct, sequence(kb, staged, A_NEW_DIFF))

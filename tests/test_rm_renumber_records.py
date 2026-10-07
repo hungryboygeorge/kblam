@@ -110,36 +110,37 @@ def message(command: str, text: str) -> str:
 # --- rm: the refusal texts -----------------------------------------------------------------------
 
 
-def merge_text(records: str, how: str, put: str) -> str:
-    """The merge-the-other-way refusal for a linked finding: who links it, what to add and where, and the
-    copy the sequence puts. The removal comes before the put in every state, and the second sentence is
-    the route for a quantity F-0012 lacks, which refuses the removal."""
+def merge_text(records: str, one: str, stale: str = "") -> str:
+    """The merge-the-other-way refusal for a linked finding: who links it, the one staged copy to work in,
+    and the sequence that copy runs. The quantity route comes first, so the author checks it before
+    choosing a route, and the removal comes before the put in every state."""
     return (f"F-0012 cannot be removed: {records} it, and kblam never removes a finding a review record "
-            f"links. findings/ is unchanged. Merge the other way: {how}, then kblam rm F-0020 --merged-into "
-            f"F-0012, then kblam put {put} (a put of F-0012 that states F-0020's fact is refused while "
-            f"F-0020 is installed). If F-0020 gives a quantity F-0012 lacks, kblam rm refuses it: put {put} "
-            f"with that quantity added and its claim left as it is, then kblam rm F-0020 --merged-into "
-            f"F-0012, then kblam edit F-0012 again, state F-0020's fact in its claim, and put "
-            f".kblam/staging/F-0012-sensor.md.")
+            f"links. findings/ is unchanged. Merge the other way, in one staged copy of F-0012: {one}. If "
+            f"F-0020 gives a quantity F-0012 lacks, kblam rm F-0020 --merged-into F-0012 is refused for it: "
+            f"add only that quantity to that copy, leave F-0012's claim as it is installed, and kblam put "
+            f"it; that put leaves nothing staged, so kblam edit F-0012 stages the next copy to work in. Add "
+            f"what F-0020 states that F-0012 does not yet (its detail and quantities) to the copy you are "
+            f"working in, run kblam rm F-0020 --merged-into F-0012, then kblam put that copy (a put of "
+            f"F-0012 that states F-0020's fact is refused while F-0020 is installed)") + stale + "."
 
 
-# What the refusal says to add and where, and the copy it says to put, for each staged-copy state.
-EDIT_AND_ADD = ("kblam edit F-0012 and add to the staged copy .kblam/staging/F-0012-sensor.md what F-0020 "
-                "states that F-0012 does not yet (its detail and quantities)")
-ADD_TO_STAGED = ("add to your staged copy .kblam/staging/F-0012-sensor.md what F-0020 states that F-0012 "
-                 "does not yet (its detail and quantities)")
-ADD_TO_ONE = ("add to one of your staged copies .kblam/staging/F-0012-other.md, "
-              ".kblam/staging/F-0012-sensor.md what F-0020 states that F-0012 does not yet (its detail and "
-              "quantities)")
-FRESH = ".kblam/staging/F-0012-sensor.md"
+# What the refusal names as the one staged copy to work in, per staged-copy state.
+EDIT_FRESH = "kblam edit F-0012 stages one at .kblam/staging/F-0012-sensor.md"
+ONE_STAGED = "your staged copy is .kblam/staging/F-0012-sensor.md"
+SEVERAL_STAGED = ("keep one of your staged copies .kblam/staging/F-0012-other.md, "
+                  ".kblam/staging/F-0012-sensor.md and delete the others, and work in that copy")
+# The last sentence, naming the records the put of the edited F-0012 lists as made stale.
+STALE_ONE = (". The edit makes CT-0003 stale until a reviewer rechecks and rebinds it; kblam put prints "
+             "the kblam review rebind command for it")
+STALE_EACH = (". The edit makes CT-0003, CU-0002 stale until a reviewer rechecks and rebinds each; kblam "
+              "put prints the kblam review rebind command for each")
 
 
 def test_rm_refuses_a_linked_finding_and_says_to_merge_the_other_way(kb):
     merge_pair(kb)
     ct(kb, "CT-0003", MINE)
-    assert refused(kb, "rm", "F-0012", "--merged-into", "F-0020") == message("rm", merge_text(
-        "review record CT-0003 links", EDIT_AND_ADD, FRESH)[:-1] + ". The edit makes CT-0003 stale until a "
-        "reviewer rechecks and rebinds it; kblam put prints the kblam review rebind command for it.")
+    assert refused(kb, "rm", "F-0012", "--merged-into", "F-0020") == message(
+        "rm", merge_text("review record CT-0003 links", EDIT_FRESH, STALE_ONE))
 
 
 def test_rm_names_every_record_and_each_one_the_edit_makes_stale(kb):
@@ -147,10 +148,8 @@ def test_rm_names_every_record_and_each_one_the_edit_makes_stale(kb):
     ct(kb, "CT-0003", MINE)
     cu(kb, "CU-0002", MINE)
     sc(kb, "SC-0004", "F-0012")
-    assert refused(kb, "rm", "F-0012", "--merged-into", "F-0020") == message("rm", merge_text(
-        "review records SC-0004, CT-0003, CU-0002 link", EDIT_AND_ADD, FRESH)[:-1] + ". The edit makes "
-        "CT-0003, CU-0002 stale until a reviewer rechecks and rebinds each; kblam put prints the kblam review "
-        "rebind command for each.")
+    assert refused(kb, "rm", "F-0012", "--merged-into", "F-0020") == message(
+        "rm", merge_text("review records SC-0004, CT-0003, CU-0002 link", EDIT_FRESH, STALE_EACH))
 
 
 @pytest.mark.parametrize("setup, records", [
@@ -164,17 +163,16 @@ def test_rm_leaves_the_stale_sentence_out_when_the_edit_makes_no_record_stale(kb
     put of the edited finding lists nothing as made stale, so the refusal says nothing about it."""
     merge_pair(kb)
     setup(kb)
-    assert refused(kb, "rm", "F-0012", "--merged-into", "F-0020") == message("rm", merge_text(
-        records, EDIT_AND_ADD, FRESH))
+    assert refused(kb, "rm", "F-0012", "--merged-into", "F-0020") == message(
+        "rm", merge_text(records, EDIT_FRESH))
 
 
 def test_rm_with_a_staged_copy_says_to_extend_and_put_that_copy(kb):
     merge_pair(kb)
     ct(kb, "CT-0003", MINE)
     m.ok(m.kblam(kb, "edit", "F-0012"))
-    assert refused(kb, "rm", "F-0012", "--merged-into", "F-0020") == message("rm", merge_text(
-        "review record CT-0003 links", ADD_TO_STAGED, FRESH)[:-1] + ". The edit makes CT-0003 stale until a "
-        "reviewer rechecks and rebinds it; kblam put prints the kblam review rebind command for it.")
+    assert refused(kb, "rm", "F-0012", "--merged-into", "F-0020") == message(
+        "rm", merge_text("review record CT-0003 links", ONE_STAGED, STALE_ONE))
 
 
 def test_rm_with_several_staged_copies_names_each(kb):
@@ -182,8 +180,8 @@ def test_rm_with_several_staged_copies_names_each(kb):
     sc(kb, "SC-0004", "F-0012")
     staged = m.ok(m.kblam(kb, "edit", "F-0012")).out.strip()
     kb.write(".kblam/staging/F-0012-other.md", (kb.root / staged).read_bytes())
-    assert refused(kb, "rm", "F-0012", "--merged-into", "F-0020") == message("rm", merge_text(
-        "review record SC-0004 links", ADD_TO_ONE, "the copy you edited"))
+    assert refused(kb, "rm", "F-0012", "--merged-into", "F-0020") == message(
+        "rm", merge_text("review record SC-0004 links", SEVERAL_STAGED))
 
 
 def test_rm_refuses_when_a_record_also_links_the_target(kb):
@@ -209,62 +207,78 @@ def test_rm_names_a_record_that_links_both_findings_once(kb):
 # --- rm: the commands the refusal names (D49) ----------------------------------------------------
 
 
-def extend(path, detail: str = "The warm-up drift of F-0020 settles within 90 seconds.") -> None:
-    """Add F-0020's quantity and detail to a staged copy of F-0012, leaving its claim as it is: the put
-    the refusal names before the removal, which needs the quantity installed."""
-    text = path.read_text(encoding="utf-8").replace(
-        "verified:", 'quantities:\n  - {name: warm-up time, value: 90, unit: "s"}\nverified:', 1)
-    path.write_bytes((text + f"\n{detail}\n").encode("utf-8"))
+# The one staged copy each state works in, as the refusal names it, and the copies staged before it.
+ACQUIRE = {"none": EDIT_FRESH, "one": ONE_STAGED, "several": SEVERAL_STAGED}
+KEPT = ".kblam/staging/F-0012-other.md"
 
 
-def restate(path, old: str = CLAIM_A, new: str = CLAIM_B) -> None:
-    """State F-0020's fact in a staged copy of F-0012: the put the refusal names last."""
-    path.write_bytes(path.read_text(encoding="utf-8").replace(old, new, 1).encode("utf-8"))
+def stage(kb, variant: str) -> None:
+    """Stage the copies the refusal will name: `kblam edit F-0012` for one, and a second copy of it for
+    several."""
+    first = m.ok(m.kblam(kb, "edit", "F-0012"), "edit").out.strip()
+    if variant == "several":
+        kb.write(KEPT, (kb.root / first).read_bytes())
 
 
-def test_the_merge_the_other_way_succeeds_as_the_refusal_names_it(kb):
-    """D49: F-0020 gives a quantity F-0012 lacks, so the refusal's removal is refused until F-0012 has
-    it. The two-put route it names runs in order, the rebind the last put prints succeeds, and validate
-    passes with nothing open."""
-    merge_pair(kb)
-    task = m.task(kb, "F-0012", by="reviewer-a", proponent="researcher-a")
-    linked = refused(kb, "rm", "F-0012", "--merged-into", "F-0020")
-    assert f"The edit makes {task} stale" in linked
+def work_in(kb, variant: str) -> str:
+    """The one staged copy to work in, obtained as the refusal names it: the copy `kblam edit F-0012`
+    prints when none is staged, the staged copy itself for one, and the kept copy (the other deleted) for
+    several. Returns its repository-relative path."""
+    if variant == "none":
+        return m.ok(m.kblam(kb, "edit", "F-0012"), "edit").out.strip()
+    if variant == "several":
+        (kb.root / ".kblam/staging/F-0012-sensor.md").unlink()      # keep one, delete the others
+        return KEPT
+    return ".kblam/staging/F-0012-sensor.md"
 
-    staged = m.ok(m.kblam(kb, "edit", "F-0012"), "edit").out.strip()   # "kblam edit F-0012": none staged
-    path = kb.root / staged
-    extend(path)
-    assert "which F-0012 does not give" in refused(kb, "rm", "F-0020", "--merged-into", "F-0012")
-    put = m.put_ok(kb, path)                            # the put the refusal names first: the quantity only
-    assert (f"kblam put: {task} is now stale (this put changed F-0012, which it is bound to); a reviewer "
+
+def add_quantity(path) -> None:
+    """Add only F-0020's quantity to a staged copy of F-0012, leaving its claim as it is installed: the put
+    the refusal names first, which needs the quantity installed before the removal."""
+    path.write_bytes(path.read_text(encoding="utf-8").replace(
+        "verified:", 'quantities:\n  - {name: warm-up time, value: 90, unit: "s"}\nverified:', 1).encode("utf-8"))
+
+
+def add_detail(path, detail: str = "The warm-up drift of F-0020 settles within 90 seconds.") -> None:
+    """Add what F-0020 states that F-0012 does not yet to a staged copy of F-0012: the put the refusal
+    names after the removal."""
+    path.write_bytes((path.read_text(encoding="utf-8") + f"\n{detail}\n").encode("utf-8"))
+
+
+def stale_line(task: str) -> str:
+    """The put's sentence naming a CT the put made stale, as the rebind it prints covers it."""
+    return (f"kblam put: {task} is now stale (this put changed F-0012, which it is bound to); a reviewer "
             f"rechecks it and runs kblam review rebind {task} --by NAME --reason TEXT --expect D. kblam "
-            f"validate fails until then") in put.out
+            f"validate fails until then")
 
+
+@pytest.mark.parametrize("staged", ["none", "one", "several"])
+@pytest.mark.parametrize("quantity", [False, True], ids=["no-quantity", "quantity"])
+def test_the_merge_the_other_way_runs_as_the_refusal_names_it(kb, staged, quantity):
+    """D49: for each staged-copy state and each route, the commands the refusal names run in its order, as
+    an agent would — the copy `kblam edit` prints, never one re-staged by hand — the rebind the last put
+    prints succeeds, validate passes and nothing is left open."""
+    merge_pair(kb, quantity=quantity)
+    task = m.task(kb, "F-0012", by="reviewer-a", proponent="researcher-a")
+    if staged != "none":
+        stage(kb, staged)                       # the copies the refusal names
+    linked = refused(kb, "rm", "F-0012", "--merged-into", "F-0020")
+    assert f"in one staged copy of F-0012: {ACQUIRE[staged]}" in linked
+    if quantity:
+        assert "which F-0012 does not give" in refused(kb, "rm", "F-0020", "--merged-into", "F-0012")
+
+    path = kb.root / work_in(kb, staged)
+    if quantity:
+        add_quantity(path)                      # only that quantity, F-0012's claim as it is installed
+        assert stale_line(task) in m.put_ok(kb, path).out
+        path = kb.root / m.ok(m.kblam(kb, "edit", "F-0012"), "edit").out.strip()   # kblam edit F-0012
+    add_detail(path)                            # what F-0020 states that F-0012 does not yet
     removed = m.ok(m.kblam(kb, "rm", "F-0020", "--merged-into", "F-0012"), "rm")
     assert "kblam rm: removed F-0020 (findings/motor/F-0020-motor.md), merged into F-0012" in removed.out
-
-    again = kb.root / m.ok(m.kblam(kb, "edit", "F-0012"), "edit").out.strip()
-    restate(again)                                      # kblam edit F-0012 again and state F-0020's fact
-    m.put_ok(kb, again)
-
-    m.ok(m.rebind(kb, task, by="reviewer-b"), "review rebind")
-    assert m.validate(kb).code == 0
-    assert m.kblam(kb, "items").out == "kblam items: no open review, rejected or unchecked items\n"
-
-
-def test_the_merge_the_other_way_succeeds_from_the_staged_copy(kb):
-    """D49 for the staged-copy wording, with no quantity in the way: the refusal names the staged copy,
-    and adding to it, removing, then putting it goes through, rebind included."""
-    merge_pair(kb, quantity=False)
-    task = m.task(kb, "F-0012", by="reviewer-a", proponent="researcher-a")
-    path = kb.root / m.ok(m.kblam(kb, "edit", "F-0012")).out.strip()
-    linked = refused(kb, "rm", "F-0012", "--merged-into", "F-0020")
-    assert "add to your staged copy .kblam/staging/F-0012-sensor.md what F-0020 states" in linked
-
-    restate(path)
-    m.ok(m.kblam(kb, "rm", "F-0020", "--merged-into", "F-0012"), "rm")
-    m.put_ok(kb, path)
+    put = m.put_ok(kb, path)                    # the put the refusal names last, which prints the rebind
+    assert f"kblam review rebind {task} --by NAME --reason TEXT --expect D" in put.out
     assert not (kb.findings / "motor" / "F-0020-motor.md").exists()
+
     m.ok(m.rebind(kb, task, by="reviewer-b"), "review rebind")
     assert m.validate(kb).code == 0
     assert m.kblam(kb, "items").out == "kblam items: no open review, rejected or unchecked items\n"

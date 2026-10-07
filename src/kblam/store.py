@@ -855,9 +855,20 @@ def _removal_problems(cfg: Config, view: KBView, finding: Finding, target: Findi
                 if not any(key == k and unit == u and not _differ(value, v, tolerance) for k, _n, v, u in theirs)]
         if lost:
             listed = _and([f"{name} = {_format_value(value, unit)}" for name, value, unit in lost])
+            them = "it" if len(lost) == 1 else "them"
+            # `kblam edit` refuses while a copy of the target is staged, so that state names the copy instead
+            staged = sorted(display_path(cfg, p) for n, p in _ids_in(cfg.staging_dir) if format_id(n) == target_id)
+            if len(staged) == 1:
+                fix = (f"add {them} to your staged copy {staged[0]}, with {target_id}'s claim as it is "
+                       f"installed, and kblam put that copy")
+            elif len(staged) > 1:
+                fix = (f"keep one of your staged copies {', '.join(staged)} and delete the others, add {them} "
+                       f"to the copy you keep, with {target_id}'s claim as it is installed, and kblam put that "
+                       f"copy")
+            else:
+                fix = f"kblam edit {target_id}"
             problems.append(f"{finding_id} gives {listed}, which {target_id} does not give with the same name, "
-                            f"value and unit; move {'it' if len(lost) == 1 else 'them'} into {target_id} first "
-                            f"(kblam edit {target_id}), or keep {finding_id}")
+                            f"value and unit; move {them} into {target_id} first ({fix}), or keep {finding_id}")
     return problems
 
 
@@ -1139,7 +1150,9 @@ def _linked_removal(cfg: Config, view: KBView, finding: Finding, target: Finding
     """rm's refusal of a finding review records link (SPEC §7): merge the other way, unless a record also
     links the target. The staged copies and the records the edit makes stale are named as SPEC §7 says, and
     the removal is named before the put: a put of the finding that states the target's fact is refused while
-    the target is installed, so the merge removes the target first."""
+    the target is installed, so the merge removes the target first. The quantity route comes first, so the
+    author checks it before choosing, and the whole merge works in one staged copy: `kblam edit` only when
+    none is staged, or again after a put has consumed the copy."""
     finding_id, target_id = finding.file_id, target.file_id
     mine = [rec.id for rec in linked]
     theirs = [rec.id for rec in _links(view, target_id)[target.path]]
@@ -1152,20 +1165,21 @@ def _linked_removal(cfg: Config, view: KBView, finding: Finding, target: Finding
     staged = sorted(display_path(cfg, p) for n, p in _ids_in(cfg.staging_dir) if format_id(n) == finding_id)
     # the copy `kblam edit` stages when none is staged yet: it copies the installed file's own name
     fresh = display_path(cfg, cfg.staging_dir / finding.name)
-    lacks = f"what {target_id} states that {finding_id} does not yet (its detail and quantities)"
     if not staged:
-        how, copy = f"kblam edit {finding_id} and add to the staged copy {fresh} {lacks}", fresh
+        one = f"kblam edit {finding_id} stages one at {fresh}"
     elif len(staged) == 1:
-        how, copy = f"add to your staged copy {staged[0]} {lacks}", staged[0]
+        one = f"your staged copy is {staged[0]}"
     else:
-        how, copy = f"add to one of your staged copies {', '.join(staged)} {lacks}", "the copy you edited"
+        one = (f"keep one of your staged copies {', '.join(staged)} and delete the others, and work in that "
+               f"copy")
     text = (f"{head}, and kblam never removes a finding a review record links. {cfg.findings_dir}/ is unchanged. "
-            f"Merge the other way: {how}, then kblam rm {target_id} --merged-into {finding_id}, then kblam put "
-            f"{copy} (a put of {finding_id} that states {target_id}'s fact is refused while {target_id} is "
-            f"installed). If {target_id} gives a quantity {finding_id} lacks, kblam rm refuses it: put {copy} "
-            f"with that quantity added and its claim left as it is, then kblam rm {target_id} --merged-into "
-            f"{finding_id}, then kblam edit {finding_id} again, state {target_id}'s fact in its claim, and put "
-            f"{fresh}")
+            f"Merge the other way, in one staged copy of {finding_id}: {one}. If {target_id} gives a quantity "
+            f"{finding_id} lacks, kblam rm {target_id} --merged-into {finding_id} is refused for it: add only "
+            f"that quantity to that copy, leave {finding_id}'s claim as it is installed, and kblam put it; that "
+            f"put leaves nothing staged, so kblam edit {finding_id} stages the next copy to work in. Add what "
+            f"{target_id} states that {finding_id} does not yet (its detail and quantities) to the copy you are "
+            f"working in, run kblam rm {target_id} --merged-into {finding_id}, then kblam put that copy (a put "
+            f"of {finding_id} that states {target_id}'s fact is refused while {target_id} is installed)")
     # the records the put of the edited finding lists as made stale (_made_stale): bound to this file, not retired
     stale = [rec.id for rec in linked
              if rec.kind in BINDINGS and rec.status not in RETIRED_STATUSES and _bound(cfg, rec, finding)]

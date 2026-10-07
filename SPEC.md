@@ -1498,15 +1498,15 @@ findings, and leaves `findings/` unchanged. When no record links the target and 
 is staged, its refusal is:
 
 "kblam rm: F-0012 cannot be removed: review record CT-0003 links it, and kblam never removes a
-finding a review record links. findings/ is unchanged. Merge the other way: kblam edit F-0012 and
-add to the staged copy .kblam/staging/F-0012-sensor.md what F-0020 states that F-0012 does not yet
-(its detail and quantities), then kblam rm F-0020 --merged-into F-0012, then kblam put
-.kblam/staging/F-0012-sensor.md (a put of F-0012 that states F-0020's fact is refused while F-0020
-is installed). If F-0020 gives a quantity F-0012 lacks, kblam rm refuses it: put
-.kblam/staging/F-0012-sensor.md with that quantity added and its claim left as it is, then kblam rm
-F-0020 --merged-into F-0012, then kblam edit F-0012 again, state F-0020's fact in its claim, and put
-.kblam/staging/F-0012-sensor.md. The edit makes CT-0003 stale until a reviewer rechecks and rebinds
-it; kblam put prints the kblam review rebind command for it."
+finding a review record links. findings/ is unchanged. Merge the other way, in one staged copy of
+F-0012: kblam edit F-0012 stages one at .kblam/staging/F-0012-sensor.md. If F-0020 gives a quantity
+F-0012 lacks, kblam rm F-0020 --merged-into F-0012 is refused for it: add only that quantity to that
+copy, leave F-0012's claim as it is installed, and kblam put it; that put leaves nothing staged, so
+kblam edit F-0012 stages the next copy to work in. Add what F-0020 states that F-0012 does not yet
+(its detail and quantities) to the copy you are working in, run kblam rm F-0020 --merged-into
+F-0012, then kblam put that copy (a put of F-0012 that states F-0020's fact is refused while F-0020
+is installed). The edit makes CT-0003 stale until a reviewer rechecks and rebinds it; kblam put
+prints the kblam review rebind command for it."
 
 - The last sentence names the CT and CU records that the put of the edited F-0012 will list as made
   stale (§5.2.4): those whose binding matches F-0012 and whose status is neither `stale` nor
@@ -1516,26 +1516,32 @@ it; kblam put prints the kblam review rebind command for it."
   rebind command itself: `review rebind` needs `--by`, `--reason` and `--expect`, a closed task
   also `--evidence`, and a closed record a reviewer independent of it (§5.2.2), and the put prints
   the full command for each record.
-- When a copy of F-0012 is staged, `kblam edit F-0012` would refuse, so "kblam edit F-0012 and add
-  to the staged copy .kblam/staging/F-0012-sensor.md" becomes "add to your staged copy <staged
-  path>"; `<staged path>` is the repository-relative path of the staged file, for example
-  `.kblam/staging/F-0012-sensor.md`, and with several staged copies of F-0012 it reads "add to one
-  of your staged copies <path 1>, <path 2>". The copy the sequence puts is that path, or "the copy
-  you edited" with several.
+- The refusal names one staged copy of F-0012 to work in, for the state it finds: with none staged,
+  "kblam edit F-0012 stages one at <fresh>", where `<fresh>` is the repository-relative path of the
+  copy `kblam edit` would stage (it copies the installed file's own name), for example
+  `.kblam/staging/F-0012-sensor.md`; with one staged, "your staged copy is <staged path>"; with
+  several, "keep one of your staged copies <path 1>, <path 2> and delete the others, and work in
+  that copy". Every later step that needs a copy says "the copy you are working in", and `kblam edit
+  F-0012` is named only when no copy is staged or after a put has consumed one: a put moves the
+  staged file into `findings/`, so the next copy `kblam edit` stages can carry a different name, and
+  the refusal never computes a path from the installed name.
 - **The removal runs before the put.** A put of F-0012 that states F-0020's fact is refused while
   F-0020 is installed: K9 or Jev's `same_fact` sees two installed findings stating one fact. So the
   sequence edits a staged copy to add what F-0012 lacks, removes F-0020, and only then puts the
   copy.
 - **When F-0020 gives a quantity F-0012 lacks**, `kblam rm F-0020 --merged-into F-0012` refuses: a
-  quantity of the finding being removed is missing from the target. The second sentence is the
-  two-put route: put the copy with that quantity added and F-0012's claim left as it is, so the put
-  states nothing F-0020 already states; remove F-0020; then edit F-0012 again to state F-0020's
-  fact in its claim and put it.
-- The commands it names: `kblam edit F-0012` succeeds because no copy is staged. `kblam rm F-0020
-  --merged-into F-0012` is named for the state after the edit, in which no record links F-0020 and
-  F-0020 gives no quantity F-0012 lacks; `rm`'s own refusals for other problems (a finding that
-  depends on F-0020, F-0012 itself listing F-0020 in `depends_on`) still apply and name their own
-  fix. A rebind that cannot keep a use's excerpt refuses and says to stage a new use (§5.2.5).
+  quantity of the finding being removed is missing from the target. The refusal names this route
+  first, so the author checks it before choosing: add only that quantity to the copy, leaving
+  F-0012's claim as it is installed, so the put states nothing F-0020 already states; put the copy,
+  which consumes it; then `kblam edit F-0012` stages the next copy to work in, and the rest of the
+  sequence follows.
+- The commands it names run in the order given, each in the state it is named for. With no copy
+  staged, `kblam edit F-0012` succeeds and prints the path the refusal named. `kblam rm F-0020
+  --merged-into F-0012` is named for the state in which no record links F-0020 and F-0020 gives no
+  quantity F-0012 lacks — after the put, when the quantity route was taken; `rm`'s own refusals for
+  other problems (a finding that depends on F-0020, F-0012 itself listing F-0020 in `depends_on`)
+  still apply and name their own fix. A rebind that cannot keep a use's excerpt refuses and says to
+  stage a new use (§5.2.5).
 
 When a record also links the target, there is no way round, and the refusal is:
 
@@ -2197,13 +2203,13 @@ librarian's agent type is listed there.
   Jev misread it; otherwise the author edits as the reject says.
 - **For each review item** it reads both findings and their cited evidence, then takes one of
   three actions:
-  - **Merge.** A real `same_fact` or `restates_and_extends` restatement is merged: it
-    `kblam edit`s the existing finding and adds to the staged copy what the new finding states
-    that the existing one does not yet, removes the new finding with `kblam rm <id>
-    --merged-into <existing>`, then puts the copy (§7). Where the removed finding gives a quantity
-    the existing one lacks, `rm` refuses: the copy is put with that quantity added and the
-    existing claim left as it is, the new finding is removed, and the existing finding is edited
-    again to state the new fact and put.
+  - **Merge.** A real `same_fact` or `restates_and_extends` restatement is merged in one staged
+    copy of the existing finding (`kblam edit` when none is staged). Where the removed finding gives
+    a quantity the existing one lacks, `rm` refuses, so that put comes first: the quantity is added
+    to the copy with the existing claim left as it is, the copy is put, and `kblam edit` stages the
+    next copy. The copy then takes what the new finding states that the existing one does not yet,
+    the new finding is removed with `kblam rm <id> --merged-into <existing>`, and the copy is put
+    (§7).
   - **Close.** It runs `kblam resolve --distinct` only when Jev misread the item: a pair of
     distinct facts, or a direct statement read as a correction. It writes the reason for a later
     reader.
@@ -2330,9 +2336,8 @@ a skill would miss the moments it is for; writing guidance loaded into every rea
       whose write raised the item. The one exception is the librarian closing a `low_confidence`
       item its own write raised (§8.1). An author sends the IDs to the librarian and carries on;
     - the merge rule: a real `same_fact` or `restates_and_extends` restatement is merged into the
-      existing finding, by adding what the new finding states to the existing finding's staged
-      copy, removing the new finding with `kblam rm` first, then putting the copy (§7), with the
-      two-put route where the removal is refused for a quantity;
+      existing finding in one staged copy, removing the new finding with `kblam rm` before the put
+      (§7), with the two-put route first where the removal is refused for a quantity;
     - that `kblam rm` and `kblam renumber` refuse a finding a review record links, since records
       never follow a finding: the author does what the refusal says (merge the other way, renumber
       the other file), and when it says to tell the user, stops and tells them (§7);
@@ -3193,12 +3198,12 @@ exemption included)
   (§5.2.6, §8).
 - **The merge removes the other finding before the put (user).** A put of the surviving finding
   that states the removed finding's fact is refused while that finding is installed (K9 or Jev's
-  `same_fact`), so the refusal now says to add what the target states to the staged copy, run
-  `kblam rm <target> --merged-into <survivor>`, then put the copy. Where the removed finding gives
-  a quantity the survivor lacks, `rm` refuses it, so the two-put route follows: put the copy with
-  the quantity added and the survivor's claim left as it is, remove the target, edit the survivor
-  again to state the fact, and put (§7). The "merge the other way" direction for a linked finding
-  is unchanged (user, 2026-10-05).
+  `same_fact`), so the refusal says to work in one staged copy of the survivor, add what the target
+  states that the survivor does not yet, run `kblam rm <target> --merged-into <survivor>`, then put
+  the copy. Where the removed finding gives a quantity the survivor lacks, `rm` refuses it, so that
+  route is named first: put the copy with the quantity added and the survivor's claim left as it
+  is, remove the target, edit the survivor again, and put (§7). The refusal for a linked finding
+  names the same order (user, 2026-10-05; user, 2026-10-06).
 - **kblam is run by agents (user, 2026-10-06).** The adjudicator and the record reviewers are
   agents; only a `kblam.toml` change (with `kblam approve-config`) and `kblam recheck`'s approval
   of a command need a person (§8, §8.3).

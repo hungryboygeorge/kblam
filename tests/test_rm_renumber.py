@@ -119,6 +119,58 @@ def test_rm_refuses_a_quantity_the_target_does_not_give(kb, capsys, target_extra
             "unit; move it into F-0001 first (kblam edit F-0001), or keep F-0002") in err
 
 
+def test_rm_names_the_staged_copy_of_the_target_when_one_is_staged(kb, capsys):
+    """A copy of the target is staged, so `kblam edit F-0001` would be refused: the refusal names that copy
+    instead, and the commands it names — add the quantity to that copy with the target's claim as it is
+    installed, put it, then rm — run in its order (D49)."""
+    kb.add("F-0001", "sensor", CLAIM_A)
+    kb.add("F-0002", "motor", CLAIM_B, topic="motor", extra=quantity("curve ratio", 1.0017))
+    assert run(kb, "edit", "F-0001") == 0
+    staged = capsys.readouterr().out.strip()
+    shown = ".kblam/staging/F-0001-sensor.md"
+    assert staged.replace("\\", "/").endswith(shown)
+
+    err = refused(kb, capsys, "rm", "F-0002", "--merged-into", "F-0001")
+    assert err == ("kblam rm: F-0002 cannot be removed: F-0002 gives curve ratio = 1.0017 ratio, which "
+                   "F-0001 does not give with the same name, value and unit; move it into F-0001 first "
+                   f"(add it to your staged copy {shown}, with F-0001's claim as it is installed, and "
+                   f"kblam put that copy), or keep F-0002. findings/ is unchanged. {POINTER}")
+
+    path = kb.root / staged                       # the commands it names, run as an agent would
+    path.write_bytes(path.read_text(encoding="utf-8").replace(
+        "verified:", quantity("curve ratio", 1.0017) + "verified:", 1).encode("utf-8"))
+    assert run(kb, "put", staged) == 0
+    assert run(kb, "rm", "F-0002", "--merged-into", "F-0001") == 0
+    assert not (kb.findings / "motor" / "F-0002-motor.md").exists()
+
+
+def test_rm_with_several_staged_copies_says_to_keep_one(kb, capsys):
+    """Two copies of the target are staged: the refusal says to keep one and delete the other, and doing
+    that, adding the quantity and putting the kept copy unblocks the rm (D49)."""
+    kb.add("F-0001", "sensor", CLAIM_A)
+    kb.add("F-0002", "motor", CLAIM_B, topic="motor", extra=quantity("curve ratio", 1.0017))
+    assert run(kb, "edit", "F-0001") == 0
+    staged = capsys.readouterr().out.strip()
+    shown = ".kblam/staging/F-0001-sensor.md"
+    kept = ".kblam/staging/F-0001-other.md"
+    kb.write(kept, (kb.root / staged).read_bytes())
+
+    err = refused(kb, capsys, "rm", "F-0002", "--merged-into", "F-0001")
+    assert err == ("kblam rm: F-0002 cannot be removed: F-0002 gives curve ratio = 1.0017 ratio, which "
+                   "F-0001 does not give with the same name, value and unit; move it into F-0001 first "
+                   f"(keep one of your staged copies {kept}, {shown} and delete the others, add it to the "
+                   "copy you keep, with F-0001's claim as it is installed, and kblam put that copy), or "
+                   f"keep F-0002. findings/ is unchanged. {POINTER}")
+
+    (kb.root / shown).unlink()                    # the commands it names, run as an agent would
+    path = kb.root / kept
+    path.write_bytes(path.read_text(encoding="utf-8").replace(
+        "verified:", quantity("curve ratio", 1.0017) + "verified:", 1).encode("utf-8"))
+    assert run(kb, "put", str(path)) == 0
+    assert run(kb, "rm", "F-0002", "--merged-into", "F-0001") == 0
+    assert not (kb.findings / "motor" / "F-0002-motor.md").exists()
+
+
 @pytest.mark.parametrize("target_extra, tolerance", [
     (quantity("Curve   RATIO", 1.0017, "  ratio "), ""),  # names compare as §6.3 does, units after collapsing
     (quantity("curve ratio", 1.0018), "quantity_rel_tolerance = 0.001\n"),

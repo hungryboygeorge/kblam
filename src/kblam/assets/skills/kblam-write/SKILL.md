@@ -282,16 +282,18 @@ whose write raised it. The one exception: the librarian may close a `low_confide
 write raised, with a written reason. An author sends the item IDs to the librarian and carries on.
 
 - A real restatement (`same_fact`, `restates_and_extends`) is merged: the finding that stays, A,
-  takes the other finding B's detail, and B is removed with `kblam rm B --merged-into A`. Remove B
-  before the put, not after: `kblam edit A`, add B's detail to the staged copy,
-  `kblam rm B --merged-into A`, then `kblam put <staged file>`; the removal leaves A's bytes
-  alone, so the staged copy still puts. A put of A that states B's fact is refused while B is
-  installed, by K9 ("claim duplicates B") or by a `same_fact` reject (exit 4) whose text says to
-  edit B: two findings that state one fact cannot both be in `{{kb_root}}/`, and here B is the one
-  being merged away, so remove it instead of editing it. When B gives a quantity A lacks,
-  `kblam rm B` is refused for it: `kblam edit A`, add the quantity with its value and unit and leave
-  the claim as it is, put it, then `kblam rm B --merged-into A`, then `kblam edit A` again, add the
-  rest of B's detail and put it. Deleting a finding file any other way is denied.
+  takes the other finding B's detail, and B is removed with `kblam rm B --merged-into A`. Work in
+  one staged copy of A (`kblam edit A` if none is staged; with several, keep one and delete the
+  others). When B gives a quantity A lacks, `kblam rm B --merged-into A` is refused for it: leave
+  A's claim as it is installed in that copy, add the quantity with its value and unit, put the copy,
+  then `kblam rm B --merged-into A`, then `kblam edit A` again and work in the copy it prints. Add
+  what B states that A does not yet (its detail and quantities) to the copy you are working in,
+  `kblam rm B --merged-into A`, then `kblam put <staged file>`; remove B before the put, not after,
+  because a put of A that states B's fact is refused while B is installed, by K9 ("claim duplicates
+  B") or by a `same_fact` reject (exit 4) whose text says to edit B: two findings that state one
+  fact cannot both be in `{{kb_root}}/`, and here B is the one being merged away, so remove it
+  instead of editing it. The removal leaves A's bytes alone, so the staged copy still puts.
+  Deleting a finding file any other way is denied.
 - `kblam rm` and `kblam renumber` refuse a finding that a review record links (records never
   follow a finding): do what the refusal says (merge the other way, removing the other finding
   before the put, or renumber the other file), and when it says to tell the user, stop and tell
