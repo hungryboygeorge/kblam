@@ -3,19 +3,26 @@
 A finding's optional `check:` names a command whose re-run reproduces its key number. The string is
 written by an agent, reaches every clone through `git pull`, and neither the K rules nor Jev look at
 it. So kblam runs one only here, never from a hook, `validate`, `put`, `check` or `audit`, and only
-after a person has approved it on this machine. An approval covers the finding ID, the command string
+after it has been approved on this machine. An approval covers the finding ID, the command string
 exactly as written and the content of every repository file its arguments name, so a changed command
-or a changed script needs a person again. A person approves at an interactive terminal, which an
-agent's shell is not. Without a terminal the approved commands run and every other one is reported as
-not approved.
+or a changed script needs approving again.
+
+Who approves depends on `[kb] recheck_person_approval`. With it false (the default) an agent may
+approve: without a terminal, each new or changed command is shown in full, with a digest naming the
+command and files it would approve, and the agent approves that exact digest with
+`kblam recheck F-NNNN --approve <digest>`. With it true only a person approves, at an interactive
+terminal, which an agent's shell is not, and `--approve` is refused. Either way the approved commands
+run, and every other one is reported as not approved.
 
 The approvals live in the repository's git directory (`.git/kblam/recheck-approved.jsonl`, shared by
 its linked work trees), not in `.kblam/`: a pull writes tracked files over ignored ones, so a commit
 could otherwise hold approvals for every clone, while git refuses any path with a `.git` component.
-The PreToolUse hook denies agents writes there. Outside a git work tree recheck runs nothing.
+Each line records who approved, "person" or "agent"; a line written before kblam recorded that reads
+as a person's. The PreToolUse hook denies agents writes there. Outside a git work tree recheck runs
+nothing.
 
 A command is split into arguments by POSIX shell rules on every platform and run without a shell, so
-the person approves exactly the program and arguments that run. It runs without the environment
+an approval is for exactly the program and arguments that run. It runs without the environment
 variable the Jev API key is read from. Its output goes to a new file that then replaces
 `.kblam/recheck/<ID>.log`, and the log line is refused where `.kblam/recheck.jsonl` is a symbolic
 link, so a link placed there never redirects kblam's writes. Like `approve-config`, this keeps a
@@ -55,6 +62,9 @@ OUTPUT_DIR = "recheck"                     # .kblam/recheck/F-NNNN.log: the outp
 TAIL_LINES = 20                            # output lines printed for a check that failed
 TAIL_WIDTH = 300                           # characters printed of one such line
 BATCH_SUFFIXES = (".bat", ".cmd")          # Windows runs these through cmd.exe, which re-parses arguments
+# The two check problems that name no step the reader can take, so cli._approve adds one when it refuses
+# to approve such a check (SPEC §7).
+NO_STEP_PROBLEMS = ("was not found on PATH", "is not an executable file")
 
 
 class RecheckError(Exception):
@@ -70,6 +80,14 @@ def command_digest(command: str) -> str:
     return hashlib.sha256(command.encode("utf-8", "surrogatepass")).hexdigest()
 
 
+def approval_digest(check: Check) -> str:
+    """12 hex characters naming exactly what approving `check` covers: its finding ID, the sha256 of its
+    check: string and the sha256 of every repository file the command names. It changes whenever any of
+    those does, so a digest read before a change no longer approves the command that would run."""
+    covered = {"id": check.finding_id, "command": check.digest, "files": check.files}
+    return hashlib.sha256(json.dumps(covered, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+
+
 @dataclass
 class Check:
     """One finding's check: command, as this run shows, approves and runs it."""
@@ -78,8 +96,9 @@ class Check:
     command: str                                          # exactly as the finding holds it
     argv: list[str] = field(default_factory=list)
     program: str | None = None                            # the file argv[0] names (find_program)
-    files: dict[str, str] = field(default_factory=dict)  # repository files the arguments name -> sha256
+    files: dict[str, str] = field(default_factory=dict)  # repository files an approval covers -> sha256
     problem: str | None = None                            # why it cannot run at all
+    problem_step: bool = False                            # whether problem already says what to do about it
 
     @property
     def digest(self) -> str:
@@ -136,12 +155,17 @@ def _check(cfg: Config, finding: Finding, command: str) -> Check:
     except ValueError as exc:
         check.problem = (f"its check: cannot be split into a program and arguments ({exc}); fix the quoting "
                          f"with kblam edit {finding.file_id}")
+        check.problem_step = True
         return check
     if not check.argv or not check.argv[0]:
         check.problem = f"its check: names no program; fix it with kblam edit {finding.file_id}"
+        check.problem_step = True
         return check
-    check.files = named_files(cfg.repo_root, check.argv)
     check.program, check.problem = find_program(check.argv[0], cfg.repo_root)
+    check.files = check_files(cfg.repo_root, check.argv, check.program)
+    # A problem that already says what to do keeps it; the two that do not -- no program on PATH, not an
+    # executable file -- get the "leave it" step when kblam refuses to approve the check (cli._approve).
+    check.problem_step = check.problem is not None and not check.problem.endswith(NO_STEP_PROBLEMS)
     return check
 
 
@@ -170,13 +194,31 @@ def named_files(root: Path, argv: list[str]) -> dict[str, str]:
     return dict(sorted(files.items()))
 
 
+def check_files(root: Path, argv: list[str], program: str | None) -> dict[str, str]:
+    """Every repository file an approval of this command covers: the ones the arguments name, plus the
+    program file that would run when it is a regular file inside the repository. Windows resolves a bare
+    name through PATHEXT (`tools/run` runs `tools/run.exe`) and through every absolute PATH entry,
+    including one inside the repository, so without the second part the program that runs could change
+    without the approval changing (SPEC §7)."""
+    files = named_files(root, argv)
+    if program:
+        try:
+            path = Path(program).resolve()
+            if path.is_relative_to(root) and path.is_file():
+                with open(path, "rb") as handle:
+                    files[path.relative_to(root).as_posix()] = hashlib.file_digest(handle, "sha256").hexdigest()
+        except (OSError, RuntimeError, ValueError):
+            pass  # unreadable now, so not pinned: a readable version later differs from the approval
+    return dict(sorted(files.items()))
+
+
 def find_program(name: str, root: Path, *, windows: bool | None = None, path: str | None = None,
                  pathext: str | None = None) -> tuple[str | None, str | None]:
     """(the program file, None), or (None, why the command cannot run). A name with a directory part is
     a path relative to the repository root; a bare name is looked up in PATH's absolute entries only,
     so the current directory is never searched (Windows would search it first). On Windows a name
     without a PATHEXT extension gets each in turn, and a batch file is refused: Windows runs it through
-    cmd.exe, which re-parses its arguments, so what ran would not be the argv the person approved."""
+    cmd.exe, which re-parses its arguments, so what ran would not be the argv that was approved."""
     windows = sys.platform == "win32" if windows is None else windows
     if pathext is None:
         pathext = os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD")
@@ -213,6 +255,14 @@ def find_program(name: str, root: Path, *, windows: bool | None = None, path: st
 class State:
     approved: bool
     reason: str = ""  # why not: "new command", "command changed since approval", "<paths> changed since approval"
+    approver: str = "person"  # who approved it, when approved: "person" or "agent"
+
+
+PERSON = "person"        # approved at a terminal by a person (SPEC §7)
+AGENT = "agent"          # approved by the agent running kblam recheck with --approve
+# Why a check an agent approved is not approved here: [kb] recheck_person_approval is true.
+REVOKED_REASON = ("it was approved by an agent, and kblam.toml sets recheck_person_approval = true, so only "
+                  "a person's approval counts on this machine")
 
 
 def approvals_path(cfg: Config) -> Path:
@@ -220,9 +270,10 @@ def approvals_path(cfg: Config) -> Path:
     commit can write. RecheckError outside a git work tree, where there is no such place."""
     folder = kblam_git_dir(cfg)
     if folder is None:
-        raise RecheckError(f"{cfg.repo_root} is not in a git work tree. kblam recheck keeps a person's approvals "
-                           f"in the repository's git directory, where no commit can write them, so outside a "
-                           f"clone it runs nothing")
+        raise RecheckError(f"{cfg.repo_root} is not in a git work tree. kblam recheck keeps the approvals in the "
+                           f"repository's git directory, where no commit can write them, so outside a clone it "
+                           f"runs nothing; leave the finding as it is and tell the user, who can run it from a "
+                           f"clone of the repository")
     return folder / APPROVALS_NAME
 
 
@@ -234,12 +285,25 @@ def shown_path(cfg: Config, path: Path) -> str:
         return shown(str(path))
 
 
+def approver_of(record: dict) -> str:
+    """Who approved what `record` describes: a line with no "approver" key was written before kblam
+    recorded who did, when a person was the only one who could approve a check, so it reads as a person's.
+    Every other value counts as an agent's, so a line whose approver was altered ("Agent", null, anything
+    kblam does not write) cannot pass itself off as a person's approval."""
+    if "approver" not in record:
+        return PERSON
+    return PERSON if record["approver"] == PERSON else AGENT
+
+
 def load_approvals(cfg: Config) -> list[dict]:
-    """Every approval recorded on this machine, oldest first."""
+    """Every approval recorded on this machine, oldest first; each with an "approver" (a line without the
+    key reads as "person"). A link or an unreadable line refuses the run, naming the step for the user,
+    because the §8 hooks deny an agent any write here (SPEC §7)."""
     path = approvals_path(cfg)
     if path.is_symlink():
-        raise RecheckError(f"{shown_path(cfg, path)} is a symbolic link; only kblam writes that file, so delete the "
-                           f"link and approve the commands again with kblam recheck at a terminal")
+        raise RecheckError(f"{shown_path(cfg, path)} is a symbolic link; only kblam writes that file, and agents "
+                           f"may not change it: leave it as it is and tell the user, who can delete the link, then "
+                           f"approve the commands again with kblam recheck")
     if not path.is_file():
         return []
     approvals = []
@@ -252,21 +316,28 @@ def load_approvals(cfg: Config) -> list[dict]:
             record = None
         if not (isinstance(record, dict) and isinstance(record.get("id"), str)
                 and isinstance(record.get("command"), str) and isinstance(record.get("files"), dict)):
-            raise RecheckError(f"{shown_path(cfg, path)}:{number} cannot be read; only kblam writes it, so "
-                               f"restore it, or delete that line and approve its command again with kblam "
-                               f"recheck at a terminal")
+            raise RecheckError(f"{shown_path(cfg, path)}:{number} cannot be read; only kblam writes it, and agents "
+                               f"may not change it: leave it as it is and tell the user, who can restore it, or "
+                               f"delete that line and approve its command again with kblam recheck")
+        record["approver"] = approver_of(record)
         approvals.append(record)
     return approvals
 
 
-def approval_state(check: Check, approvals: list[dict]) -> State:
-    """Whether a person approved this check as it is now: its finding ID, command and named files."""
+def approval_state(check: Check, approvals: list[dict], *, person_only: bool = False) -> State:
+    """Whether this check is approved as it is now: its finding ID, command and named files. With
+    `person_only` (the machine sets recheck_person_approval = true) an agent's approval does not count,
+    and the reason says so."""
     mine = [a for a in approvals if a["id"] == check.finding_id]
-    same = [a for a in mine if a["command"] == check.digest]
-    if any(a["files"] == check.files for a in same):
-        return State(True)
+    counted = [a for a in mine if not person_only or approver_of(a) == PERSON]
+    same = [a for a in counted if a["command"] == check.digest]
+    for approval in same:
+        if approval["files"] == check.files:
+            return State(True, approver=approver_of(approval))
+    if person_only and not counted and mine:
+        return State(False, REVOKED_REASON)
     if not same:
-        return State(False, "command changed since approval" if mine else "new command")
+        return State(False, "command changed since approval" if counted else "new command")
     return State(False, f"{changed_files(same[-1]['files'], check.files)} changed since approval")
 
 
@@ -275,9 +346,10 @@ def changed_files(before: dict[str, str], now: dict[str, str]) -> str:
     return ", ".join(shown(p) for p in sorted(before.keys() | now.keys()) if before.get(p) != now.get(p))
 
 
-def record_approval(cfg: Config, check: Check) -> None:
-    """Record that a person approved `check`, as it is now, on this machine."""
-    record = {"id": check.finding_id, "command": check.digest, "files": check.files, "approved": _now()}
+def record_approval(cfg: Config, check: Check, *, approver: str = PERSON) -> None:
+    """Record that `approver` approved `check`, as it is now, on this machine."""
+    record = {"id": check.finding_id, "command": check.digest, "files": check.files, "approved": _now(),
+              "approver": approver}
     path = approvals_path(cfg)
     with kb_lock(cfg, f"recheck {check.finding_id}"):
         old = path.read_bytes() if path.is_file() else b""
@@ -325,6 +397,20 @@ def approval_prompt(cfg: Config, check: Check, state: State) -> str:
             f"  pinned:  {pins}\n"
             f"  It runs in {shown(str(cfg.repo_root))}, with stdin closed and without {shown(key_variable(cfg))}, "
             f"for at most {cfg.recheck_timeout_seconds:g} s.")
+
+
+def approval_block(cfg: Config, check: Check, state: State) -> str:
+    """What an agent reads before approving `check` with no terminal: the block a person would see, the
+    command that approves exactly this command and these files, and what to do if anything looks wrong."""
+    return "\n".join([
+        approval_prompt(cfg, check, state),
+        f"  To approve it, run: kblam recheck {check.finding_id} --approve {approval_digest(check)}",
+        "  That digest names this command and these files; kblam refuses it once either changes.",
+        "  Approve it only if the command does what this finding's check: needs and nothing else. If",
+        "  anything looks wrong -- a program unrelated to the finding, deleting or sending anything, a",
+        "  path outside this repository, or a character hidden in an escaped command -- do not approve",
+        "  it: leave the finding as it is and tell the user.",
+    ])
 
 
 # --- running ------------------------------------------------------------------------------------
@@ -458,12 +544,14 @@ def _tail(path: Path) -> list[str]:
     return [_printable(line[:TAIL_WIDTH]) + (" ..." if len(line) > TAIL_WIDTH else "") for line in lines]
 
 
-def log(cfg: Config, check: Check, outcome: str, *, terminal: bool, result: Outcome | None = None) -> None:
-    """One line in .kblam/recheck.jsonl: the finding, the digests of what ran and the outcome; never the
-    command text or its output. The file is opened without following a link (O_NOFOLLOW where the OS
-    has it, and a link is refused first everywhere), so a link there cannot redirect the line."""
+def log(cfg: Config, check: Check, outcome: str, *, terminal: bool, approver: str | None = None,
+        result: Outcome | None = None) -> None:
+    """One line in .kblam/recheck.jsonl: the finding, the digests of what ran, who approved it and the
+    outcome; never the command text or its output. `approver` is None when nothing was approved. The file
+    is opened without following a link (O_NOFOLLOW where the OS has it, and a link is refused first
+    everywhere), so a link there cannot redirect the line."""
     record = {"ts": _now(), "id": check.finding_id, "fingerprint": check.fingerprint, "command": check.digest,
-              "files": check.files, "outcome": outcome, "terminal": terminal,
+              "files": check.files, "outcome": outcome, "terminal": terminal, "approver": approver,
               "exit_code": result.exit_code if result else None,
               "seconds": round(result.seconds, 3) if result else None}
     path = cfg.state_dir / LOG_NAME

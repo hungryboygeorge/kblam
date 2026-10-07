@@ -54,6 +54,12 @@ DEFAULT_KB = {
     "scope_wildcard": "any",
     # kblam recheck (§7): how long one check: command may run before it and everything it started are killed.
     "recheck_timeout_seconds": 600.0,
+    # §7: who approves a check: command. False (the default): the agent running kblam recheck reads each
+    # new or changed command and approves it itself with --approve. True: only a person at a terminal
+    # approves one, which is stronger. The key is in the committed kblam.toml, so a pull that sets it
+    # back to false lets agents approve again: check any pulled change to it. Changing it needs
+    # kblam approve-config at a terminal.
+    "recheck_person_approval": False,
 }
 
 # M6.10 keys whose absence means something other than any value (SPEC §9): None when absent.
@@ -100,6 +106,7 @@ class Config:
     scope_separator: str = "/"
     scope_wildcard: str = "any"
     recheck_timeout_seconds: float = 600.0
+    recheck_person_approval: bool = False
     adjudicators: tuple[str, ...] | None = None
     history_id_terms: tuple[str, ...] | None = None
     review_dir: str = "research-review"
@@ -169,7 +176,8 @@ def _check_type(key: str, value, kind, table: str = "kb") -> None:
     else:
         ok = isinstance(value, kind)
     if not ok:
-        want = "a list of strings" if kind is list else kind.__name__
+        want = ("a list of strings" if kind is list else
+                "true or false" if kind is bool else kind.__name__)
         raise ConfigError(f"{CONFIG_NAME}: [{table}] {key} must be {want}, got {value!r}")
 
 
@@ -240,6 +248,7 @@ def load_config(root: Path | None = None, cwd: Path | None = None) -> Config:
         scope_separator=kb["scope_separator"],
         scope_wildcard=kb["scope_wildcard"],
         recheck_timeout_seconds=float(kb["recheck_timeout_seconds"]),
+        recheck_person_approval=kb["recheck_person_approval"],
         adjudicators=tuple(kb_raw["adjudicators"]) if "adjudicators" in kb_raw else None,
         history_id_terms=(tuple(t.lower() for t in kb_raw["history_id_terms"])
                           if "history_id_terms" in kb_raw else None),

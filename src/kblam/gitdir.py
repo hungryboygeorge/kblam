@@ -6,9 +6,9 @@ answers with someone else's. Two consequences:
 
 - `tracked_state` lists what git tracks under `.kblam/`, and kblam acts on none of its state while
   anything is (the CLI refuses, the Stop hook blocks).
-- What a person approves on this machine (kblam recheck's approvals) is kept in the repository's git
-  directory, which `git_common_dir` finds: git refuses any path with a `.git` component, so no commit
-  can write there.
+- What is approved on this machine (kblam recheck's approvals, by an agent or a person) is kept in
+  the repository's git directory, which `git_common_dir` finds: git refuses any path with a `.git`
+  component, so no commit can write there.
 
 `git_common_dir` reads the filesystem only, so the PreToolUse hook can call it on its fast path.
 """
@@ -51,8 +51,8 @@ def git_common_dir(start: Path) -> Path | None:
 
 
 def kblam_git_dir(cfg: Config) -> Path | None:
-    """`<git common dir>/kblam/`, where this clone keeps what a person approved on this machine; None
-    outside a git work tree."""
+    """`<git common dir>/kblam/`, where this clone keeps the check: commands approved on this machine;
+    None outside a git work tree."""
     common = git_common_dir(cfg.repo_root)
     return common / KBLAM_GIT_DIR if common is not None else None
 

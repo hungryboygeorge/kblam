@@ -41,9 +41,11 @@ CONFIG_USE = (f"{CONFIG_NAME} sets the rules kblam enforces and where kblam send
 RESOLUTIONS_USE = (f"{RESOLUTIONS_NAME} records the adjudicator's resolutions, and only kblam resolve writes "
                    f"it: the adjudicator closes an item Jev misread with kblam resolve <item-id> --distinct "
                    f"\"<reason>\", and any other agent sends the item ID to the coordinator or librarian.")
-APPROVALS_USE = ("That folder holds the check: commands a person approved on this machine, and only kblam recheck "
-                 "writes it, after showing each command to a person at a terminal; an agent asks the user to run "
-                 "kblam recheck, and never approves or runs a check: command itself.")
+APPROVALS_USE = ("That folder holds the check: commands approved on this machine, and only kblam recheck "
+                 "writes it: an agent approves a command by running kblam recheck with --approve and the "
+                 "digest of the block printed for it, and a person approves one at a terminal; when "
+                 "kblam.toml sets recheck_person_approval = true, only a person approves one, at a "
+                 "terminal. An agent never writes that file itself.")
 REMOVAL_USE = ("Removing a finding is the adjudicator's decision: once a merge has moved everything a finding "
                "states into another, the adjudicator removes it with kblam rm <id> --merged-into <target>. "
                "Any other agent sends the finding IDs to the coordinator or librarian.")
@@ -514,7 +516,8 @@ def _pre_tool_use(cfg: Config, data: dict) -> int:
     approvals_dir = kblam_git_dir(cfg)
 
     def approvals(path: str) -> bool:
-        """<git common dir>/kblam/ (SPEC §7 recheck, §8): the check: commands a person approved here."""
+        """<git common dir>/kblam/ (SPEC §7 recheck, §8): the check: commands approved here, by an agent
+        or a person."""
         return approvals_dir is not None and any(_within(form, approvals_dir) for form in forms(path))
 
     def removes_findings(path: str) -> bool:
