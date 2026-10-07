@@ -412,7 +412,7 @@ are K13 errors.
 | Key | Type | Rule |
 |---|---|---|
 | `schema` | integer | `1`. Any other value is a K13 error, "unsupported schema version N". |
-| `id` | string | matches the filename (`git restore --source=HEAD --staged --worktree <path>` where git holds it; otherwise leave it and tell the user) |
+| `id` | string | matches the filename (`git restore --source=HEAD --staged --worktree <path>` where git's last commit holds it; otherwise leave it and tell the user) |
 | `created` | date | `YYYY-MM-DD`, set at allocation |
 | `creator` | name | who allocated the record (`--by`) |
 | `status` | string | in the kind's vocabulary (§5.2.3) |
@@ -2080,9 +2080,9 @@ exits 0; the decision travels only in the JSON on stdout (desk-hooks H4–H6).
      It lists the failures, then the fix sentence. With the review root folder:
      "Fix each failure through kblam. A finding: kblam edit <id>, change the staged copy, kblam put
      it. A record: do what its failure line says (the kblam command it names, a restore from git, or
-     leaving it and telling the user); or change a free field with kblam challenge edit or kblam task
-     edit and kblam put it. Never write under findings/ or research-review/ directly. Once the tree
-     is clean, kblam validate --record accepts the change."
+     leaving it and telling the user); or change a free field with kblam challenge edit or kblam
+     task edit and kblam put it. Never write under findings/ or research-review/ directly. Once the
+     tree is clean, kblam validate --record accepts the change."
      Without it: "Fix each failure through kblam (kblam edit <id>, change the staged copy, kblam put
      it); never write under findings/ directly. Once the tree is clean, kblam validate --record
      accepts the change." Either way it ends with the skill pointer.

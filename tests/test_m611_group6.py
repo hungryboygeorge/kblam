@@ -553,15 +553,15 @@ def test_a_hand_changed_id_is_a_k13_error(kb, source_repo):
     """Start: SC-0001 installed open by reviewer-a, in a KB that is no git repository. Hand edit (fixture
     setup): the record's `id` becomes SC-0009 while its file name does not. Command: `kblam validate`.
     Exit 1, "K13 research-review/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file name's
-    ID (SC-0001); git does not hold a file at research-review/challenges/SC-0001.yaml, and records are
-    never renamed, so leave it as it is and tell the user" and no other error. Files: none (validate is
-    read-only). A5: a record's ID matches its file (§5.2.4 K13)."""
+    ID (SC-0001); git's last commit does not hold a file at research-review/challenges/SC-0001.yaml, and
+    records are never renamed, so leave it as it is and tell the user" and no other error. Files: none
+    (validate is read-only). A5: a record's ID matches its file (§5.2.4 K13)."""
     install_challenge(kb, source_repo)
     edit(m.record_path(kb, "SC-0001"), id="SC-0009")
     validate(kb, source_repo, code=1,
              out=f"K13 {PATH['SC']}:{key_line(kb, 'SC-0001', 'id')}: id: 'SC-0009' does not match the file "
-                 f"name's ID (SC-0001); git does not hold a file at {PATH['SC']}, and records are never "
-                 f"renamed, so leave it as it is and tell the user\n{failed(1)}\n")
+                 f"name's ID (SC-0001); git's last commit does not hold a file at {PATH['SC']}, and "
+                 f"records are never renamed, so leave it as it is and tell the user\n{failed(1)}\n")
 
 
 def test_a_hand_changed_proponent_on_a_decided_task_is_a_k13_error(kb, source_repo):

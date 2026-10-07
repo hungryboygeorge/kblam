@@ -207,7 +207,7 @@ the excerpt stays a K14 error until a use is reviewed or rebound, or the excerpt
 | K13 | a file under `{{review_root}}/` that is not a record or the generated `INDEX.md` ("`{{review_root}}/` holds only SC-, CT- and CU- records in their kind's folder"), or a record or `INDEX.md` that is a symlink | remove the stray file, or replace the link with the file itself |
 | K13 | "INDEX.md is missing; run kblam review index", or "INDEX.md differs from the generated review index", because a hand edit or a new record left it behind | `kblam review index` |
 | K13 | a schema error: an unknown or missing key, a wrong type, a bad path or hash, a blank required field, an assertion that no longer matches its source | the diagnostic names the field or the file: fix the staged record and put it again |
-| K13 | an ID claimed by two files, or a record whose `id` differs from its file name | restore the record's file from git (`git restore --source=HEAD --staged --worktree <path>`) when the line says so; when it says git does not hold the file, leave it as it is and tell the user |
+| K13 | an ID claimed by two files, or a record whose `id` differs from its file name | restore the record's file from git (`git restore --source=HEAD --staged --worktree <path>`) when the line says so; when it says git's last commit does not hold the file, leave it as it is and tell the user |
 | K13 | a registered record missing from `{{review_root}}/`: `records are never deleted or renamed` | restore it from git |
 | K13 | a decided record was changed by hand: the last decision's `bind` no longer matches the record's subject digest | restore the record from git; a decided record cannot be edited |
 | K13 | `the source changed since kblam challenge new; run it again`: the staged record's source no longer holds the bytes `challenge new` captured | start that record again against the bytes you now mean to challenge (`kblam challenge new`) |
@@ -286,13 +286,13 @@ write raised, with a written reason. An author sends the item IDs to the librari
   one staged copy of A (`kblam edit A` if none is staged; with several, keep one and delete the
   others). When B gives a quantity A lacks, `kblam rm B --merged-into A` is refused for it: leave
   A's claim as it is installed in that copy, add the quantity with its value and unit, put the copy,
-  then `kblam edit A` again and work in the copy it prints. Add
-  what B states that A does not yet (its detail and quantities) to the copy you are working in,
-  `kblam rm B --merged-into A`, then `kblam put <staged file>`; remove B before the put, not after,
-  because a put of A that states B's fact is refused while B is installed, by K9 ("claim duplicates
-  B") or by a `same_fact` reject (exit 4) whose text says to edit B: two findings that state one
-  fact cannot both be in `{{kb_root}}/`, and here B is the one being merged away, so remove it
-  instead of editing it. The removal leaves A's bytes alone, so the staged copy still puts.
+  then `kblam edit A` again and work in the copy it prints. Add what B states that A does not yet
+  (its detail and quantities) to the copy you are working in, `kblam rm B --merged-into A`, then
+  `kblam put <staged file>`; remove B before the put, not after, because a put of A that states B's
+  fact is refused while B is installed, by K9 ("claim duplicates B") or by a `same_fact` reject
+  (exit 4) whose text says to edit B: two findings that state one fact cannot both be in
+  `{{kb_root}}/`, and here B is the one being merged away, so remove it instead of editing it. The
+  removal leaves A's bytes alone, so the staged copy still puts.
   Deleting a finding file any other way is denied.
 - `kblam rm` and `kblam renumber` refuse a finding that a review record links (records never
   follow a finding): do what the refusal says (merge the other way, removing the other finding

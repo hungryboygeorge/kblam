@@ -121,7 +121,7 @@ def schema_code(kind: str, key: str) -> str:
     return "K13" if kind != "CT" or key in COMMON_KEYS else "K15"
 
 
-def schema_issues(rec: Record, *, staged: bool, tracked=None) -> list[Issue]:
+def schema_issues(rec: Record, *, staged: bool, committed=None) -> list[Issue]:
     """Structural checks of the §5.2.2 and §5.2.3 field tables, in field order.
 
     Unknown and missing keys; types (booleans are not integers); non-empty strings; names (NAME_RE);
@@ -135,10 +135,10 @@ def schema_issues(rec: Record, *, staged: bool, tracked=None) -> list[Issue]:
     owner rec.id or "",
     path rec.path, line rec.key_line(<top-level key>) or 0.
 
-    `tracked` answers whether git holds a file at a record's path, for the step the id/file-name
-    mismatch names: a callable taking that path (kblam.gitdir.tracked_file of the config), called only
-    for a record whose `id` does not match its file name. None is the answer outside a repository, so
-    that mismatch then names no git command.
+    `committed` answers whether git's last commit holds a file at a record's path, for the step the
+    id/file-name mismatch names: a callable taking that path (kblam.gitdir.committed_file of the
+    config), called only for a record whose `id` does not match its file name. None is the answer
+    outside a repository, so that mismatch then names no git command.
     """
     if rec.data is None:
         return [Issue(rec.path, 0, "K13", rec.error or "record did not parse", "error", rec.id or "")]
@@ -172,7 +172,7 @@ def schema_issues(rec: Record, *, staged: bool, tracked=None) -> list[Issue]:
             continue
         checker, argument = FIELD_CHECKS[key]
         if checker is _check_id:
-            argument = tracked      # _check_id's argument is the caller's answer about git, not a table value
+            argument = committed    # _check_id's argument is the caller's answer about git, not a table value
         checker(rec, key, key, data[key], staged, add, argument)
     return issues
 
@@ -226,7 +226,7 @@ def _ok_date(value) -> bool:
     return False
 
 
-def _check_id(rec, top_key, prefix, value, staged, add, tracked):
+def _check_id(rec, top_key, prefix, value, staged, add, committed):
     if not (isinstance(value, str) and ID_RE.match(value)):
         if staged and _blank(value):
             return
@@ -234,23 +234,26 @@ def _check_id(rec, top_key, prefix, value, staged, add, tracked):
         return
     if rec.id is not None and value != rec.id:
         add(top_key, f"id: {value!r} does not match the file name's ID ({rec.id}); "
-                     f"{_id_step(rec, tracked)}")
+                     f"{_id_step(rec, committed)}")
 
 
-def _id_step(rec: Record, tracked) -> str:
-    """What fixes a record file whose `id` does not match its file name (SPEC §5.2.4 K13). Where git
-    holds a file at the record's path, restoring it puts the recorded `id` back. The restore names HEAD
-    for both the index and the worktree, so a hand edit already `git add`ed is put back too (a plain
-    `git restore <path>` restores the index version, so the added hand edit would survive). Where git
-    does not hold a file at the record's path — a record renamed or copied by hand — no command an agent
-    may run puts the record back under the name its ID gives: kblam's hooks deny removing a record file,
-    and git cannot move a file it never held. `tracked` is the caller's answer
-    (kblam.gitdir.tracked_file); None means no repository can answer."""
-    if tracked is not None and tracked(rec.path):
+def _id_step(rec: Record, committed) -> str:
+    """What fixes a record file whose `id` does not match its file name (SPEC §5.2.4 K13). Where git's
+    last commit holds a file at the record's path, restoring it puts the recorded `id` back. The restore
+    names HEAD for both the index and the worktree, so a hand edit already `git add`ed is put back too
+    (a plain `git restore <path>` restores the index version, so the added hand edit would survive).
+    The last commit is what the restore needs, not the index: a record that is only `git add`ed is not in
+    HEAD, so the restore would delete the file rather than put it back, and it is named only where HEAD
+    holds the path. Where it does not — a record renamed or copied by hand, one never committed, a
+    repository with no commit — no command an agent may run puts the record back under the name its ID
+    gives: kblam's hooks deny removing a record file, and git cannot move a file it never held.
+    `committed` is the caller's answer (kblam.gitdir.committed_file); None means no repository can
+    answer."""
+    if committed is not None and committed(rec.path):
         return (f"restore the record's file from git "
                 f"(git restore --source=HEAD --staged --worktree {rec.path})")
-    return (f"git does not hold a file at {rec.path}, and records are never renamed, so leave it as it "
-            f"is and tell the user")
+    return (f"git's last commit does not hold a file at {rec.path}, and records are never renamed, so "
+            f"leave it as it is and tell the user")
 
 
 def _check_date(rec, top_key, prefix, value, staged, add, argument):

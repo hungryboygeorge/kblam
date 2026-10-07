@@ -228,15 +228,17 @@ def test_missing_schema_key_is_reported_and_the_rest_still_checked():
 
 
 def test_id_must_match_the_file_name():
-    """The step names the command that works in the state: git restores a file it holds, and a file git
-    does not hold at that path (a hand rename or copy) has no step an agent may run."""
+    """The step names the command that works in the state: git's last commit holds the record's file, so
+    the restore puts it back, and where it does not (a hand rename, a copy, a file only `git add`ed) has
+    no step an agent may run."""
     rec = parse("SC", "SC-0001", id="SC-0002")
     assert rows(rec) == [expect("SC", "K13",
-                                "id: 'SC-0002' does not match the file name's ID (SC-0001); git does not "
-                                "hold a file at research-review/challenges/SC-0001.yaml, and records are "
-                                "never renamed, so leave it as it is and tell the user", rec, "id")]
-    tracked = [i.message for i in schema_issues(rec, staged=False, tracked=lambda path: True)]
-    assert tracked == ["id: 'SC-0002' does not match the file name's ID (SC-0001); restore the record's "
+                                "id: 'SC-0002' does not match the file name's ID (SC-0001); git's last "
+                                "commit does not hold a file at research-review/challenges/SC-0001.yaml, "
+                                "and records are never renamed, so leave it as it is and tell the user",
+                                rec, "id")]
+    committed = [i.message for i in schema_issues(rec, staged=False, committed=lambda path: True)]
+    assert committed == ["id: 'SC-0002' does not match the file name's ID (SC-0001); restore the record's "
                        "file from git (git restore --source=HEAD --staged --worktree "
                        "research-review/challenges/SC-0001.yaml)"]
 

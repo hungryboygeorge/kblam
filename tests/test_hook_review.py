@@ -396,8 +396,8 @@ def test_stop_blocks_on_a_record_changed_out_of_band(review_kb, monkeypatch, cap
                      f"kblam validate:")
     assert failures == [f"K13 {REVIEW}/INDEX.md: INDEX.md is missing; run kblam review index",
                         f"K13 {REVIEW}/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file name's "
-                        f"ID (SC-0001); git does not hold a file at {REVIEW}/challenges/SC-0001.yaml, and "
-                        f"records are never renamed, so leave it as it is and tell the user"]
+                        f"ID (SC-0001); git's last commit does not hold a file at {REVIEW}/challenges/"
+                        f"SC-0001.yaml, and records are never renamed, so leave it as it is and tell the user"]
     assert (fix, pointer) == (STOP_FIX, POINTER)
 
 
@@ -543,9 +543,10 @@ def test_the_fix_sentence_names_kblam_edit_and_put_for_a_hand_edited_finding(rev
 
 def test_the_fix_sentence_names_a_restore_from_git_for_a_record_line_that_names_no_command(
         git_review_kb, monkeypatch, capsys):
-    """D49 for a K13 record line that names no kblam command, the id/file-name mismatch: git holds the
-    record's file at its path, so the line names the git restore that puts the recorded `id` back, and
-    the PreToolUse hook allows that command. The hand edit is `git add`ed first: the restore names HEAD
+    """D49 for a K13 record line that names no kblam command, the id/file-name mismatch: git's last
+    commit holds the record's file at its path, so the line names the git restore that puts the recorded
+    `id` back, and the PreToolUse hook allows that command. The hand edit is `git add`ed first: the
+    restore names HEAD
     for the index and the worktree, so the staged hand edit is put back too (a plain `git restore` would
     leave it). kblam put refuses a staged copy whose ID was put back (the ID is not a free field), so
     the restore is what does; kblam validate --record then leaves the hook silent."""
@@ -584,10 +585,11 @@ def test_the_fix_sentence_names_a_restore_from_git_for_a_record_line_that_names_
 
 def test_the_id_mismatch_of_a_renamed_record_names_no_step_an_agent_may_run(
         git_review_kb, monkeypatch, capsys):
-    """D49 for the same line where git holds no file at the record's path (a hand rename): no command an
-    agent may run puts the record back under the name its ID gives. The PreToolUse hook denies `mv` of a
-    record file (it removes one and writes under the review root), and `git mv` cannot move a file git
-    never held, so the line says to leave it as it is and tell the user; the renamed file stays as it is."""
+    """D49 for the same line where git's last commit holds no file at the record's path (a hand rename):
+    no command an agent may run puts the record back under the name its ID gives. The PreToolUse hook
+    denies `mv` of a record file (it removes one and writes under the review root), and `git mv` cannot
+    move a file git never held, so the line says to leave it as it is and tell the user; the renamed file
+    stays as it is."""
     kb = git_review_kb
     kb.add("F-0001", "motor", E1)
     kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
@@ -599,9 +601,9 @@ def test_the_id_mismatch_of_a_renamed_record_names_no_step_an_agent_may_run(
 
     failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
 
-    assert (f"K13 {renamed}:2: id: 'SC-0001' does not match the file name's ID (SC-0002); git does not "
-            f"hold a file at {renamed}, and records are never renamed, so leave it as it is and tell the "
-            f"user") in failures
+    assert (f"K13 {renamed}:2: id: 'SC-0001' does not match the file name's ID (SC-0002); git's last "
+            f"commit does not hold a file at {renamed}, and records are never renamed, so leave it as it "
+            f"is and tell the user") in failures
     assert (fix, pointer) == (STOP_FIX, POINTER)
 
     # the rename an agent would run: the hook denies it (a record file's removal, a review-root write)
@@ -613,3 +615,82 @@ def test_the_id_mismatch_of_a_renamed_record_names_no_step_an_agent_may_run(
                           capture_output=True).returncode != 0
     assert (kb.root / renamed).is_file()
     assert not (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").exists()
+
+
+def test_the_id_mismatch_of_a_record_git_added_but_never_committed_names_no_restore(
+        git_review_kb, monkeypatch, capsys):
+    """D49: the restore the line names reads HEAD, so it is named only where HEAD holds the file. A record
+    kblam put and someone `git add`ed, with no commit (a commit the pre-commit hook refused, say), then
+    hand-edited: git's last commit does not hold it, so the line says to leave it as it is and tell the
+    user. The restore would delete it from the index and the worktree, and no commit could bring it back.
+    The record file is still there afterwards, and the line names no git restore."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")                       # the record is in the index; no commit holds it
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0009"))   # the hand edit
+
+    failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
+
+    assert (f"K13 {REVIEW}/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file name's ID "
+            f"(SC-0001); git's last commit does not hold a file at {REVIEW}/challenges/SC-0001.yaml, and "
+            f"records are never renamed, so leave it as it is and tell the user") in failures
+    assert (fix, pointer) == (STOP_FIX, POINTER)
+    assert not any("git restore" in line for line in failures)    # the command that would delete it
+    assert (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").is_file()   # so the record is still there
+
+
+def test_the_id_mismatch_under_an_unborn_head_names_no_restore(review_kb, monkeypatch, capsys):
+    """D49 for the same line in a repository with no commit yet (a KB initialized but never committed):
+    the record `git add`ed and hand-edited. There is no HEAD for `git restore --source=HEAD` to read, so
+    the line says to leave it as it is and tell the user; the record file is still there afterwards."""
+    kb = review_kb
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(kb.root.parent / "no-global-gitconfig"))
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(kb.root.parent))
+    kb.write(".gitignore", ".kblam/\n")
+    git(kb.root, "init", "-q")                      # no commit: HEAD is unborn
+    kb.add("F-0001", "motor", E1)
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")                       # the record is in the index; HEAD holds nothing
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0009"))   # the hand edit
+
+    failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
+
+    assert (f"K13 {REVIEW}/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file name's ID "
+            f"(SC-0001); git's last commit does not hold a file at {REVIEW}/challenges/SC-0001.yaml, and "
+            f"records are never renamed, so leave it as it is and tell the user") in failures
+    assert (fix, pointer) == (STOP_FIX, POINTER)
+    assert not any("git restore" in line for line in failures)
+    assert (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").is_file()
+
+
+@pytest.mark.parametrize("commit", [False, True], ids=["in the index only", "committed"])
+def test_the_write_path_refuses_an_id_that_differs_from_its_file_name_before_any_restore(
+        git_review_kb, commit):
+    """D49 for the write path: a put never reaches the step that names a fix for an `id` that does not
+    match its file name. The put frame refuses such a staged record first, with the line below, which
+    names no git command, so the write path offers no restore at all — the restore K13 names for an
+    installed record is never printed here. The check reads no git state: a record that is only `git
+    add`ed (no commit holds it, so that restore would delete it) and a committed one give the same line.
+    The installed record file is unchanged."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    if commit:
+        git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0009"))   # the hand edit
+    before = (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").read_bytes()
+
+    staged = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())
+    refused = m.kblam(kb, "put", str(staged))
+
+    assert (refused.code, refused.out) == (1, "")
+    assert refused.err == (f"kblam put: .kblam/review-staging/SC-0001.yaml: id is 'SC-0009', but the file "
+                           f"name's ID is SC-0001; the ID never changes {POINTER}\n")
+    assert "git restore" not in refused.err
+    assert (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").read_bytes() == before

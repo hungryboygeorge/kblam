@@ -82,10 +82,24 @@ def tracked_state(cfg: Config) -> list[str]:
     return _ls_files(cfg, STATE_DIR)
 
 
-def tracked_file(cfg: Config, path: str) -> bool:
-    """Whether git holds a file at the repository-relative `path`: what `git restore <path>` needs.
-    False outside a git work tree and whenever git cannot answer."""
-    return bool(_ls_files(cfg, path))
+def committed_file(cfg: Config, path: str) -> bool:
+    """Whether git's last commit holds a file at the repository-relative `path`: what `git restore
+    --source=HEAD <path>` needs. The last commit is read, not the index, because a restore from HEAD
+    puts the committed file back and deletes a file that only the index holds, so a `git add` that was
+    never committed must not be answered with that command. False outside a git work tree and whenever
+    git cannot answer: an unborn HEAD (no commit yet) and a missing git both count as not holding it."""
+    if git_common_dir(cfg.repo_root) is None:
+        return False
+    import subprocess  # only here: the hooks' fast path never calls this
+
+    try:
+        done = subprocess.run(["git", "--literal-pathspecs", "ls-tree", "--name-only", "HEAD", "--", path],
+                              cwd=cfg.repo_root, capture_output=True, timeout=GIT_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if done.returncode != 0:
+        return False
+    return path in done.stdout.decode("utf-8", "replace").splitlines()
 
 
 def tracked_state_problem(tracked: list[str]) -> str:

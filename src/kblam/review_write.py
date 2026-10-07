@@ -37,7 +37,7 @@ from kblam import (decisions, gitpin, k13, k14, k15, matching, paths, receipts, 
                    review_index, rules, treehash, writes)
 from kblam.config import Config
 from kblam.finding import fingerprint, normalise_newlines, plain_data
-from kblam.gitdir import tracked_file
+from kblam.gitdir import committed_file
 from kblam.k13 import _canonical_kind                      # K13's one rule for a record's canonical path
 from kblam.records import Record
 from kblam.rules import Issue
@@ -895,7 +895,7 @@ def _land(cfg: Config, command: str, kind: str, rec_id: str, view: KBView, candi
     all_issues = rules.validate(candidate)
     written = records.parse_record(path, new_bytes)
     mine = sorted({issue for issue in rules.errors(all_issues) if issue.owner == rec_id}
-                  | set(records.schema_issues(written, staged=False, tracked=partial(tracked_file, cfg))),
+                  | set(records.schema_issues(written, staged=False, committed=partial(committed_file, cfg))),
                   key=_order)
     result = WriteResult(rec_id=rec_id, path=path,
                          digest=decisions.subject_digest(kind, written.data),
