@@ -43,8 +43,8 @@ RESOLUTIONS_USE = (f"{RESOLUTIONS_NAME} records the adjudicator's resolutions, a
                    f"\"<reason>\", and any other agent sends the item ID to the coordinator or librarian.")
 APPROVALS_USE = ("That folder holds the check: commands approved on this machine, and only kblam recheck "
                  "writes it: an agent approves a command by running kblam recheck with --approve and the "
-                 "digest of the block printed for it, and a person approves one at a terminal, unless "
-                 "kblam.toml sets recheck_person_approval = true, where only a person approves one, at a "
+                 "digest of the block printed for it, and a person approves one at a terminal; when "
+                 "kblam.toml sets recheck_person_approval = true, only a person approves one, at a "
                  "terminal. An agent never writes that file itself.")
 REMOVAL_USE = ("Removing a finding is the adjudicator's decision: once a merge has moved everything a finding "
                "states into another, the adjudicator removes it with kblam rm <id> --merged-into <target>. "

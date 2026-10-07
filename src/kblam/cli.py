@@ -789,28 +789,38 @@ def _approve(cfg, args) -> int:
     """`kblam recheck F-NNNN --approve DIGEST`: the agent running kblam records its own approval of the one
     check whose block it read, then that check runs."""
     if cfg.recheck_person_approval:
+        if len(args.ids) == 1:
+            raise RecheckError(f"--approve is refused: kblam.toml sets recheck_person_approval = true, so only a "
+                               f"person at a terminal approves a check: command. Ask the user to run kblam recheck "
+                               f"{shown(args.ids[0])} at a terminal, which shows the command and asks them")
         raise RecheckError("--approve is refused: kblam.toml sets recheck_person_approval = true, so only a person "
                            "at a terminal approves a check: command. Ask the user to run kblam recheck with that "
                            "finding's ID at a terminal, which shows the command and asks them")
     if len(args.ids) != 1:
         got = ", ".join(args.ids) if args.ids else "none"
         raise RecheckError(f"--approve approves the one check whose block you read, so it needs exactly one finding "
-                           f"ID; {got} was given. Run kblam recheck --list to see which findings have a check: "
-                           f"command, then approve one by ID with the digest its block prints")
+                           f"ID; {got} was given. Run kblam recheck F-NNNN for the one finding you mean: it prints "
+                           f"that check's block and the --approve command to run (kblam recheck --list shows which "
+                           f"findings have a check: command)")
+    given = args.approve.strip().lower()  # a digest copied in capitals, or with spaces, is the same digest
     check = recheck.collect(cfg, args.ids)[0][0]
     if check.problem:
-        raise RecheckError(f"{check.finding_id} cannot be approved: {check.problem}")
+        if check.problem_step:  # it already says what to do (kblam edit); do not add a second step
+            raise RecheckError(f"{check.finding_id} cannot be approved: {check.problem}")
+        raise RecheckError(f"{check.finding_id} cannot be approved: {check.problem}; it cannot run on this machine, "
+                           f"so there is nothing to approve: leave the finding as it is and tell the user")
     digest = recheck.approval_digest(check)
-    if args.approve != digest:
+    if given != digest:
         state = recheck.approval_state(check, recheck.load_approvals(cfg), person_only=False)
         if state.approved:
             raise RecheckError(f"{check.finding_id} is already approved as it is now, so there is nothing to "
                                f"approve, and {shown(args.approve)} is not the digest of its check: command and "
                                f"files ({digest}). Run kblam recheck {check.finding_id} to run it")
-        print(f"kblam recheck: {check.finding_id} was not approved: {shown(args.approve)} does not name its check: "
-              f"command and files as they are now, so the command or a file it names changed since that digest "
-              f"was shown. Read the block below again, then approve the digest it prints, or leave the finding "
-              f"as it is.")
+        was_given = shown(given) or "''"  # an empty one would otherwise leave a gap in the sentence
+        print(f"kblam recheck: {check.finding_id} was not approved: {was_given} is not the digest of "
+              f"its check: command and files as they are now: it was copied wrong, or the command or a file it "
+              f"names changed since it was shown. Read the block below again, then approve the digest it "
+              f"prints, or leave the finding as it is.")
         print(recheck.approval_block(cfg, check, state))
         return EXIT_INVALID
     recheck.record_approval(cfg, check, approver=recheck.AGENT)
@@ -837,7 +847,7 @@ def _recheck_one(cfg, c: recheck.Check, state: recheck.State, terminal: bool, de
         recheck.log(cfg, c, "not_started", terminal=terminal)
         return "could not run"
     if state.approved:
-        now = recheck.named_files(cfg.repo_root, c.argv)
+        now = recheck.check_files(cfg.repo_root, c.argv, c.program)
         if now != c.files:  # changed while this run asked, or ran an earlier check
             state = recheck.State(False, f"{recheck.changed_files(c.files, now)} changed since approval")
     if not state.approved:

@@ -62,6 +62,9 @@ OUTPUT_DIR = "recheck"                     # .kblam/recheck/F-NNNN.log: the outp
 TAIL_LINES = 20                            # output lines printed for a check that failed
 TAIL_WIDTH = 300                           # characters printed of one such line
 BATCH_SUFFIXES = (".bat", ".cmd")          # Windows runs these through cmd.exe, which re-parses arguments
+# The two check problems that name no step the reader can take, so cli._approve adds one when it refuses
+# to approve such a check (SPEC §7).
+NO_STEP_PROBLEMS = ("was not found on PATH", "is not an executable file")
 
 
 class RecheckError(Exception):
@@ -93,8 +96,9 @@ class Check:
     command: str                                          # exactly as the finding holds it
     argv: list[str] = field(default_factory=list)
     program: str | None = None                            # the file argv[0] names (find_program)
-    files: dict[str, str] = field(default_factory=dict)  # repository files the arguments name -> sha256
+    files: dict[str, str] = field(default_factory=dict)  # repository files an approval covers -> sha256
     problem: str | None = None                            # why it cannot run at all
+    problem_step: bool = False                            # whether problem already says what to do about it
 
     @property
     def digest(self) -> str:
@@ -151,12 +155,17 @@ def _check(cfg: Config, finding: Finding, command: str) -> Check:
     except ValueError as exc:
         check.problem = (f"its check: cannot be split into a program and arguments ({exc}); fix the quoting "
                          f"with kblam edit {finding.file_id}")
+        check.problem_step = True
         return check
     if not check.argv or not check.argv[0]:
         check.problem = f"its check: names no program; fix it with kblam edit {finding.file_id}"
+        check.problem_step = True
         return check
-    check.files = named_files(cfg.repo_root, check.argv)
     check.program, check.problem = find_program(check.argv[0], cfg.repo_root)
+    check.files = check_files(cfg.repo_root, check.argv, check.program)
+    # A problem that already says what to do keeps it; the two that do not -- no program on PATH, not an
+    # executable file -- get the "leave it" step when kblam refuses to approve the check (cli._approve).
+    check.problem_step = check.problem is not None and not check.problem.endswith(NO_STEP_PROBLEMS)
     return check
 
 
@@ -182,6 +191,24 @@ def named_files(root: Path, argv: list[str]) -> dict[str, str]:
                     files[path.relative_to(root).as_posix()] = hashlib.file_digest(handle, "sha256").hexdigest()
         except (OSError, RuntimeError, ValueError):
             continue  # unreadable now, so not pinned: a readable version later differs from the approval
+    return dict(sorted(files.items()))
+
+
+def check_files(root: Path, argv: list[str], program: str | None) -> dict[str, str]:
+    """Every repository file an approval of this command covers: the ones the arguments name, plus the
+    program file that would run when it is a regular file inside the repository. Windows resolves a bare
+    name through PATHEXT (`tools/run` runs `tools/run.exe`) and through every absolute PATH entry,
+    including one inside the repository, so without the second part the program that runs could change
+    without the approval changing (SPEC §7)."""
+    files = named_files(root, argv)
+    if program:
+        try:
+            path = Path(program).resolve()
+            if path.is_relative_to(root) and path.is_file():
+                with open(path, "rb") as handle:
+                    files[path.relative_to(root).as_posix()] = hashlib.file_digest(handle, "sha256").hexdigest()
+        except (OSError, RuntimeError, ValueError):
+            pass  # unreadable now, so not pinned: a readable version later differs from the approval
     return dict(sorted(files.items()))
 
 
@@ -259,19 +286,24 @@ def shown_path(cfg: Config, path: Path) -> str:
 
 
 def approver_of(record: dict) -> str:
-    """Who approved what `record` describes: "agent" when the line says so, else "person". Lines written
-    before kblam recorded the approver, and lines holding anything else, read as a person's approval,
-    which was the only kind that could approve a check then."""
-    return AGENT if record.get("approver") == AGENT else PERSON
+    """Who approved what `record` describes: a line with no "approver" key was written before kblam
+    recorded who did, when a person was the only one who could approve a check, so it reads as a person's.
+    Every other value counts as an agent's, so a line whose approver was altered ("Agent", null, anything
+    kblam does not write) cannot pass itself off as a person's approval."""
+    if "approver" not in record:
+        return PERSON
+    return PERSON if record["approver"] == PERSON else AGENT
 
 
 def load_approvals(cfg: Config) -> list[dict]:
-    """Every approval recorded on this machine, oldest first; each with an "approver" (an older line
-    without one reads as "person")."""
+    """Every approval recorded on this machine, oldest first; each with an "approver" (a line without the
+    key reads as "person"). A link or an unreadable line refuses the run, naming the step for the user,
+    because the §8 hooks deny an agent any write here (SPEC §7)."""
     path = approvals_path(cfg)
     if path.is_symlink():
-        raise RecheckError(f"{shown_path(cfg, path)} is a symbolic link; only kblam writes that file, so delete the "
-                           f"link and approve the commands again with kblam recheck at a terminal")
+        raise RecheckError(f"{shown_path(cfg, path)} is a symbolic link; only kblam writes that file, and agents "
+                           f"may not change it: leave it as it is and tell the user, who can delete the link, then "
+                           f"approve the commands again with kblam recheck")
     if not path.is_file():
         return []
     approvals = []
@@ -284,9 +316,9 @@ def load_approvals(cfg: Config) -> list[dict]:
             record = None
         if not (isinstance(record, dict) and isinstance(record.get("id"), str)
                 and isinstance(record.get("command"), str) and isinstance(record.get("files"), dict)):
-            raise RecheckError(f"{shown_path(cfg, path)}:{number} cannot be read; only kblam writes it, so "
-                               f"restore it, or delete that line and approve its command again with kblam "
-                               f"recheck at a terminal")
+            raise RecheckError(f"{shown_path(cfg, path)}:{number} cannot be read; only kblam writes it, and agents "
+                               f"may not change it: leave it as it is and tell the user, who can restore it, or "
+                               f"delete that line and approve its command again with kblam recheck")
         record["approver"] = approver_of(record)
         approvals.append(record)
     return approvals

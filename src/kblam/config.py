@@ -56,7 +56,9 @@ DEFAULT_KB = {
     "recheck_timeout_seconds": 600.0,
     # §7: who approves a check: command. False (the default): the agent running kblam recheck reads each
     # new or changed command and approves it itself with --approve. True: only a person at a terminal
-    # approves one, so no agent can approve a command that reaches this machine through a pull.
+    # approves one, which is stronger. The key is in the committed kblam.toml, so a pull that sets it
+    # back to false lets agents approve again: check any pulled change to it. Changing it needs
+    # kblam approve-config at a terminal.
     "recheck_person_approval": False,
 }
 

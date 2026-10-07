@@ -17,9 +17,8 @@ for staged records. `kblam.resolutions.jsonl` is kblam's too: only `kblam resolv
 `kblam.toml` sets the rules and where kblam sends its API key, so only a person changes it: writing
 or removing it is denied too, and a commit that changes it is refused until a person approves it with
 `kblam approve-config` at a terminal. If a finding needs something it does not allow, such as a new
-scope, ask the user to add it. `[kb] recheck_person_approval` is one of those rules: with it true,
-only a person at a terminal approves a check: command, so ask the user to change it rather than
-changing it yourself. Never try to approve a change yourself.
+scope, ask the user to add it. `[kb] recheck_person_approval` is one of those rules: never change it
+yourself; with it true, only a person at a terminal approves a check: command.
 
 ## The flow
 
@@ -333,9 +332,9 @@ approve it with the printed `kblam recheck F-NNNN --approve <digest>` only if th
 this finding's check: needs and nothing else. If anything looks wrong (a program unrelated to the
 finding, deleting or sending anything, a path outside the repository, or a character hidden in an
 escaped command), do not approve it: leave the finding as it is and tell the user. With
-`recheck_person_approval = true` the block instead says a person must approve it: ask the user to
-run `kblam recheck F-NNNN` at a terminal, where it is shown to them first. Never run a check:
-command yourself to get around that.
+`recheck_person_approval = true`, kblam recheck instead prints that only a person approves it: ask
+the user to run `kblam recheck F-NNNN` at a terminal, where it is shown to them first. Never run a
+check: command yourself to get around that.
 
 A failed check means the key number did not reproduce, or the command broke. Read its output
 (`.kblam/recheck/F-NNNN.log`), then `kblam edit` the finding so it states what the evidence shows
