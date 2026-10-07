@@ -396,8 +396,8 @@ def test_stop_blocks_on_a_record_changed_out_of_band(review_kb, monkeypatch, cap
                      f"kblam validate:")
     assert failures == [f"K13 {REVIEW}/INDEX.md: INDEX.md is missing; run kblam review index",
                         f"K13 {REVIEW}/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file name's "
-                        f"ID (SC-0001); restore the record's file from git (git restore "
-                        f"{REVIEW}/challenges/SC-0001.yaml)"]
+                        f"ID (SC-0001); git does not hold a file at {REVIEW}/challenges/SC-0001.yaml, and "
+                        f"records are never renamed, so leave it as it is and tell the user"]
     assert (fix, pointer) == (STOP_FIX, POINTER)
 
 
@@ -543,10 +543,11 @@ def test_the_fix_sentence_names_kblam_edit_and_put_for_a_hand_edited_finding(rev
 
 def test_the_fix_sentence_names_a_restore_from_git_for_a_record_line_that_names_no_command(
         git_review_kb, monkeypatch, capsys):
-    """D49 for a K13 record line that names no kblam command, the id/file-name mismatch: kblam put
-    refuses a staged copy whose ID was put back (the ID is not a free field, so the old sentence's "a
-    staged copy and kblam put" cannot fix it), and restoring the record's file from git is what does;
-    kblam validate --record then leaves the hook silent."""
+    """D49 for a K13 record line that names no kblam command, the id/file-name mismatch: git holds the
+    record's file at its path, so the line names the git restore that puts the recorded `id` back, and
+    the PreToolUse hook allows that command. kblam put refuses a staged copy whose ID was put back (the
+    ID is not a free field), so the restore is what does; kblam validate --record then leaves the hook
+    silent."""
     kb = git_review_kb
     kb.add("F-0001", "motor", E1)
     kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
@@ -557,10 +558,13 @@ def test_the_fix_sentence_names_a_restore_from_git_for_a_record_line_that_names_
 
     failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
 
+    restore = f"git restore {REVIEW}/challenges/SC-0001.yaml"
     assert failures == [f"K13 {REVIEW}/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file "
-                        f"name's ID (SC-0001); restore the record's file from git (git restore "
-                        f"{REVIEW}/challenges/SC-0001.yaml)"]
+                        f"name's ID (SC-0001); restore the record's file from git ({restore})"]
     assert (fix, pointer) == (STOP_FIX, POINTER)
+
+    # the command the line names, run by an agent: the hook allows it, and it is what puts the ID back
+    assert call("PreToolUse", tool(kb, "Bash", command=restore), monkeypatch, capsys) == (0, None, "")
 
     # the route the old sentence offered instead: a staged copy and kblam put cannot fix this line
     staged = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())
@@ -571,3 +575,36 @@ def test_the_fix_sentence_names_a_restore_from_git_for_a_record_line_that_names_
     git(kb.root, "restore", f"{REVIEW}/challenges/SC-0001.yaml")   # the restore the sentence names
     assert m.validate(kb, "--record").code == 0
     assert call("Stop", stop(kb), monkeypatch, capsys) == (0, None, "")
+
+
+def test_the_id_mismatch_of_a_renamed_record_names_no_step_an_agent_may_run(
+        git_review_kb, monkeypatch, capsys):
+    """D49 for the same line where git holds no file at the record's path (a hand rename): no command an
+    agent may run puts the record back under the name its ID gives. The PreToolUse hook denies `mv` of a
+    record file (it removes one and writes under the review root), and `git mv` cannot move a file git
+    never held, so the line says to leave it as it is and tell the user; the renamed file stays as it is."""
+    kb = git_review_kb
+    kb.add("F-0001", "motor", E1)
+    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    m.accept_tree(kb)
+    git(kb.root, "add", "-A")
+    git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
+    renamed = f"{REVIEW}/challenges/SC-0002.yaml"                  # fixture edit: a rename, in place
+    (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").rename(kb.root / renamed)
+
+    failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
+
+    assert (f"K13 {renamed}:2: id: 'SC-0001' does not match the file name's ID (SC-0002); git does not "
+            f"hold a file at {renamed}, and records are never renamed, so leave it as it is and tell the "
+            f"user") in failures
+    assert (fix, pointer) == (STOP_FIX, POINTER)
+
+    # the rename an agent would run: the hook denies it (a record file's removal, a review-root write)
+    rename = f"mv {renamed} {REVIEW}/challenges/SC-0001.yaml"
+    assert denied(call("PreToolUse", tool(kb, "Bash", command=rename), monkeypatch, capsys)[1])
+
+    # and git cannot move a file it never held: the path stays untracked and the file stays where it is
+    assert subprocess.run(["git", "-C", str(kb.root), "mv", renamed, f"{REVIEW}/challenges/SC-0001.yaml"],
+                          capture_output=True).returncode != 0
+    assert (kb.root / renamed).is_file()
+    assert not (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").exists()

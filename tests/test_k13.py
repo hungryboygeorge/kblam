@@ -1632,8 +1632,9 @@ def test_absent_or_partial_allocation_proves_no_identity_change(kb_ready, source
     ("proponent", None, "missing key 'proponent'"),
     ("proponent", 7, "proponent: 7 is not a name"),
     ("proponent", "not a name", "proponent: 'not a name' is not a name"),
-    ("id", "CT-0009", "id: 'CT-0009' does not match the file name's ID (CT-0001); restore the record's file "
-                      "from git (git restore research-review/tasks/CT-0001.yaml)"),
+    ("id", "CT-0009", "id: 'CT-0009' does not match the file name's ID (CT-0001); git does not hold a file "
+                      "at research-review/tasks/CT-0001.yaml, and records are never renamed, so leave it as "
+                      "it is and tell the user"),
 ])
 def test_invalid_identity_has_only_its_schema_error(kb_ready, source_repo, field, value, message):
     data = ct(kb_ready)

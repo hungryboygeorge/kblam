@@ -121,7 +121,7 @@ def schema_code(kind: str, key: str) -> str:
     return "K13" if kind != "CT" or key in COMMON_KEYS else "K15"
 
 
-def schema_issues(rec: Record, *, staged: bool) -> list[Issue]:
+def schema_issues(rec: Record, *, staged: bool, tracked=None) -> list[Issue]:
     """Structural checks of the §5.2.2 and §5.2.3 field tables, in field order.
 
     Unknown and missing keys; types (booleans are not integers); non-empty strings; names (NAME_RE);
@@ -134,6 +134,11 @@ def schema_issues(rec: Record, *, staged: bool) -> list[Issue]:
     Every issue: code "K13" (K15 for a CT's §5.2.3 fields, excluding proponent), level "error",
     owner rec.id or "",
     path rec.path, line rec.key_line(<top-level key>) or 0.
+
+    `tracked` answers whether git holds a file at a record's path, for the step the id/file-name
+    mismatch names: a callable taking that path (kblam.gitdir.tracked_file of the config), called only
+    for a record whose `id` does not match its file name. None is the answer outside a repository, so
+    that mismatch then names no git command.
     """
     if rec.data is None:
         return [Issue(rec.path, 0, "K13", rec.error or "record did not parse", "error", rec.id or "")]
@@ -166,6 +171,8 @@ def schema_issues(rec: Record, *, staged: bool) -> list[Issue]:
             add(key, f"missing key {key!r}")
             continue
         checker, argument = FIELD_CHECKS[key]
+        if checker is _check_id:
+            argument = tracked      # _check_id's argument is the caller's answer about git, not a table value
         checker(rec, key, key, data[key], staged, add, argument)
     return issues
 
@@ -219,15 +226,27 @@ def _ok_date(value) -> bool:
     return False
 
 
-def _check_id(rec, top_key, prefix, value, staged, add, argument):
+def _check_id(rec, top_key, prefix, value, staged, add, tracked):
     if not (isinstance(value, str) and ID_RE.match(value)):
         if staged and _blank(value):
             return
         add(top_key, "id: required" if _missing(value) else f"id: {value!r} is not an ID")
         return
     if rec.id is not None and value != rec.id:
-        add(top_key, f"id: {value!r} does not match the file name's ID ({rec.id}); restore the record's file "
-                     f"from git (git restore {rec.path})")
+        add(top_key, f"id: {value!r} does not match the file name's ID ({rec.id}); "
+                     f"{_id_step(rec, tracked)}")
+
+
+def _id_step(rec: Record, tracked) -> str:
+    """What fixes a record file whose `id` does not match its file name (SPEC §5.2.4 K13). Where git
+    holds a file at the record's path, restoring it puts the recorded `id` back. Where it does not — a
+    record renamed or copied by hand — no command an agent may run puts the record back under the name
+    its ID gives: kblam's hooks deny removing a record file, and git cannot move a file it never held.
+    `tracked` is the caller's answer (kblam.gitdir.tracked_file); None means no repository can answer."""
+    if tracked is not None and tracked(rec.path):
+        return f"restore the record's file from git (git restore {rec.path})"
+    return (f"git does not hold a file at {rec.path}, and records are never renamed, so leave it as it "
+            f"is and tell the user")
 
 
 def _check_date(rec, top_key, prefix, value, staged, add, argument):

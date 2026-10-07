@@ -7,10 +7,12 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, replace
 from datetime import date
+from functools import partial
 from pathlib import PurePosixPath
 
 from kblam import decisions, matching, paths, receipts, records, registry, sources, treehash
 from kblam.finding import fingerprint, normalise_newlines
+from kblam.gitdir import tracked_file
 from kblam.records import Record
 from kblam.review_index import generate_review_index
 from kblam.rules import Issue
@@ -282,7 +284,7 @@ def _record_issues(view, reader, rec: Record) -> list[Issue]:
     """The structure of one record file, then the checks its kind and status add. A file that is no
     record, and a record whose data did not parse or whose status is malformed, get structure errors
     only (SPEC §5.2.4 Severity table)."""
-    schema = records.schema_issues(rec, staged=False)
+    schema = records.schema_issues(rec, staged=False, tracked=partial(tracked_file, view.cfg))
     issues = [_owned(issue, rec) for issue in schema]
     issues += [_owned(issue, rec) for issue in decisions.decision_issues(rec)]
     issues += _identity_issues(view, rec, schema, trust_state=reader.trust_state)

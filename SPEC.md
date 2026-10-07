@@ -412,7 +412,7 @@ are K13 errors.
 | Key | Type | Rule |
 |---|---|---|
 | `schema` | integer | `1`. Any other value is a K13 error, "unsupported schema version N". |
-| `id` | string | matches the filename |
+| `id` | string | matches the filename (`git restore <path>` where git holds it; otherwise leave it and tell the user) |
 | `created` | date | `YYYY-MM-DD`, set at allocation |
 | `creator` | name | who allocated the record (`--by`) |
 | `status` | string | in the kind's vocabulary (§5.2.3) |
@@ -3211,7 +3211,7 @@ exemption included)
   then put the copy. Where the removed finding gives a quantity the survivor lacks, `rm` refuses it,
   so that route is named first: put the copy with the quantity added and the survivor's claim left
   as it is, remove the target, edit the survivor again, and put (§7). The refusal for a linked
-  finding names the same order.
+  finding names the same order (direction: user, 2026-10-05; order: lead, 2026-10-06).
 - **kblam is run by agents (user, 2026-10-06).** The adjudicator and the record reviewers are
   agents; only a `kblam.toml` change (with `kblam approve-config`) and `kblam recheck`'s approval
   of a command need a person (§8, §8.3).
