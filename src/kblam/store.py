@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path, PurePosixPath
 
-from kblam import k14, k15, matching, records, resolutions, review, writes
+from kblam import decisions, k14, k15, matching, records, resolutions, review, writes
 from kblam.check import Checker, CheckResult, _differ, _format_value, _quantities
 from kblam.config import Config
 from kblam.jev import Side, jev_settings
@@ -878,10 +878,12 @@ def remove_finding(cfg: Config, finding_id: str, target_id: str) -> RemoveResult
 
     Refused while another finding depends on it, while either ID is not a single readable finding in the KB,
     while one of its quantities is missing from <target> with the same value and unit, or while a review
-    record links it (in any status; the refusal says to merge the other way, _linked_removal). Under the lock it
-    removes the file and a topic folder that leaves empty, regenerates INDEX.md, applies the tree.hash rule
-    (§8) and closes the finding's open review, rejected and unchecked items. The reason for the removal goes
-    in the commit message. Who may run it is the hooks' concern (the adjudicator gate, §8 item 2).
+    record that is not retired links it (the refusal says to merge the other way, _linked_removal). A
+    retired record no longer refuses the removal: the adjudicator retires each record that links a finding
+    it settles, and a retired record's question is re-filed against the finding that remains. Under the lock
+    it removes the file and a topic folder that leaves empty, regenerates INDEX.md, applies the tree.hash
+    rule (§8) and closes the finding's open review, rejected and unchecked items. The reason for the removal
+    goes in the commit message. Who may run it is the hooks' concern (the adjudicator gate, §8 item 2).
     """
     for value in (finding_id, target_id):
         if not ID_RE.match(value):
@@ -929,14 +931,17 @@ def _remove(cfg: Config, finding_id: str, target_id: str) -> RemoveResult:
 def _set_id(finding: Finding, new_id: str, shown: str, other) -> bytes:
     """The finding's bytes with its `id` value set to `new_id`; no other byte changes. `other()` is the
     path of another file with that ID that kblam can renumber, or None: only then does a refusal offer
-    renumbering it instead (SPEC §7)."""
+    renumbering it instead (SPEC §7). When it offers nothing, the refusal says to leave the file as it is
+    and tell the user what to fix: agents may not edit a file under findings/, and kblam cannot rewrite an
+    `id` line it cannot set without changing anything else."""
     try:
         position = finding.meta.lc.key("id")
     except (AttributeError, KeyError):
         alternative = other()
         raise StoreError(f"{shown} has no id key, so kblam cannot rewrite it; "
                          + (_instead(alternative) if alternative
-                            else f"ask a person to add its id line (id: {finding.file_id})")) from None
+                            else f"leave it as it is and tell the user to add its id line "
+                                 f"(id: {finding.file_id})")) from None
     data = _rewrite_entry(finding, position, new_id)
     expected = plain_data(finding.meta)
     expected["id"] = new_id
@@ -944,7 +949,8 @@ def _set_id(finding: Finding, new_id: str, shown: str, other) -> bytes:
         alternative = other()
         raise StoreError(f"{shown}: could not set id to {new_id} without changing anything else; "
                          + (f"{_instead(alternative)}, or " if alternative else "")
-                         + "ask a person to fix this file's id line")
+                         + f"leave it as it is and tell the user to write this file's id line as "
+                           f"id: {finding.file_id}")
     return data
 
 
@@ -966,10 +972,16 @@ def renumber(cfg: Config, path: Path) -> RenumberResult:
     shows it means this file (it equals this file's fingerprint before the change, and no file keeping the
     old ID has that fingerprint) is re-keyed to the new ID with this file's new fingerprint, verified by
     re-parsing as `stamp_dependency` is. The other mentions of the old ID (titles, bodies, depends_on entries
-    whose fingerprint does not settle which file they mean) are listed for a person to check. A resolution
+    whose fingerprint does not settle which file they mean) are listed for the user to check. A resolution
     (§6.4) whose side is the old ID at this file's state hash meant this file, so a copy under the new ID is
     appended to kblam.resolutions.jsonl, and the verdicts it settled are not raised again. It regenerates
     INDEX.md and applies the tree.hash rule (§8).
+
+    Refused while a review record that is not retired links the selected file (SPEC §7 "`rm` and
+    `renumber` vs review records"): the refusal says which other file with the ID to renumber instead, and,
+    when none can be, hands the dead end to the adjudicator, who retires each record that links the selected
+    file, renumbers it, and re-files each retired record whose question still applies against its new ID. A
+    retired record no longer refuses a renumber.
     """
     source = Path(path)
     with kb_lock(cfg, f"renumber {source.name}"):
@@ -1004,8 +1016,13 @@ def _renumber(cfg: Config, source: Path) -> RenumberResult:
     def other() -> str | None:
         return next((k.path for k, problem in unlinked_peers() if problem is None), None)
 
+    def mine_problem() -> str | None:
+        """Why renumbering the selected file itself would refuse once the records that link it are retired
+        (None when it would not): a refusal never names a command that would still refuse for this file."""
+        return _renumber_problem(cfg, view, finding, new_id)
+
     if links[finding.path]:
-        raise StoreError(_linked_renumber(view, finding, links, unlinked_peers()))
+        raise StoreError(_linked_renumber(view, finding, links, unlinked_peers(), mine_problem))
     plan = _renumber_plan(cfg, view, finding, kept, new_id, other)
 
     clean = clean_before_v2(cfg, view, bool(view.records), creates_registry=False)
@@ -1050,10 +1067,11 @@ def _renumber_plan(cfg: Config, view: KBView, finding: Finding, kept: list[Findi
     if not finding.ok:
         line, message = finding.parse_errors[0]
         alternative = other()
+        where = f"line {line}" if line else "this file"
         raise StoreError(f"{finding.path} cannot be read as a finding (" + (f"line {line}: " if line else "")
                          + f"{message}), so kblam cannot rewrite its id; "
                          + (f"{_instead(alternative)}, or " if alternative else "")
-                         + "ask a person to fix this file")
+                         + f"leave it as it is and tell the user to repair {where}")
     new_path = f"{PurePosixPath(finding.path).parent.as_posix()}/{new_id}-{finding.slug}.md"
     data = _set_id(finding, new_id, finding.path, other)
     new_fp = fingerprint(parse_finding(new_path, data), cfg.scope_separator)
@@ -1121,11 +1139,14 @@ def _bound(cfg: Config, rec, finding: Finding) -> bool:
 def _links(view: KBView, finding_id: str) -> dict[str, list]:
     """The review records that link each file with `finding_id`: {path: [records.Record]}, in `_kind_order`.
     A CT or CU naming the ID links the file its binding identifies, or, when its binding identifies none,
-    every file with the ID. An SC's `linked_findings` entry is a bare ID and links every file with it. Every
-    status counts: retiring a record does not free a finding's identity. Installed records only."""
+    every file with the ID. An SC's `linked_findings` entry is a bare ID and links every file with it.
+    Every status counts except `stale`: a retired record's question is settled by the adjudicator, who
+    retires it, so it no longer keeps a finding's identity and never refuses an rm or a renumber
+    (SPEC §7 "`rm` and `renumber` vs review records"). Installed records only."""
     files = [f for f in view.findings if f.file_id == finding_id]
     links: dict[str, list] = {f.path: [] for f in files}
-    named = [rec for rec in view.records if isinstance(rec.id, str) and isinstance(rec.data, dict)]
+    named = [rec for rec in view.records if isinstance(rec.id, str) and isinstance(rec.data, dict)
+             and rec.status != records.RETIRED]
     for rec in sorted(named, key=lambda rec: _kind_order(rec.id)):
         if rec.kind == "SC":
             listed = rec.data.get("linked_findings")
@@ -1146,59 +1167,184 @@ def _review_records(ids: list[str], verb: str = "") -> str:
     return words + (f" {verb}s" if len(ids) == 1 else f" {verb}") if verb else words
 
 
+def _staged_copy(cfg: Config, finding: Finding) -> str:
+    """The one staged copy of `finding` a merge works in, named for the state kblam finds (SPEC §7): the
+    copy `kblam edit` would stage when none is staged, the staged copy itself for one, and which of several
+    to keep."""
+    staged = sorted(display_path(cfg, p) for n, p in _ids_in(cfg.staging_dir) if format_id(n) == finding.file_id)
+    if not staged:
+        # the copy `kblam edit` stages when none is staged yet: it copies the installed file's own name
+        return f"run kblam edit {finding.file_id}, which stages one at {display_path(cfg, cfg.staging_dir / finding.name)}"
+    if len(staged) == 1:
+        return f"your staged copy is {staged[0]}"
+    return (f"keep one of your staged copies {', '.join(staged)} and delete the others, and work in that copy")
+
+
+def _merge_route(lead: str, removed: Finding, target: Finding, one: str) -> str:
+    """The steps that move everything `removed` states into `target` (SPEC §7): the quantity route comes
+    first, so whoever runs it checks that before choosing, and the removal comes before the put, since a put
+    of `target` that states `removed`'s fact is refused while `removed` is installed. `lead` introduces the
+    route and names the direction, and `one` is the staged copy of `target` to work in."""
+    removed_id, target_id = removed.file_id, target.file_id
+    return (f"{lead}: {one}. If {removed_id} gives a quantity {target_id} lacks, kblam rm {removed_id} "
+            f"--merged-into {target_id} is refused for it: add only that quantity to that copy, leave "
+            f"{target_id}'s claim as it is installed, and kblam put it; that put leaves nothing staged, so "
+            f"kblam edit {target_id} stages the next copy to work in. Add what {removed_id} states that "
+            f"{target_id} does not yet (its detail and quantities) to the copy you are working in, run kblam "
+            f"rm {removed_id} --merged-into {target_id}, then kblam put that copy (a put of {target_id} that "
+            f"states {removed_id}'s fact is refused while {removed_id} is installed)")
+
+
+def _stale_sentence(cfg: Config, recs: list, finding: Finding) -> str:
+    """The sentence naming the records a put of an edited copy of `finding` lists as made stale (SPEC
+    §5.2.4): those whose binding matches this file and whose status is neither retired nor withdrawn; ""
+    when there are none."""
+    stale = [rec.id for rec in recs
+             if rec.kind in BINDINGS and rec.status not in RETIRED_STATUSES and _bound(cfg, rec, finding)]
+    if not stale:
+        return ""
+    each = "it" if len(stale) == 1 else "each"
+    return (f". The edit makes {', '.join(stale)} stale until a reviewer rechecks and rebinds {each}; kblam "
+            f"put prints the kblam review rebind command for {each}")
+
+
+def _adjudicator_sends(ids: list[str]) -> str:
+    """Who settles a dead end and what an agent that is not the adjudicator does with it (SPEC §8.1): the
+    adjudicator is the librarian when one is deployed and otherwise the coordinator, never the author of the
+    records concerned, and the other agent names the IDs to it and carries on."""
+    return ("Settling this is the adjudicator's: the librarian when one is deployed, otherwise the "
+            "coordinator, and never the author of the records involved. Send " + _and(ids)
+            + " to the coordinator or librarian, who decide them, and carry on.")
+
+
+def _retire_commands(recs: list, reason) -> str:
+    """The commands that retire each of `recs`, in order, each with its current subject digest in full
+    (`decisions.subject_digest`), which `--expect` takes: the adjudicator's retire step. `reason` gives the
+    `--reason` text of one record."""
+    return "; ".join(f"kblam review decide {rec.id} --status stale --by NAME --reason \"{reason(rec)}\" "
+                     f"--expect {decisions.subject_digest(rec.kind, rec.data)}" for rec in recs)
+
+
+def _independence_notes(recs: list) -> str:
+    """For each of `recs` the retire step decides that is not open, the role its `--by` must not be, with
+    that role's recorded value (SPEC §5.2.2 "Independent means"): retiring an open record needs no
+    independence and every other decision does, so the printed command succeeds for whoever runs it."""
+    notes = []
+    for rec in recs:
+        data = rec.data if isinstance(rec.data, dict) else {}
+        if rec.status not in records.STATUSES.get(rec.kind, ()) or rec.status == "open":
+            continue
+        roles = [f"its {role} ({rec.id}'s {role} is {data.get(role)})"
+                 for role in decisions.SELF_ROLES.get(rec.kind, ())
+                 if isinstance(data.get(role), str) and data.get(role)]
+        if roles:
+            notes.append(f" {rec.id} is {rec.status}, so its --by must not be " + _and(roles) + ".")
+    return "".join(notes)
+
+
+def _refile_steps(target: str, phrase: str) -> str:
+    """The re-file step of a dead end (SPEC §5.2.5): a retired record whose question still applies is filed
+    again against the finding that remains, `target` as the commands name it and `phrase` as the sentence
+    names it. A use is never filed on its own: `use review` stages one only for a confirmed challenge's
+    affected excerpt."""
+    return (f" For each retired record whose question still applies to {phrase}, file a new record against "
+            f"{phrase}: kblam challenge new SOURCE-PATH --lines A-B --by NAME, whose free linked_findings "
+            f"entry then names {target}; kblam task new {target} --kind KIND --by NAME --proponent NAME; and, "
+            f"for a use, kblam use review SC-NNNN {target} ORDINAL --by NAME --proponent NAME, which stages "
+            f"one only for a confirmed challenge's affected excerpt of {target}. Fill the staged record and "
+            f"put it (kblam put STAGED-PATH)")
+
+
+def _selected_file_route(finding: Finding, problem: str) -> str:
+    """What a renumber dead end says about the selected file itself (SPEC §7), when the renumber the route
+    names would refuse for it once the records that link it are retired: the file's own problem, and the
+    step that makes the route runnable. The problems kblam writes for the file itself end with the step to
+    leave it and tell the user what to repair; the others (a damaged kblam.resolutions.jsonl, a dependent's
+    `depends_on` entry it cannot re-key) name what to repair in the problem, so the step is added without
+    naming a file."""
+    path = finding.path
+    step = ("" if "leave it as it is and tell the user" in problem
+            else " Leave it as it is and tell the user to repair what the line above names.")
+    return (f" Then kblam renumber {path} refuses for this file itself: {problem}.{step} Once it is "
+            f"repaired, run kblam renumber {path} again")
+
+
+def _retire_then_renumber(finding: Finding, files: list[Finding], mine: list, sent: list[str],
+                          own) -> str:
+    """The way out of a renumber dead end (SPEC §7): the adjudicator retires each record that links the
+    selected file and is not retired, renumbers it, and files each retired record whose question still
+    applies again against the new ID the renumber prints. `files` is every file with the ID, for the reason
+    the retirement records; `mine` are the records that link the selected file; `sent` is what an agent that
+    is not the adjudicator names to it. `own()` is why renumbering the selected file itself would refuse
+    once it is free (None when it would not): the route then names that problem instead of the renumber, so
+    nothing prints a command that cannot run."""
+    count = {2: "two", 3: "three"}.get(len(files), str(len(files)))
+
+    def reason(rec) -> str:
+        """The reason the retirement records: the file the record links is taking a new ID, so the record's
+        question belongs with the new name."""
+        return f"{finding.path} took a new ID: {count} findings shared {finding.file_id}"
+
+    bare = ""
+    sc_ids = [rec.id for rec in mine if rec.kind == "SC"]
+    if sc_ids:
+        # an SC's linked_findings entry is a bare ID, so it links every file with the ID
+        bare = (f" {_and(sc_ids)} {'lists' if len(sc_ids) == 1 else 'list'} {finding.file_id} in "
+                f"linked_findings as a bare ID, so it links every file with the ID: retiring it frees all of "
+                f"them, and each record is listed once.")
+    problem = own()
+    tail = (_selected_file_route(finding, problem) if problem else
+            f" Then kblam renumber {finding.path}, which prints the new ID."
+            + _refile_steps("NEW-ID", "the ID kblam renumber prints"))
+    return (_adjudicator_sends(sent)
+            + f" The adjudicator retires each record that links {finding.path} and is not retired: "
+            + _retire_commands(mine, reason) + "." + _independence_notes(mine) + bare + tail)
+
+
 def _linked_removal(cfg: Config, view: KBView, finding: Finding, target: Finding, linked: list) -> str:
-    """rm's refusal of a finding review records link (SPEC §7): merge the other way, unless a record also
-    links the target. The staged copies and the records the edit makes stale are named as SPEC §7 says, and
-    the removal is named before the put: a put of the finding that states the target's fact is refused while
-    the target is installed, so the merge removes the target first. The quantity route comes first, so the
-    author checks it before choosing, and the whole merge works in one staged copy: `kblam edit` only when
-    none is staged, or again after a put has consumed the copy."""
+    """rm's refusal of a finding review records link (SPEC §7). When no record that is not retired links
+    the target either, neither finding can be removed, and the refusal hands the dead end to the
+    adjudicator, who retires the records that link the finding being removed and merges it into the target.
+    Otherwise it says to merge the other way, and names the staged copy and the records the edit makes
+    stale: the removal comes before the put (a put of the finding that states the target's fact is refused
+    while the target is installed), the quantity route comes first, so the author checks it before
+    choosing, and the whole merge works in one staged copy: `kblam edit` only when none is staged, or again
+    after a put has consumed the copy."""
     finding_id, target_id = finding.file_id, target.file_id
     mine = [rec.id for rec in linked]
-    theirs = [rec.id for rec in _links(view, target_id)[target.path]]
+    target_links = _links(view, target_id)[target.path]
     head = f"{finding_id} cannot be removed: {_review_records(mine, 'link')} it"
-    if theirs:
+    if target_links:
+        theirs = [rec.id for rec in target_links]
         named = sorted(set(mine) | set(theirs), key=_kind_order)
-        return (f"{head}, and {target_id} cannot be removed in its place: {_review_records(theirs, 'link')} it; "
-                f"kblam never removes a finding a review record links. {cfg.findings_dir}/ is unchanged. Leave "
-                f"both as they are and tell the user {_and([finding_id, target_id, *named])}")
-    staged = sorted(display_path(cfg, p) for n, p in _ids_in(cfg.staging_dir) if format_id(n) == finding_id)
-    # the copy `kblam edit` stages when none is staged yet: it copies the installed file's own name
-    fresh = display_path(cfg, cfg.staging_dir / finding.name)
-    if not staged:
-        one = f"run kblam edit {finding_id}, which stages one at {fresh}"
-    elif len(staged) == 1:
-        one = f"your staged copy is {staged[0]}"
-    else:
-        one = (f"keep one of your staged copies {', '.join(staged)} and delete the others, and work in that "
-               f"copy")
-    text = (f"{head}, and kblam never removes a finding a review record links. {cfg.findings_dir}/ is unchanged. "
-            f"Merge the other way, in one staged copy of {finding_id}: {one}. If {target_id} gives a quantity "
-            f"{finding_id} lacks, kblam rm {target_id} --merged-into {finding_id} is refused for it: add only "
-            f"that quantity to that copy, leave {finding_id}'s claim as it is installed, and kblam put it; that "
-            f"put leaves nothing staged, so kblam edit {finding_id} stages the next copy to work in. Add what "
-            f"{target_id} states that {finding_id} does not yet (its detail and quantities) to the copy you are "
-            f"working in, run kblam rm {target_id} --merged-into {finding_id}, then kblam put that copy (a put "
-            f"of {finding_id} that states {target_id}'s fact is refused while {target_id} is installed)")
-    # the records the put of the edited finding lists as made stale (_made_stale): bound to this file, not retired
-    stale = [rec.id for rec in linked
-             if rec.kind in BINDINGS and rec.status not in RETIRED_STATUSES and _bound(cfg, rec, finding)]
-    if stale:
-        each = "it" if len(stale) == 1 else "each"
-        text += (f". The edit makes {', '.join(stale)} stale until a reviewer rechecks and rebinds {each}; kblam "
-                 f"put prints the kblam review rebind command for {each}")
-    return text
+        return (f"{head}, and {target_id} cannot be removed in its place: {_review_records(theirs, 'link')} "
+                f"it; kblam never removes a finding a review record links. {cfg.findings_dir}/ is unchanged. "
+                + _adjudicator_sends([finding_id, target_id, *named])
+                + f" The adjudicator retires each record that links {finding_id} and is not retired: "
+                + _retire_commands(linked, lambda rec: f"{finding_id} merged into {target_id}")
+                + "." + _independence_notes(linked)
+                + " " + _merge_route(f"Then merge {finding_id} into {target_id}, in one staged copy of "
+                                     f"{target_id}", finding, target, _staged_copy(cfg, target))
+                + _stale_sentence(cfg, target_links, target) + "."
+                + _refile_steps(target_id, target_id))
+    return (f"{head}, and kblam never removes a finding a review record links. {cfg.findings_dir}/ is unchanged. "
+            + _merge_route(f"Merge the other way, in one staged copy of {finding_id}", target, finding,
+                           _staged_copy(cfg, finding))
+            + _stale_sentence(cfg, linked, finding))
 
 
 def _linked_renumber(view: KBView, finding: Finding, links: dict[str, list],
-                     peers: list[tuple[Finding, str | None]]) -> str:
+                     peers: list[tuple[Finding, str | None]], own) -> str:
     """renumber's refusal of a file review records link (SPEC §7): renumber another file with the ID that
-    kblam can renumber, or, when there is none, why not. `peers` are the other files no record links, each
-    with the reason kblam cannot renumber it (None when it can)."""
+    kblam can renumber, or, when there is none, hand the dead end to the adjudicator, who retires each
+    record that links the selected file and renumbers it. `peers` are the other files no record links, each
+    with the reason kblam cannot renumber it (None when it can); `own()` is why renumbering the selected
+    file itself would refuse once it is free (None when it would not)."""
     old_id = finding.file_id
     files = [f for f in view.findings if f.file_id == old_id]
-    mine = [rec.id for rec in links[finding.path]]
-    head = f"{finding.path} holds {old_id}, which {_review_records(mine, 'link')}, so it keeps its ID"
+    mine = links[finding.path]
+    ids = [rec.id for rec in mine]
+    head = f"{finding.path} holds {old_id}, which {_review_records(ids, 'link')}, so it keeps its ID"
     ready = [f.path for f, problem in peers if problem is None]
     if ready:
         if len(files) == 2:
@@ -1207,20 +1353,21 @@ def _linked_renumber(view: KBView, finding: Finding, links: dict[str, list],
             which = f"the other finding{'s' if len(ready) > 1 else ''} with that ID that kblam can renumber"
         return f"{head}. Renumber {which} instead: " + "; ".join(f"kblam renumber {path}" for path in ready)
     if not peers:
-        ids = sorted({rec.id for f in files for rec in links[f.path]}, key=_kind_order)
+        all_ids = sorted({rec.id for f in files for rec in links[f.path]}, key=_kind_order)
         both, paths = (("both findings", "both paths") if len(files) == 2
                        else (f"all {len(files)} findings", f"the {len(files)} paths"))
-        return (f"{both} with ID {old_id} ({', '.join(f.path for f in files)}) are linked by {_review_records(ids)}, "
-                f"and kblam renumbers no finding a review record links. K1 fails kblam validate and every commit "
-                f"until a person settles this: tell the user {paths} and {', '.join(ids)}")
+        return (f"{both} with ID {old_id} ({', '.join(f.path for f in files)}) are linked by "
+                f"{_review_records(all_ids)}, and kblam renumbers no finding a review record links. K1 fails "
+                f"kblam validate and every commit until this is settled. "
+                + _retire_then_renumber(finding, files, mine, [paths, *all_ids], own))
     if len(files) == 2:
         (peer, problem), = peers
         why = f"the other finding with that ID, {peer.path}, cannot be renumbered yet: {problem}"
     else:
         why = (f"the other finding{'s' if len(peers) > 1 else ''} with that ID that no review record links cannot "
                f"be renumbered yet: " + "; ".join(f"{f.path}: {problem}" for f, problem in peers))
-    return (f"{head}; {why}. Ask a person to fix that, then run "
-            + "; ".join(f"kblam renumber {f.path}" for f, _ in peers))
+    return (f"{head}; {why}. "
+            + _retire_then_renumber(finding, files, mine, [finding.path, *ids], own))
 
 
 def _carried_resolutions(cfg: Config, finding: Finding, old_id: str, new_id: str) -> list[resolutions.Resolution]:

@@ -6,8 +6,13 @@ message names is run in the state the message names and succeeds (D49)."""
 from __future__ import annotations
 
 import hashlib
+import os
+import re
 import shlex
 import shutil
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -56,8 +61,8 @@ def cu(kb, rec_id: str, path: str, finding_id: str = "F-0012", **fields) -> None
     install(kb, "CU", rec_id, finding=finding_id, finding_fingerprint=fp, finding_file_sha256=sha, **fields)
 
 
-def sc(kb, rec_id: str, *finding_ids: str) -> None:
-    install(kb, "SC", rec_id, linked_findings=list(finding_ids))
+def sc(kb, rec_id: str, *finding_ids: str, **fields) -> None:
+    install(kb, "SC", rec_id, linked_findings=list(finding_ids), **fields)
 
 
 def merge_pair(kb, *, quantity: bool = True) -> None:
@@ -110,19 +115,75 @@ def message(command: str, text: str) -> str:
 # --- rm: the refusal texts -----------------------------------------------------------------------
 
 
+def merge_into(removed: str, target: str, one: str, lead: str) -> str:
+    """The steps that move everything `removed` states into `target`, as a refusal prints them: the
+    quantity route first, the removal before the put, and the whole merge in one staged copy of `target`
+    (`one`). `lead` names the direction."""
+    return (f"{lead}: {one}. If {removed} gives a quantity {target} lacks, kblam rm {removed} "
+            f"--merged-into {target} is refused for it: add only that quantity to that copy, leave "
+            f"{target}'s claim as it is installed, and kblam put it; that put leaves nothing staged, so "
+            f"kblam edit {target} stages the next copy to work in. Add what {removed} states that {target} "
+            f"does not yet (its detail and quantities) to the copy you are working in, run kblam rm "
+            f"{removed} --merged-into {target}, then kblam put that copy (a put of {target} that states "
+            f"{removed}'s fact is refused while {removed} is installed)")
+
+
 def merge_text(records: str, one: str, stale: str = "") -> str:
     """The merge-the-other-way refusal for a linked finding: who links it, the one staged copy to work in,
     and the sequence that copy runs. The quantity route comes first, so the author checks it before
     choosing a route, and the removal comes before the put in every state."""
     return (f"F-0012 cannot be removed: {records} it, and kblam never removes a finding a review record "
-            f"links. findings/ is unchanged. Merge the other way, in one staged copy of F-0012: {one}. If "
-            f"F-0020 gives a quantity F-0012 lacks, kblam rm F-0020 --merged-into F-0012 is refused for it: "
-            f"add only that quantity to that copy, leave F-0012's claim as it is installed, and kblam put "
-            f"it; that put leaves nothing staged, so kblam edit F-0012 stages the next copy to work in. Add "
-            f"what F-0020 states that F-0012 does not yet (its detail and quantities) to the copy you are "
-            f"working in, run kblam rm F-0020 --merged-into F-0012, then kblam put that copy (a put of "
-            f"F-0012 that states F-0020's fact is refused while F-0020 is installed)") + stale + "."
+            f"links. findings/ is unchanged. "
+            + merge_into("F-0020", "F-0012", one, "Merge the other way, in one staged copy of F-0012")
+            + stale + ".")
 
+
+def adjudicator_route(sent: str, path: str, decides: str, note: str = "") -> str:
+    """The adjudicator wording and the retire step: who settles a dead end, what an agent that is not the
+    adjudicator sends it, and the commands that retire each record linking `path`; `note` is the
+    independence note of a record that is not open."""
+    return (f"Settling this is the adjudicator's: the librarian when one is deployed, otherwise the "
+            f"coordinator, and never the author of the records involved. Send {sent} to the coordinator or "
+            f"librarian, who decide them, and carry on. The adjudicator retires each record that links "
+            f"{path} and is not retired: {decides}." + note)
+
+
+def refile_text(target: str, phrase: str) -> str:
+    """The re-file step: a retired record whose question still applies is filed again against the finding
+    that remains (`target` in the commands, `phrase` in the sentence)."""
+    return (f" For each retired record whose question still applies to {phrase}, file a new record against "
+            f"{phrase}: kblam challenge new SOURCE-PATH --lines A-B --by NAME, whose free linked_findings "
+            f"entry then names {target}; kblam task new {target} --kind KIND --by NAME --proponent NAME; "
+            f"and, for a use, kblam use review SC-NNNN {target} ORDINAL --by NAME --proponent NAME, which "
+            f"stages one only for a confirmed challenge's affected excerpt of {target}. Fill the staged "
+            f"record and put it (kblam put STAGED-PATH)")
+
+
+def retire_commands(kb, reason: str, *rec_ids: str) -> str:
+    """The retire commands a refusal prints for `rec_ids`, each with its current subject digest (the same
+    digest `kblam review decide --expect` takes) and the reason the adjudicator records."""
+    return "; ".join(f'kblam review decide {rec_id} --status stale --by NAME --reason "{reason}" '
+                     f"--expect {m.expect(kb, rec_id)}" for rec_id in rec_ids)
+
+
+# The merge a dead end runs: the direction F-0012 into F-0020, in one staged copy of F-0020.
+REASON_MERGE = "F-0012 merged into F-0020"
+TARGET_FRESH = "run kblam edit F-0020, which stages one at .kblam/staging/F-0020-motor.md"
+MERGE_TARGET = merge_into("F-0012", "F-0020", TARGET_FRESH,
+                          "Then merge F-0012 into F-0020, in one staged copy of F-0020")
+# The sentence naming the records the edit of F-0020, the target, makes stale.
+STALE_TARGET = (". The edit makes CU-0001 stale until a reviewer rechecks and rebinds it; kblam put "
+                "prints the kblam review rebind command for it")
+
+
+def dead_end_text(kb, records: str, records_for: str, sent: str, rec_ids: tuple[str, ...],
+                  stale: str = "", note: str = "") -> str:
+    """The dead end where a record also links the target: nothing can be removed, so the refusal hands it
+    to the adjudicator, who retires the records linking F-0012 and merges F-0012 into F-0020."""
+    return (f"F-0012 cannot be removed: {records} it, and F-0020 cannot be removed in its place: "
+            f"{records_for} it; kblam never removes a finding a review record links. findings/ is unchanged. "
+            + adjudicator_route(sent, "F-0012", retire_commands(kb, REASON_MERGE, *rec_ids), note)
+            + " " + MERGE_TARGET + stale + "." + refile_text("F-0020", "F-0020") + ".")
 
 # What the refusal names as the one staged copy to work in, per staged-copy state.
 EDIT_FRESH = "run kblam edit F-0012, which stages one at .kblam/staging/F-0012-sensor.md"
@@ -154,13 +215,13 @@ def test_rm_names_every_record_and_each_one_the_edit_makes_stale(kb):
 
 @pytest.mark.parametrize("setup, records", [
     (lambda kb: sc(kb, "SC-0004", "F-0012"), "review record SC-0004 links"),
-    (lambda kb: (ct(kb, "CT-0003", MINE, status="stale"), cu(kb, "CU-0002", MINE, status="withdrawn")),
-     "review records CT-0003, CU-0002 link"),
+    (lambda kb: cu(kb, "CU-0002", MINE, status="withdrawn"), "review record CU-0002 links"),
     (lambda kb: ct(kb, "CT-0003", "findings/nowhere.md"), "review record CT-0003 links"),  # a stale binding
 ])
 def test_rm_leaves_the_stale_sentence_out_when_the_edit_makes_no_record_stale(kb, setup, records):
-    """Only SC links, only retired or withdrawn records, or a binding that no longer matches the file: the
-    put of the edited finding lists nothing as made stale, so the refusal says nothing about it."""
+    """Only SC links, only a withdrawn record, or a binding that no longer matches the file: the put of
+    the edited finding lists nothing as made stale, so the refusal says nothing about it. A retired record
+    does not link at all (R3e), so it cannot reach this refusal."""
     merge_pair(kb)
     setup(kb)
     assert refused(kb, "rm", "F-0012", "--merged-into", "F-0020") == message(
@@ -184,24 +245,31 @@ def test_rm_with_several_staged_copies_names_each(kb):
         "rm", merge_text("review record SC-0004 links", SEVERAL_STAGED))
 
 
-def test_rm_refuses_when_a_record_also_links_the_target(kb):
+def test_rm_dead_end_is_handed_to_the_adjudicator_in_full(kb):
+    """F-0012 and F-0020 are both linked: the whole text, byte for byte, with the retire command carrying
+    the record's current subject digest in full and the merge named in the direction F-0012 into F-0020."""
     merge_pair(kb)
     ct(kb, "CT-0003", MINE)
     cu(kb, "CU-0001", "findings/motor/F-0020-motor.md", finding_id="F-0020")
-    assert refused(kb, "rm", "F-0012", "--merged-into", "F-0020") == message("rm", (
-        "F-0012 cannot be removed: review record CT-0003 links it, and F-0020 cannot be removed in its place: "
-        "review record CU-0001 links it; kblam never removes a finding a review record links. findings/ is "
-        "unchanged. Leave both as they are and tell the user F-0012, F-0020, CT-0003 and CU-0001."))
+    assert refused(kb, "rm", "F-0012", "--merged-into", "F-0020") == message("rm", dead_end_text(
+        kb, "review record CT-0003 links", "review record CU-0001 links",
+        "F-0012, F-0020, CT-0003 and CU-0001", ("CT-0003",), STALE_TARGET))
 
 
-def test_rm_names_a_record_that_links_both_findings_once(kb):
+def test_rm_dead_end_names_each_record_once_and_its_independence(kb):
+    """A rejected record that is not open needs a `--by` other than its creator, so the refusal names the
+    role and its value; a record linking both findings is listed once."""
     merge_pair(kb)
     ct(kb, "CT-0003", MINE)
     sc(kb, "SC-0004", "F-0012", "F-0020")
-    assert refused(kb, "rm", "F-0012", "--merged-into", "F-0020") == message("rm", (
-        "F-0012 cannot be removed: review records SC-0004, CT-0003 link it, and F-0020 cannot be removed in its "
-        "place: review record SC-0004 links it; kblam never removes a finding a review record links. findings/ "
-        "is unchanged. Leave both as they are and tell the user F-0012, F-0020, SC-0004 and CT-0003."))
+    install(kb, "SC", "SC-0002", linked_findings=["F-0012"], status="rejected", creator="reviewer-a")
+    cu(kb, "CU-0001", "findings/motor/F-0020-motor.md", finding_id="F-0020", status="withdrawn",
+       proponent="researcher-a")
+    assert refused(kb, "rm", "F-0012", "--merged-into", "F-0020") == message("rm", dead_end_text(
+        kb, "review records SC-0002, SC-0004, CT-0003 link", "review records SC-0004, CU-0001 link",
+        "F-0012, F-0020, SC-0002, SC-0004, CT-0003 and CU-0001", ("SC-0002", "SC-0004", "CT-0003"),
+        note=" SC-0002 is rejected, so its --by must not be its creator (SC-0002's creator is reviewer-a)."))
+
 
 
 # --- rm: the commands the refusal names (D49) ----------------------------------------------------
@@ -326,19 +394,27 @@ def test_a_withdrawn_record_still_links(kb):
         f"finding with that ID instead: kblam renumber {MINE}."))
 
 
-@pytest.mark.parametrize("setup, records, listed", [
-    (lambda kb: sc(kb, "SC-0004", "F-0012"), "review record SC-0004", "SC-0004"),          # a bare ID
-    (lambda kb: ct(kb, "CT-0003", "findings/nowhere.md"), "review record CT-0003", "CT-0003"),  # matches neither
+def bare_note(*sc_ids: str) -> str:
+    """The note a renumber dead end prints for the SC records it retires: an SC's linked_findings entry is
+    a bare ID, so retiring one frees every file with that ID."""
+    words = ", ".join(sc_ids[:-1]) + (" and " if len(sc_ids) > 1 else "") + sc_ids[-1]
+    return (f" {words} {'lists' if len(sc_ids) == 1 else 'list'} F-0012 in linked_findings as a bare ID, so "
+            f"it links every file with the ID: retiring it frees all of them, and each record is listed once.")
+
+
+@pytest.mark.parametrize("setup, records, sent, retire, note", [
+    (lambda kb: sc(kb, "SC-0004", "F-0012"), "review record SC-0004", "both paths and SC-0004",
+     ("SC-0004",), bare_note("SC-0004")),                                              # a bare ID
+    (lambda kb: ct(kb, "CT-0003", "findings/nowhere.md"), "review record CT-0003", "both paths and CT-0003",
+     ("CT-0003",), ""),                                                             # matches neither file
     (lambda kb: (ct(kb, "CT-0003", MINE), cu(kb, "CU-0001", THEIRS)), "review records CT-0003, CU-0001",
-     "CT-0003, CU-0001"),
+     "both paths, CT-0003 and CU-0001", ("CT-0003",), ""),                # records link the two files
 ])
-def test_renumber_refuses_when_every_file_with_the_id_is_linked(kb, setup, records, listed):
+def test_renumber_refuses_when_every_file_with_the_id_is_linked(kb, setup, records, sent, retire, note):
     same_id(kb)
     setup(kb)
-    assert refused(kb, "renumber", kb.root / MINE) == message("renumber", (
-        f"both findings with ID F-0012 ({MINE}, {THEIRS}) are linked by {records}, and kblam renumbers no "
-        f"finding a review record links. K1 fails kblam validate and every commit until a person settles "
-        f"this: tell the user both paths and {listed}."))
+    assert refused(kb, "renumber", kb.root / MINE) == message("renumber", renumber_dead_end_text(
+        kb, "both findings", f"{MINE}, {THEIRS}", records, sent, MINE, "two", retire, note=note))
 
 
 def test_renumber_with_three_files_names_each_one_it_can_renumber(kb):
@@ -359,8 +435,12 @@ def test_renumber_with_three_files_all_linked(kb):
     sc(kb, "SC-0004", "F-0012")
     assert refused(kb, "renumber", kb.root / THEIRS) == message("renumber", (
         f"all 3 findings with ID F-0012 ({MINE}, {THEIRS}, {THIRD}) are linked by review record SC-0004, and "
-        f"kblam renumbers no finding a review record links. K1 fails kblam validate and every commit until a "
-        f"person settles this: tell the user the 3 paths and SC-0004."))
+        f"kblam renumbers no finding a review record links. K1 fails kblam validate and every commit until "
+        f"this is settled. "
+        + adjudicator_route("the 3 paths and SC-0004", THEIRS,
+                            retire_commands(kb, took_new_id(THEIRS, "three"), "SC-0004"), note=bare_note("SC-0004"))
+        + f" Then kblam renumber {THEIRS}, which prints the new ID."
+        + refile_text("NEW-ID", "the ID kblam renumber prints") + "."))
 
 
 UNREADABLE = "---\nid: F-0012\ntitle: [unclosed\n---\n\n**Claim.** The motor warm-up drift settles.\n"
@@ -370,18 +450,20 @@ def damage_unreadable(kb) -> str:
     kb.write(THEIRS, UNREADABLE)
     line, problem = parse_finding(THEIRS, UNREADABLE.encode()).parse_errors[0]
     return (f"{THEIRS} cannot be read as a finding (" + (f"line {line}: " if line else "") + f"{problem}), so "
-            f"kblam cannot rewrite its id; ask a person to fix this file")
+            f"kblam cannot rewrite its id; leave it as it is and tell the user to repair "
+            + (f"line {line}" if line else "this file"))
 
 
 def damage_id_line(kb) -> str:
     kb.write(THEIRS, finding_text("F-0012", CLAIM_B, topic="motor").replace("id: F-0012", "id: !!str F-0012"))
-    return (f"{THEIRS}: could not set id to F-0013 without changing anything else; ask a person to fix this "
-            f"file's id line")
+    return (f"{THEIRS}: could not set id to F-0013 without changing anything else; leave it as it is and tell "
+            f"the user to write this file's id line as id: F-0012")
 
 
 def damage_no_id(kb) -> str:
     kb.write(THEIRS, finding_text("F-0012", CLAIM_B, topic="motor").replace("id: F-0012\n", ""))
-    return f"{THEIRS} has no id key, so kblam cannot rewrite it; ask a person to add its id line (id: F-0012)"
+    return (f"{THEIRS} has no id key, so kblam cannot rewrite it; leave it as it is and tell the user to add "
+            f"its id line (id: F-0012)")
 
 
 def damage_resolutions(kb) -> str:
@@ -396,17 +478,46 @@ def repair(kb) -> None:
     (kb.root / "kblam.resolutions.jsonl").unlink(missing_ok=True)
 
 
-@pytest.mark.parametrize("damage", [damage_unreadable, damage_id_line, damage_no_id, damage_resolutions])
-def test_renumber_says_why_the_unlinked_file_cannot_be_renumbered_yet(kb, at_root, damage):
-    """Case C, for each reason; a person fixes it, and then the command the message names succeeds."""
+def own_problem_clause(path: str, problem: str, step: str = "") -> str:
+    """The clause a renumber dead end prints when the selected file itself would refuse once the records
+    that link it are retired: its own problem, and the step to run again once the user has repaired it.
+    `step` is the leave-it sentence, given only when the problem does not carry one itself (a damaged
+    kblam.resolutions.jsonl's problem does not; the ones kblam writes for the file do)."""
+    leave = f" {step}" if step else ""
+    return (f" Then kblam renumber {path} refuses for this file itself: {problem}.{leave} Once it is "
+            f"repaired, run kblam renumber {path} again.")
+
+
+# What the clause adds for a problem that does not itself say to leave the file and tell the user.
+STEP_FROM_PROBLEM = "Leave it as it is and tell the user to repair what the line above names."
+
+
+def case_c_text(kb, reason: str, own: str = "", retire: tuple[str, ...] = ("CT-0003",),
+                sent: str = f"{MINE} and CT-0003") -> str:
+    """Case C: every other file with the ID has a problem of its own, so the refusal names it and hands the
+    dead end to the adjudicator, who retires the records linking the selected file and renumbers it. `own`
+    is the clause printed when the selected file itself has a problem too (a damaged
+    kblam.resolutions.jsonl is both files' problem)."""
+    return (f"{MINE} holds F-0012, which review record CT-0003 links, so it keeps its ID; the other finding "
+            f"with that ID, {THEIRS}, cannot be renumbered yet: {reason}. "
+            + adjudicator_route(sent, MINE, retire_commands(kb, took_new_id(MINE, "two"), *retire))
+            + (own if own else f" Then kblam renumber {MINE}, which prints the new ID."
+               + refile_text("NEW-ID", "the ID kblam renumber prints") + "."))
+
+
+@pytest.mark.parametrize("damage, shared", [
+    (damage_unreadable, False), (damage_id_line, False), (damage_no_id, False), (damage_resolutions, True)])
+def test_renumber_says_why_the_unlinked_file_cannot_be_renumbered_yet(kb, at_root, damage, shared):
+    """Case C, for each reason: the other file's problem is named, the route through the adjudicator is
+    given, and the file the user must repair is named. `shared` marks a damaged kblam.resolutions.jsonl,
+    which blocks the selected file's renumber too, so the route says so and ends with the step to run once
+    the user has repaired it."""
     same_id(kb)
     ct(kb, "CT-0003", MINE)
     reason = damage(kb)
     m.accept_tree(kb)
-    assert refused(kb, "renumber", kb.root / MINE) == message("renumber", (
-        f"{MINE} holds F-0012, which review record CT-0003 links, so it keeps its ID; the other finding with "
-        f"that ID, {THEIRS}, cannot be renumbered yet: {reason}. Ask a person to fix that, then run kblam "
-        f"renumber {THEIRS}."))
+    own = own_problem_clause(MINE, reason, STEP_FROM_PROBLEM) if shared else ""
+    assert refused(kb, "renumber", kb.root / MINE) == message("renumber", case_c_text(kb, reason, own))
 
     repair(kb)
     m.accept_tree(kb)
@@ -416,8 +527,7 @@ def test_renumber_says_why_the_unlinked_file_cannot_be_renumbered_yet(kb, at_roo
 
 def test_renumber_says_when_a_dependent_of_the_unlinked_file_cannot_be_rekeyed(kb, at_root):
     """Case C, fifth reason: a depends_on entry meaning the other file that kblam cannot re-key without
-    changing anything else (its value on a line of its own); once a person rewrites the entry, the
-    command the message names succeeds."""
+    changing anything else (its value on a line of its own)."""
     same_id(kb)
     ct(kb, "CT-0003", MINE)
     theirs_fp = binding(kb, THEIRS)[0]
@@ -427,11 +537,9 @@ def test_renumber_says_when_a_dependent_of_the_unlinked_file_cannot_be_rekeyed(k
     text = finding_text("F-0012", CLAIM_B, topic="motor").replace("id: F-0012", "id: F-0031")
     new_fp = fingerprint(parse_finding(renamed, text.encode()), "/")
     m.accept_tree(kb)
-    assert refused(kb, "renumber", kb.root / MINE) == message("renumber", (
-        f"{MINE} holds F-0012, which review record CT-0003 links, so it keeps its ID; the other finding with "
-        f"that ID, {THEIRS}, cannot be renumbered yet: {dependent}: could not change depends_on F-0012 to "
-        f"F-0031 without changing anything else; change that entry by hand to F-0031: {new_fp}. Ask a person "
-        f"to fix that, then run kblam renumber {THEIRS}."))
+    assert refused(kb, "renumber", kb.root / MINE) == message("renumber", case_c_text(kb, (
+        f"{dependent}: could not change depends_on F-0012 to F-0031 without changing anything else; "
+        f"change that entry by hand to F-0031: {new_fp}")))
 
     kb.add("F-0030", "pump", CLAIM_C, topic="pump", extra=f"depends_on:\n  F-0012: '{theirs_fp}'\n")
     m.accept_tree(kb)
@@ -443,13 +551,18 @@ def test_renumber_with_three_files_names_each_unlinked_file_and_its_reason(kb):
     same_id(kb, third=True)
     ct(kb, "CT-0003", MINE)
     unreadable = damage_unreadable(kb)
+    no_id = f"{THIRD} has no id key, so kblam cannot rewrite it; leave it as it is and tell the user to add " \
+            f"its id line (id: F-0012)"
     kb.write(THIRD, finding_text("F-0012", CLAIM_C, topic="tray").replace("id: F-0012\n", ""))
     m.accept_tree(kb)
     assert refused(kb, "renumber", kb.root / MINE) == message("renumber", (
         f"{MINE} holds F-0012, which review record CT-0003 links, so it keeps its ID; the other findings with "
         f"that ID that no review record links cannot be renumbered yet: {THEIRS}: {unreadable}; {THIRD}: "
-        f"{THIRD} has no id key, so kblam cannot rewrite it; ask a person to add its id line (id: F-0012). Ask a "
-        f"person to fix that, then run kblam renumber {THEIRS}; kblam renumber {THIRD}."))
+        f"{no_id}. "
+        + adjudicator_route(f"{MINE} and CT-0003", MINE,
+                            retire_commands(kb, took_new_id(MINE, "three"), "CT-0003"))
+        + f" Then kblam renumber {MINE}, which prints the new ID."
+        + refile_text("NEW-ID", "the ID kblam renumber prints") + "."))
 
 
 def peer_state(kb, peer: str) -> None:
@@ -467,10 +580,13 @@ def test_the_selected_files_own_refusal_offers_the_other_file_only_when_it_can_b
     kb.write(MINE, UNREADABLE)
     peer_state(kb, peer)
     line, problem = parse_finding(MINE, UNREADABLE.encode()).parse_errors[0]
+    # With no alternative to offer, the refusal leaves the file and names what the user must repair: no
+    # agent may edit a file under findings/ (SPEC §8 item 1).
     offer = f"renumber {THEIRS} instead (kblam renumber {THEIRS}), or " if peer == "ready" else ""
+    where = f"line {line}" if line else "this file"
     assert refused(kb, "renumber", kb.root / MINE) == message("renumber", (
         f"{MINE} cannot be read as a finding (" + (f"line {line}: " if line else "") + f"{problem}), so kblam "
-        f"cannot rewrite its id; {offer}ask a person to fix this file."))
+        f"cannot rewrite its id; {offer}leave it as it is and tell the user to repair {where}."))
     if peer == "ready":
         m.ok(m.kblam(kb, "renumber", THEIRS), "renumber")      # the offered command, as printed
 
@@ -553,10 +669,12 @@ def test_challenge_new_allocates_above_a_removed_record(kb, source_repo):
 @pytest.mark.parametrize("peer", ["ready", "linked", "broken"])
 @pytest.mark.parametrize("damage, refusal, offer, advice", [
     ("id: !!str F-0012", f"{MINE}: could not set id to F-0013 without changing anything else; {{}}",
-     f"renumber {THEIRS} instead (kblam renumber {THEIRS}), or ask a person to fix this file's id line",
-     "ask a person to fix this file's id line"),
+     f"renumber {THEIRS} instead (kblam renumber {THEIRS}), or leave it as it is and tell the user to write "
+     f"this file's id line as id: F-0012",
+     "leave it as it is and tell the user to write this file's id line as id: F-0012"),
     ("", f"{MINE} has no id key, so kblam cannot rewrite it; {{}}",
-     f"renumber {THEIRS} instead (kblam renumber {THEIRS})", "ask a person to add its id line (id: F-0012)"),
+     f"renumber {THEIRS} instead (kblam renumber {THEIRS})",
+     "leave it as it is and tell the user to add its id line (id: F-0012)"),
 ])
 def test_the_selected_files_id_line_refusals_offer_the_other_file_only_when_it_can_be_renumbered(
         kb, at_root, damage, refusal, offer, advice, peer):
@@ -603,3 +721,305 @@ def test_renumber_on_a_clone_with_records_records_nothing_and_says_what_to_do(kb
     assert unbootstrapped(kb) and m.registry(kb) is None
     bootstraps_as_named(kb, f"CT-0003 open replication of F-0012: {QUESTION}", 2)
     assert m.registry(kb) == ["CT-0003"]
+
+
+# --- R3e: retired records stop blocking, and the adjudicator settles the dead ends -----------------
+#
+# "Retire, then act" (user, 2026-10-07): a retired (`stale`) record no longer refuses an rm or a
+# renumber, and where two findings that records link are a dead end, the adjudicator retires the records
+# linking the finding that goes and runs the command. Every step below runs as printed (D49).
+
+ADJUDICATOR = "librarian"
+ASSET_ROOT = Path(__file__).resolve().parents[1] / "src" / "kblam" / "assets"
+DECIDE_RE = re.compile(r'kblam review decide \S+ --status stale --by NAME --reason "[^"]*" --expect [0-9a-f]{64}')
+
+
+def took_new_id(path: str, count: str) -> str:
+    """The reason a retirement records before a renumber: the file the record links is taking a new ID."""
+    return f"{path} took a new ID: {count} findings shared F-0012"
+
+
+def retire_as_printed(kb, text: str) -> list[str]:
+    """Run every retire command a refusal prints, as the adjudicator whose own name replaces `--by NAME`:
+    D49's run of the step the text names. Returns the record IDs it retired, in the order printed."""
+    commands = DECIDE_RE.findall(text)
+    assert commands, f"the refusal printed no retire command:\n{text}"
+    for command in commands:
+        argv = [ADJUDICATOR if token == "NAME" else token for token in shlex.split(command)[1:]]
+        m.ok(m.kblam(kb, *argv), "review decide")
+    return [shlex.split(command)[3] for command in commands]
+
+
+def renumber_as_printed(kb, text: str, path: str) -> str:
+    """Run the `kblam renumber <path>` a refusal prints; the new ID the command printed."""
+    assert f"kblam renumber {path}" in text, f"the refusal did not print a renumber of {path}:\n{text}"
+    run = m.ok(m.kblam(kb, "renumber", path), "renumber")
+    match = re.search(r"F-\d+ -> (F-\d+):", run.out)
+    assert match, run.out
+    return match.group(1)
+
+
+def rebind_as_printed(kb, out: str, rec_id: str) -> None:
+    """Run the rebind command a put prints for the record it made stale, with the adjudicator's name for
+    `--by`, a reason for TEXT and the record's current subject digest for D."""
+    line = next(line for line in out.splitlines() if "runs kblam review rebind " in line)
+    command = line.split("runs ", 1)[1].split(". kblam validate", 1)[0]
+    values = {"NAME": ADJUDICATOR, "TEXT": "re-read the merged finding", "D": m.expect(kb, rec_id)}
+    argv = [values.get(token, token) for token in shlex.split(command)[1:]]
+    m.ok(m.kblam(kb, *argv), "review rebind")
+
+
+def commits_with_the_hook(kb) -> subprocess.CompletedProcess:
+    """`git commit` as an agent runs it, with the pre-commit hook installed at .git/hooks/pre-commit: the
+    hook refuses the commit while kblam validate fails (SPEC §8 item 4)."""
+    from kblam import approval
+
+    if shutil.which("sh") is None:
+        pytest.skip("the POSIX pre-commit hook requires sh")
+    git(kb, "init", "-q")
+    hook = kb.root / ".git" / "hooks" / "pre-commit"
+    hook.write_bytes((ASSET_ROOT / "pre-commit").read_bytes())
+    os.chmod(hook, 0o755)
+    if not (kb.root / ".gitignore").exists():
+        kb.write(".gitignore", ".kblam/\n")
+    approval.record_approval(kb.cfg, (kb.root / "kblam.toml").read_bytes())
+    git(kb, "add", "-A")
+    env = {**os.environ, "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"]}
+    return subprocess.run(["git", "-c", "user.name=kblam test", "-c", "user.email=test@example.com",
+                           "-c", "commit.gpgsign=false", "commit", "-q", "-m", "the KB"],
+                          cwd=kb.root, env=env, capture_output=True, text=True)
+
+
+def recorded_and_committed(kb) -> None:
+    """The KB validates and a commit passes the installed pre-commit hook. The warnings allowed are the
+    fixture's untracked evidence folder and K13's dangling link on a retired record whose finding was
+    removed (a warning at that status, never an error): nothing else, and no error at all."""
+    git(kb, "init", "-q")
+    if not (kb.root / ".gitignore").exists():
+        kb.write(".gitignore", ".kblam/\n")
+    run = m.ok(m.validate(kb, "--record"), "validate --record")
+    warnings = [line for line in run.out.splitlines() if "warning" in line]
+    assert all("is not tracked by git" in line or "K13 warning" in line for line in warnings), run.out
+    done = commits_with_the_hook(kb)
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+def retire(kb, *rec_ids: str, by: str = "reviewer-b") -> None:
+    """Retire installed records the way the adjudicator does: `kblam review decide --status stale`, with
+    the reason and the current subject digest (D49: a stored `status: stale` with no decision is not a
+    retirement, and K13 refuses it)."""
+    for rec_id in rec_ids:
+        m.ok(m.kblam(kb, "review", "decide", rec_id, "--status", "stale", "--by", by,
+                     "--reason", "settled before the merge or renumber", "--expect", m.expect(kb, rec_id)),
+             "review decide")
+
+
+def test_rm_succeeds_when_only_retired_records_link(kb):
+    """A retired record leaves the finding's identity free: rm is an ordinary rm, so the retirement the
+    adjudicator recorded is what unblocked it."""
+    merge_pair(kb)
+    ct(kb, "CT-0003", MINE)
+    sc(kb, "SC-0004", "F-0012")
+    cu(kb, "CU-0001", "findings/motor/F-0020-motor.md", finding_id="F-0020")
+    retire(kb, "CT-0003", "SC-0004", "CU-0001")
+    removed = m.ok(m.kblam(kb, "rm", "F-0012", "--merged-into", "F-0020"), "rm")
+    assert removed.out.startswith(f"kblam rm: removed F-0012 ({MINE}), merged into F-0020\n"), removed.out
+    assert not (kb.root / MINE).exists()
+    assert m.validate(kb, "--record").code == 0
+
+
+def test_renumber_succeeds_when_only_retired_records_link(kb, at_root):
+    """The same for renumber: a retired record no longer keeps a file's identity."""
+    same_id(kb)
+    sc(kb, "SC-0004", "F-0012")
+    ct(kb, "CT-0003", MINE)
+    retire(kb, "SC-0004", "CT-0003")
+    run = m.ok(m.kblam(kb, "renumber", MINE), "renumber")
+    assert run.out.startswith(f"kblam renumber: F-0012 -> F-0013: {MINE} is now "
+                              f"findings/calibration/F-0013-sensor.md (fingerprint "), run.out
+    assert m.validate(kb, "--record").code == 0
+
+
+def test_a_rejected_record_still_blocks_and_a_stale_one_leaves_the_stale_sentence_out(kb):
+    """Only `stale` is retired: a rejected SC still links, so rm refuses; and a retired CT's binding no
+    longer puts it in the list of records the edit makes stale."""
+    merge_pair(kb)
+    cu(kb, "CU-0002", MINE, status="withdrawn")
+    install(kb, "SC", "SC-0004", linked_findings=["F-0012"], status="rejected", creator="reviewer-a")
+    ct(kb, "CT-0003", MINE, status="stale")
+    assert refused(kb, "rm", "F-0012", "--merged-into", "F-0020") == message("rm", merge_text(
+        "review records SC-0004, CU-0002 link", EDIT_FRESH))
+
+
+def test_the_rm_dead_end_runs_as_the_refusal_names_it(kb, at_root):
+    """D49: the retire commands the refusal prints run as printed, then the merge it names (the copy
+    `kblam edit` stages, what F-0012 states added to it, the rm, the put), the rebind that put prints,
+    validate --record, and a commit through the installed pre-commit hook."""
+    merge_pair(kb)
+    ct(kb, "CT-0003", MINE)
+    ct(kb, "CT-0002", "findings/motor/F-0020-motor.md", finding_id="F-0020")
+    text = refused(kb, "rm", "F-0012", "--merged-into", "F-0020")
+
+    assert retire_as_printed(kb, text) == ["CT-0003"]
+    path = kb.root / m.ok(m.kblam(kb, "edit", "F-0020"), "edit").out.strip()      # the copy it names
+    add_detail(path, CLAIM_A)                       # what F-0012 states that F-0020 does not yet
+    removed = m.ok(m.kblam(kb, "rm", "F-0012", "--merged-into", "F-0020"), "rm")
+    assert removed.out.startswith(f"kblam rm: removed F-0012 ({MINE}), merged into F-0020\n"), removed.out
+    put = m.put_ok(kb, path)
+    assert "The edit makes CT-0002 stale" in text          # the sentence the refusal printed
+    rebind_as_printed(kb, put.out, "CT-0002")
+    recorded_and_committed(kb)
+
+
+def test_the_rm_dead_end_independence_note_runs_with_another_name(kb):
+    """The refusal names the role `--by` must not be for a record that is not open; the adjudicator uses
+    another name, and the decide the note describes succeeds."""
+    merge_pair(kb)
+    cu(kb, "CU-0001", "findings/motor/F-0020-motor.md", finding_id="F-0020")
+    install(kb, "SC", "SC-0002", linked_findings=["F-0012"], status="rejected", creator=ADJUDICATOR)
+    text = refused(kb, "rm", "F-0012", "--merged-into", "F-0020")
+    assert (f"SC-0002 is rejected, so its --by must not be its creator (SC-0002's creator is "
+            f"{ADJUDICATOR}).") in text
+    same = m.kblam(kb, "review", "decide", "SC-0002", "--status", "stale", "--by", ADJUDICATOR,
+                   "--reason", REASON_MERGE, "--expect", m.expect(kb, "SC-0002"))
+    assert same.code == 1 and "creator" in same.err
+    m.ok(m.kblam(kb, "review", "decide", "SC-0002", "--status", "stale", "--by", "reviewer-b",
+                 "--reason", REASON_MERGE, "--expect", m.expect(kb, "SC-0002")), "review decide")
+
+
+# --- R3e: renumber's dead ends ---------------------------------------------------------------------
+
+
+def renumber_dead_end_text(kb, both: str, files: str, records: str, sent: str, selected: str,
+                           count: str, retire: tuple[str, ...], note: str = "", own: str = "") -> str:
+    """The dead end where every file with the ID is linked: what was refused, the adjudicator wording,
+    the retire commands for the records linking the selected file, and either the renumber and the
+    re-file step or, when the selected file itself has a problem (`own`), that problem and the step that
+    makes the route runnable."""
+    return (f"{both} with ID F-0012 ({files}) are linked by {records}, and kblam renumbers no finding a "
+            f"review record links. K1 fails kblam validate and every commit until this is settled. "
+            + adjudicator_route(sent, selected, retire_commands(kb, took_new_id(selected, count), *retire))
+            + note
+            + (own if own else f" Then kblam renumber {selected}, which prints the new ID."
+               + refile_text("NEW-ID", "the ID kblam renumber prints") + "."))
+
+
+def test_renumber_dead_end_names_the_selected_files_own_problem(kb, at_root):
+    """Case B with the selected file unreadable: it is named for what it is, not printed a renumber that
+    would refuse, and the file is the user's to repair (no agent may edit findings/)."""
+    same_id(kb)
+    ct(kb, "CT-0003", MINE)                      # links the selected file
+    cu(kb, "CU-0001", THEIRS)                    # links the other one, so every file is linked
+    kb.write(MINE, UNREADABLE)
+    m.accept_tree(kb)
+    line, problem = parse_finding(MINE, UNREADABLE.encode()).parse_errors[0]
+    own = own_problem_clause(MINE, (
+        f"{MINE} cannot be read as a finding (" + (f"line {line}: " if line else "") + f"{problem}), so kblam "
+        f"cannot rewrite its id; leave it as it is and tell the user to repair "
+        + (f"line {line}" if line else "this file")))
+    assert refused(kb, "renumber", MINE) == message("renumber", renumber_dead_end_text(
+        kb, "both findings", f"{MINE}, {THEIRS}", "review records CT-0003, CU-0001",
+        "both paths, CT-0003 and CU-0001", MINE, "two", ("CT-0003",), own=own))
+
+
+def test_renumber_dead_end_is_handed_to_the_adjudicator_in_full(kb, at_root):
+    """Case B with two files and one SC: the whole text, byte for byte, including the bare-ID note."""
+    same_id(kb)
+    sc(kb, "SC-0004", "F-0012")
+    assert refused(kb, "renumber", MINE) == message("renumber", renumber_dead_end_text(
+        kb, "both findings", f"{MINE}, {THEIRS}", "review record SC-0004", "both paths and SC-0004", MINE,
+        "two", ("SC-0004",), note=bare_note("SC-0004")))
+
+
+def test_renumber_dead_end_with_three_files_list_each_record_once(kb, at_root):
+    """Case B with three files and a CT linking only the selected one: the retire list names each record
+    once, and the record list in the head names every record that links any file."""
+    same_id(kb, third=True)
+    ct(kb, "CT-0003", MINE)
+    sc(kb, "SC-0004", "F-0012")
+    assert refused(kb, "renumber", MINE) == message("renumber", renumber_dead_end_text(
+        kb, "all 3 findings", f"{MINE}, {THEIRS}, {THIRD}", "review records SC-0004, CT-0003",
+        "the 3 paths, SC-0004 and CT-0003", MINE, "three", ("SC-0004", "CT-0003"),
+        note=bare_note("SC-0004")))
+
+
+def test_the_renumber_dead_end_runs_as_the_refusal_names_it(kb, at_root):
+    """D49: retire the records the refusal names, renumber the selected file as printed, file a new record
+    against the new ID it printed, and the KB validates and commits."""
+    same_id(kb)
+    sc(kb, "SC-0004", "F-0012")
+    text = refused(kb, "renumber", MINE)
+
+    assert retire_as_printed(kb, text) == ["SC-0004"]
+    assert renumber_as_printed(kb, text, MINE) == "F-0013"
+    assert (kb.findings / "calibration" / "F-0013-sensor.md").is_file()
+    # the re-file step: the retired record's question again, against the new ID the renumber printed
+    m.ok(m.kblam(kb, "task", "new", "F-0013", "--kind", "replication", "--by", "reviewer-a",
+                 "--proponent", "researcher-a"), "task new")
+    recorded_and_committed(kb)
+
+
+def test_renumber_dead_end_names_the_unlinked_files_problem_and_its_route(kb, at_root):
+    """Case C: the other file's problem is named as before, and the route replaces the step that sent an
+    agent to a person to fix it."""
+    same_id(kb)
+    ct(kb, "CT-0003", MINE)
+    reason = damage_no_id(kb)
+    m.accept_tree(kb)
+    assert refused(kb, "renumber", MINE) == message("renumber", (
+        f"{MINE} holds F-0012, which review record CT-0003 links, so it keeps its ID; the other finding "
+        f"with that ID, {THEIRS}, cannot be renumbered yet: {reason}. "
+        + adjudicator_route(f"{MINE} and CT-0003", MINE,
+                            retire_commands(kb, took_new_id(MINE, "two"), "CT-0003"))
+        + f" Then kblam renumber {MINE}, which prints the new ID."
+        + refile_text("NEW-ID", "the ID kblam renumber prints") + "."))
+
+
+@pytest.mark.parametrize("damage", [damage_unreadable, damage_id_line, damage_no_id, damage_resolutions])
+def test_the_renumber_dead_end_with_a_damaged_other_file_runs_as_printed(kb, at_root, damage):
+    """D49: the route runs whatever the damage is, and every file the user must repair is left to them.
+    For the three damages to the other file, the route runs straight away and the other file is left as it
+    is. A damaged kblam.resolutions.jsonl is both files' problem, so the text names it for the selected
+    file too: the retire step runs, the user repairs the log (the step the text names), and the printed
+    renumber then succeeds."""
+    same_id(kb)
+    ct(kb, "CT-0003", MINE)
+    damage(kb)
+    m.accept_tree(kb)
+    text = refused(kb, "renumber", MINE)
+
+    assert retire_as_printed(kb, text) == ["CT-0003"]
+    if damage is damage_resolutions:
+        assert "refuses for this file itself" in text and "which prints the new ID" not in text
+        repair(kb)                                           # the user repairs it, as the text says
+        m.accept_tree(kb)
+    else:
+        assert "leave it as it is and tell the user" in text     # the damaged file is left, per the text
+    assert renumber_as_printed(kb, text, MINE) == "F-0013"   # the command the text names, run again
+    if damage is not damage_resolutions:
+        repair(kb)                                           # the user repairs the other file
+        m.ok(m.kblam(kb, "index"), "index")
+        m.accept_tree(kb)
+    m.ok(m.kblam(kb, "task", "new", "F-0013", "--kind", "replication", "--by", "reviewer-a",
+                 "--proponent", "researcher-a"), "task new")
+    recorded_and_committed(kb)
+
+
+def test_the_selected_files_own_damage_leaves_the_file_and_tells_the_user(kb, at_root):
+    """Case C's reasons for the selected file itself, with no other file an agent could renumber: the
+    refusal says to leave the file as it is and what the user must write, since no agent may edit a file
+    under findings/."""
+    same_id(kb)
+    ct(kb, "CT-0003", THEIRS)                     # the other file is linked, so there is no alternative
+    kb.write(MINE, finding_text("F-0012", CLAIM_A).replace("id: F-0012\n", ""))
+    m.accept_tree(kb)
+    assert refused(kb, "renumber", MINE) == message("renumber", (
+        f"{MINE} has no id key, so kblam cannot rewrite it; leave it as it is and tell the user to add its "
+        f"id line (id: F-0012)."))
+
+    kb.write(MINE, finding_text("F-0012", CLAIM_A).replace("id: F-0012", "id: !!str F-0012"))
+    m.accept_tree(kb)
+    assert refused(kb, "renumber", MINE) == message("renumber", (
+        f"{MINE}: could not set id to F-0013 without changing anything else; leave it as it is and tell the "
+        f"user to write this file's id line as id: F-0012."))
+
