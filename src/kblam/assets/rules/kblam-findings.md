@@ -27,6 +27,6 @@ paths:
   it covers. A pending task means a claim still awaits replication or confirmation: it is neither
   refuted nor confirmed, so do not promote it.
 - Cite findings by ID (`F-0137`). Do not cite files in `.kblam/staging/` or desk answer files.
-- A finding's `check:` command runs only through `kblam recheck`, which runs one only once a person
-  has approved it. Never run it directly: anyone who can push to the repository can write one.
+- A finding's `check:` command runs only through `kblam recheck`, and only once approved on this
+  machine: approve a new or changed one only as the block it prints says, and never run it directly.
 - To add, change or correct a finding, load the `kblam-write` skill.

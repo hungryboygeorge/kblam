@@ -600,8 +600,10 @@ def test_an_agent_cannot_write_the_approvals(kb, monkeypatch, capsys, tool_name,
     monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
     code, answer, _ = call("PreToolUse", tool(kb, tool_name, **tool_input), monkeypatch, capsys)
     reason = denied(answer)
-    assert code == 0 and "That folder holds the check: commands a person approved on this machine" in reason
-    assert "never approves or runs a check: command itself" in reason
+    assert code == 0 and "That folder holds the check: commands approved on this machine" in reason
+    assert "an agent approves a command by running kblam recheck with --approve and the digest of the " \
+           "block printed for it" in reason
+    assert "An agent never writes that file itself" in reason
 
 
 def test_only_recheck_runs_a_check(mkb, capsys, monkeypatch):
@@ -731,7 +733,8 @@ def test_outside_a_git_work_tree_recheck_runs_nothing(kb, capsys, monkeypatch):
     add_check(kb, "F-0001", mark("F-0001"))
     code, out, err = run(kb, capsys, monkeypatch, answers=[])
     assert (code, out, ran(kb)) == (1, "", [])
-    assert "is not in a git work tree. kblam recheck keeps a person's approvals in the repository's git " in err
+    assert "is not in a git work tree. kblam recheck keeps the approvals in the repository's git " in err
+    assert "leave the finding as it is and tell the user" in err
 
 
 def test_linked_work_trees_share_one_clones_approvals(kb, tmp_path):

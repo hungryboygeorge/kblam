@@ -1,6 +1,6 @@
 ---
 name: kblam-write
-description: Add, change or correct a finding in {{kb_root}}/ (the kblam knowledge base), or challenge a source, task a claim or review a use under {{review_root}}/, and handle any kblam refusal - a denied write under {{kb_root}}/, {{review_root}}/ or .kblam/ or to kblam.toml, a kblam put rejection (exit 1, 3 or 4), a Stop hook block, a failing kblam validate or pre-commit, a review or unchecked item, a suspect dependency, a check that kblam recheck reports as failed or not approved, or a K13, K14 or K15 refusal.
+description: Add, change or correct a finding in {{kb_root}}/ (the kblam knowledge base), or challenge a source, task a claim or review a use under {{review_root}}/, and handle any kblam refusal - a denied write under {{kb_root}}/, {{review_root}}/ or .kblam/ or to kblam.toml, a kblam put rejection (exit 1, 3 or 4), a Stop hook block, a failing kblam validate or pre-commit, a review or unchecked item, a suspect dependency, a check that kblam recheck reports as failed or not approved (including one `recheck_person_approval = true` leaves to a person), or a K13, K14 or K15 refusal.
 ---
 
 # Writing findings with kblam
@@ -17,7 +17,9 @@ for staged records. `kblam.resolutions.jsonl` is kblam's too: only `kblam resolv
 `kblam.toml` sets the rules and where kblam sends its API key, so only a person changes it: writing
 or removing it is denied too, and a commit that changes it is refused until a person approves it with
 `kblam approve-config` at a terminal. If a finding needs something it does not allow, such as a new
-scope, ask the user to add it. Never try to approve a change yourself.
+scope, ask the user to add it. `[kb] recheck_person_approval` is one of those rules: with it true,
+only a person at a terminal approves a check: command, so ask the user to change it rather than
+changing it yourself. Never try to approve a change yourself.
 
 ## The flow
 
@@ -323,11 +325,17 @@ Run `kblam check --pending` once Jev is reachable.
 arguments, with `/` in paths (`\` is an escape character, as in a POSIX shell), and put a pipeline
 or a redirection in a script under `evidence/`.
 
-kblam runs a check only once a person has approved that exact command, and the files it names, on
-their machine, because anyone who can push can put a command in a finding. A new or changed
-command, or one whose script changed, is reported as not approved and is not run: ask the user to
-run `kblam recheck F-NNNN` at a terminal, where it is shown to them first. Never run the command
-yourself to get around that, and never try to approve it.
+kblam runs a check only once that exact command, and the files it names, have been approved on this
+machine, because anyone who can push can put a command in a finding. A new or changed command, or
+one whose script changed, is reported as not approved and is not run. By default `kblam recheck`
+then prints a block for it: read the command, the argv, the program and the pinned files, and
+approve it with the printed `kblam recheck F-NNNN --approve <digest>` only if the command does what
+this finding's check: needs and nothing else. If anything looks wrong (a program unrelated to the
+finding, deleting or sending anything, a path outside the repository, or a character hidden in an
+escaped command), do not approve it: leave the finding as it is and tell the user. With
+`recheck_person_approval = true` the block instead says a person must approve it: ask the user to
+run `kblam recheck F-NNNN` at a terminal, where it is shown to them first. Never run a check:
+command yourself to get around that.
 
 A failed check means the key number did not reproduce, or the command broke. Read its output
 (`.kblam/recheck/F-NNNN.log`), then `kblam edit` the finding so it states what the evidence shows

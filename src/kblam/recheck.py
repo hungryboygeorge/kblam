@@ -22,7 +22,7 @@ as a person's. The PreToolUse hook denies agents writes there. Outside a git wor
 nothing.
 
 A command is split into arguments by POSIX shell rules on every platform and run without a shell, so
-the person approves exactly the program and arguments that run. It runs without the environment
+an approval is for exactly the program and arguments that run. It runs without the environment
 variable the Jev API key is read from. Its output goes to a new file that then replaces
 `.kblam/recheck/<ID>.log`, and the log line is refused where `.kblam/recheck.jsonl` is a symbolic
 link, so a link placed there never redirects kblam's writes. Like `approve-config`, this keeps a
@@ -191,7 +191,7 @@ def find_program(name: str, root: Path, *, windows: bool | None = None, path: st
     a path relative to the repository root; a bare name is looked up in PATH's absolute entries only,
     so the current directory is never searched (Windows would search it first). On Windows a name
     without a PATHEXT extension gets each in turn, and a batch file is refused: Windows runs it through
-    cmd.exe, which re-parses its arguments, so what ran would not be the argv the person approved."""
+    cmd.exe, which re-parses its arguments, so what ran would not be the argv that was approved."""
     windows = sys.platform == "win32" if windows is None else windows
     if pathext is None:
         pathext = os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD")
@@ -243,9 +243,10 @@ def approvals_path(cfg: Config) -> Path:
     commit can write. RecheckError outside a git work tree, where there is no such place."""
     folder = kblam_git_dir(cfg)
     if folder is None:
-        raise RecheckError(f"{cfg.repo_root} is not in a git work tree. kblam recheck keeps a person's approvals "
-                           f"in the repository's git directory, where no commit can write them, so outside a "
-                           f"clone it runs nothing")
+        raise RecheckError(f"{cfg.repo_root} is not in a git work tree. kblam recheck keeps the approvals in the "
+                           f"repository's git directory, where no commit can write them, so outside a clone it "
+                           f"runs nothing; leave the finding as it is and tell the user, who can run it from a "
+                           f"clone of the repository")
     return folder / APPROVALS_NAME
 
 
