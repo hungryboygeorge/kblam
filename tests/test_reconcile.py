@@ -187,22 +187,27 @@ def test_untrusted_validation_never_opens_state_references(kb, monkeypatch, loca
 
     assert reads == []
     availability = [issue for issue in issues
-                    if "unavailable:" in issue.message or "the pinned version is not present" in issue.message]
+                    if "cannot be read here" in issue.message or "the pinned version" in issue.message]
     assert len(availability) == 1
     issue = availability[0]
     if location == "decision":
         assert issue.code == "K15"
+        # The evidence's bytes are under .kblam/, which this check does not read, so no restore can put
+        # them back from this clone: the line names only the step that can work here (K15's recovery).
         assert issue.message == (
-            "the evidence '.kblam/foreign-evidence.txt' of CT-0001's effective decision is "
-            "unavailable: the path cannot be read as a file; restore those bytes, then run "
-            "kblam review rebind CT-0001 --by NAME --reason TEXT --expect D "
-            "--evidence PROVENANCE:PATH:LOCATOR")
+            "the evidence '.kblam/foreign-evidence.txt' of CT-0001's effective decision cannot be read "
+            "here: this check reads no file under .kblam/, so no restore puts it back. Run kblam review "
+            "rebind CT-0001 --by NAME --reason TEXT --expect D --evidence PROVENANCE:PATH:LOCATOR")
     else:
         assert issue.code == "K13"
-        where = ("evidence/missing-assertion.txt" if location == "snapshot"
-                 else ".kblam/foreign-evidence.txt")
-        expected = (("basis[0]: " if location == "basis" else "")
-                    + "the pinned version is not present" + retire_pinned(where))
+        prefix = "basis[0]: " if location == "basis" else ""
+        # The refused path is the reference's own (source, basis) or its snapshot's: either way a path
+        # under .kblam/, which this check reads nothing from while machine state is not trusted. The
+        # restore the usual line names cannot work here, so only the retire step is named.
+        expected = (prefix + "the pinned version .kblam/foreign-evidence.txt cannot be read here: this "
+                    "check reads no file under .kblam/, so no restore puts it back. Retire the record and "
+                    "file a new one (kblam review decide SC-0001 --status stale --by NAME --reason TEXT "
+                    "--expect D)")
         assert issue.message == expected
 
 
@@ -230,6 +235,9 @@ def test_untrusted_use_recovery_keeps_its_projected_reader_and_receipts_untruste
 
 
 def test_tracked_state_stop_never_opens_a_challenge_source_in_state(gkb, capsys, monkeypatch):
+    """D49 for the line the Stop hook gives while git tracks `.kblam/`: the source under `.kblam/` is not
+    read at all, so the line names no restore of it (that cannot work here) and names only the retire
+    step, which runs once the state the block's own text names is dealt with."""
     view = _state_reference_scene(gkb, "source", confirmed=True)
     assert rules.validate(view) == []
     git(gkb, "add", "-f", ".kblam/foreign-evidence.txt")
@@ -242,7 +250,10 @@ def test_tracked_state_stop_never_opens_a_challenge_source_in_state(gkb, capsys,
 
     out = capsys.readouterr().out
     assert "git tracks" in out
-    assert "the pinned version is not present" in out
+    assert ("the pinned version .kblam/foreign-evidence.txt cannot be read here: this check reads no file "
+            "under .kblam/, so no restore puts it back. Retire the record and file a new one (kblam review "
+            "decide SC-0001 --status stale --by NAME --reason TEXT --expect D)") in out
+    assert "restore the pinned bytes" not in out
     assert reads == [cfg.state_dir.resolve() / "stop-block"]  # hook-owned marker remains allowed
 
 

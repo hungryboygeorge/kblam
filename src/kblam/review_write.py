@@ -37,7 +37,7 @@ from kblam import (decisions, gitpin, k13, k14, k15, matching, paths, receipts, 
                    review_index, rules, treehash, writes)
 from kblam.config import Config
 from kblam.finding import fingerprint, normalise_newlines, plain_data
-from kblam.gitdir import committed_file
+from kblam.gitdir import committed_record
 from kblam.k13 import _canonical_kind                      # K13's one rule for a record's canonical path
 from kblam.records import Record
 from kblam.rules import Issue
@@ -895,7 +895,7 @@ def _land(cfg: Config, command: str, kind: str, rec_id: str, view: KBView, candi
     all_issues = rules.validate(candidate)
     written = records.parse_record(path, new_bytes)
     mine = sorted({issue for issue in rules.errors(all_issues) if issue.owner == rec_id}
-                  | set(records.schema_issues(written, staged=False, committed=partial(committed_file, cfg))),
+                  | set(records.schema_issues(written, staged=False, committed=partial(committed_record, cfg))),
                   key=_order)
     result = WriteResult(rec_id=rec_id, path=path,
                          digest=decisions.subject_digest(kind, written.data),
@@ -973,11 +973,11 @@ def _id_refusal(cfg: Config, kind: str, rec_id: str, shown: str, bad) -> str:
     putting it back is the whole fix. Where the installed record's `id` differs too — a copy staged
     before the hand edit, or staged by hand — putting the staged `id` back would only meet put's next
     refusal ("id is not a free field"), so the staged file goes and the installed file is restored. An
-    installed file that does not parse (or is not a mapping, or cannot be read) gets that same step
-    with no "has id …" clause, its own `id` being unsayable, and one whose `id` is missing or blank is
-    named as having no `id` (records.id_text), never as Python's None. The STAGED `id` is named the same
-    way: a missing or blank one gives "the staged file has no id", with whichever step the installed
-    record chooses ("Set id back to …" also covers adding the line back)."""
+    installed file that does not parse (or is not a mapping, or cannot be read) gets that same step with
+    no `id` clause, its own `id` being unsayable; one that parses but does not read as the file-name ID
+    says so and names the `id` it holds (records.id_text), never Python's None. The STAGED `id` is named
+    the same way: a missing or blank one gives "the staged file has no id", with whichever step the
+    installed record chooses ("Set id back to …" also covers adding the line back)."""
     blank = bad is None or (isinstance(bad, str) and not bad.strip())
     head = (f"{shown}: the staged file has no id, but the file name's ID is {rec_id}; the ID never "
             f"changes" if blank else
@@ -994,9 +994,9 @@ def _id_refusal(cfg: Config, kind: str, rec_id: str, shown: str, bad) -> str:
         return (f"{head}, and the installed record {path} does not read as {rec_id} either. Delete "
                 f"{shown}, run kblam validate and do what its line for {path} says")
     if data.get("id") != rec_id:
-        return (f"{head}, and the installed record {path} "
-                f"{records.id_text(data.get('id'), also=True)}. Delete {shown}, "
-                f"run kblam validate and do what its line for {path} says")
+        return (f"{head}, and the installed record {path} does not read as {rec_id} either: it "
+                f"{records.id_text(data.get('id'))}. Delete {shown}, run kblam validate and do what its "
+                f"line for {path} says")
     return f"{head}. Set id back to {rec_id} in {shown} and put it again"
 
 

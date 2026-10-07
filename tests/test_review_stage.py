@@ -790,3 +790,28 @@ def test_staging_leaves_the_review_root_the_registry_and_tree_hash_alone(kb, sou
     assert not (kb.root / ".kblam/review-ids").exists()
     assert {p.relative_to(kb.root).as_posix(): p.read_bytes()
             for p in (kb.root / REVIEW).rglob("*") if p.is_file()} == review_before
+
+
+# --- R3e 1b: the command to run again once an unparseable record is fixed --------------------------
+
+
+def test_use_review_names_the_command_to_run_again_after_a_damaged_challenge(kb, source_repo):
+    """D49 for the step `use review` adds when the challenge it needs does not parse (R3e 1b): the refusal
+    names kblam validate's line for the file and the command to run again once it is fixed. The probe puts
+    the file back as it was and runs that command, which then stages the use."""
+    installed(kb, "SC", sc(source_repo))
+    add_finding(kb, "3", LINE3)
+    path = f"{SC_DIR}/SC-0001.yaml"
+    sound = (kb.root / path).read_bytes()
+    kb.write(path, "- not a mapping\n")
+
+    with pytest.raises(StoreError) as exc:
+        review_stage.use_review(kb.cfg, "SC-0001", "F-0001", 1, "reviewer-b", "researcher-a")
+    assert str(exc.value) == (
+        f"{path} did not parse (not a YAML mapping); run kblam validate and do what its line for {path} "
+        f"says; once it is fixed, run kblam use review SC-0001 F-0001 1 --by reviewer-b --proponent "
+        f"researcher-a again")
+
+    (kb.root / path).write_bytes(sound)                    # the fix its line names, run
+    staged = review_stage.use_review(kb.cfg, "SC-0001", "F-0001", 1, "reviewer-b", "researcher-a")
+    assert staged == kb.root / STAGING / "CU-0001.yaml"    # the command it says to run again, run

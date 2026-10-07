@@ -11,8 +11,9 @@ from functools import partial
 from pathlib import PurePosixPath
 
 from kblam import decisions, matching, paths, receipts, records, registry, sources, treehash
+from kblam.config import STATE_DIR
 from kblam.finding import fingerprint, normalise_newlines
-from kblam.gitdir import committed_file
+from kblam.gitdir import committed_record
 from kblam.records import Record
 from kblam.review_index import generate_review_index
 from kblam.rules import Issue
@@ -249,18 +250,45 @@ def _id_claims(view) -> dict[str, list[Record]]:
 
 
 def _duplicate_issues(view, claims: dict[str, list[Record]]) -> list[Issue]:
-    """IDs are unique and each ID matches its file (SPEC §5.2.4 K13): a structure error, every status."""
+    """IDs are unique and each ID matches its file (SPEC §5.2.4 K13): a structure error, every status.
+    The step is the one `records.restore_step` gives for the file that causes the duplicate, or, where
+    no restore puts that file right, the step that names the files and says to leave them alone."""
+    committed = partial(committed_record, view.cfg)
     issues = []
     for rec_id in sorted(claims):
         holders = claims[rec_id]
         if len(holders) < 2:
             continue
         where = ", ".join(rec.path for rec in holders)
+        step = _duplicate_step(holders, committed)
         message = (f"the ID {rec_id} is claimed by more than one record file ({where}); each ID names one "
-                   f"record, and records are never renamed, so restore the right file from git")
+                   f"record, and records are never renamed. {step[:1].upper()}{step[1:]}")
         for rec in holders:
             issues.append(Issue(rec.path, rec.key_line("id"), "K13", message, "error", rec.id or ""))
     return issues
+
+
+def _duplicate_step(holders: list[Record], committed) -> str:
+    """What fixes a duplicate ID: the file whose own bytes no longer read as the record its file name
+    gives is the one kblam will not accept, so it gets the step records.restore_step gives (the restore,
+    where git's last commit holds a copy kblam reads as that record, in the file's kind folder). Every
+    other duplicate is a hand copy, or a file git's last commit already holds as it stands: putting those
+    bytes back changes nothing, kblam never renames a record, and the hooks deny removing a record file,
+    so no command an agent may run puts it right and a person is left. The step then names the files it
+    concerns and says to leave them as they are."""
+    strays = [rec for rec in holders if not _reads_as_its_name(rec)]
+    if len(strays) == 1 and records.in_kind_folder(strays[0]):
+        return records.restore_step(strays[0].path, committed)
+    listed = ", ".join(rec.path for rec in holders)
+    return (f"no command an agent may run puts {listed} right; leave them as they are and tell the user")
+
+
+def _reads_as_its_name(rec: Record) -> bool:
+    """Whether the record's own bytes read as the record its file name gives: data that parsed and an
+    `id` that is the file name's ID. A file that does not is the one a duplicate line's restore is for:
+    its `id` line, or the file itself, is the hand damage the ID error already reports."""
+    value = rec.data.get("id") if isinstance(rec.data, dict) else None
+    return rec.id is not None and value == rec.id
 
 
 def _registry_issues(view, present: set[str], registered: set[str] | None) -> list[Issue]:
@@ -284,7 +312,7 @@ def _record_issues(view, reader, rec: Record) -> list[Issue]:
     """The structure of one record file, then the checks its kind and status add. A file that is no
     record, and a record whose data did not parse or whose status is malformed, get structure errors
     only (SPEC §5.2.4 Severity table)."""
-    schema = records.schema_issues(rec, staged=False, committed=partial(committed_file, view.cfg))
+    schema = records.schema_issues(rec, staged=False, committed=partial(committed_record, view.cfg))
     issues = [_owned(issue, rec) for issue in schema]
     issues += [_owned(issue, rec) for issue in decisions.decision_issues(rec)]
     issues += _identity_issues(view, rec, schema, trust_state=reader.trust_state)
@@ -368,11 +396,13 @@ def _dangling_level(kind: str, status: str) -> str:
 
 
 def _reference_issues(rec: Record, key: str, label: str, ref: FileRef, resolved: Resolved,
-                      status: str, *, availability: bool = True) -> list[Issue]:
+                      status: str, *, availability: bool = True, reader=None) -> list[Issue]:
     """One resolved reference (a challenge's source, a basis entry, a decision's evidence entry): a
     structural problem is an error at every status, and a state the record cannot use is the
     availability row. An unusable reference only reports the structural problem. `availability=False`
-    leaves the state row out (K15 owns a task's evidence availability)."""
+    leaves the state row out (K15 owns a task's evidence availability). `reader` is the validation's
+    source reader, for the paths it refuses to read for trust (SourceReader.refused_for_trust, named in
+    `_state_message`)."""
     if resolved.error is not None:
         if isinstance(ref.path, str) and paths.syntax_problem(ref.path) is not None:
             return []                   # records.schema_issues reports a path's syntax itself
@@ -382,17 +412,20 @@ def _reference_issues(rec: Record, key: str, label: str, ref: FileRef, resolved:
     level = _availability_level(rec.kind, status)
     if level is None or resolved.state.available:
         return []
-    sentence = _state_message(rec, ref, resolved)
+    sentence = _state_message(rec, ref, resolved,
+                              untrusted=reader.refused_for_trust(ref) if reader is not None else None)
     return [Issue(rec.path, rec.key_line(key), "K13", sentence if label == "source" else f"{label}: {sentence}",
                   level, rec.id or "")]
 
 
-def _state_message(rec: Record, ref: FileRef, resolved: Resolved) -> str:
+def _state_message(rec: Record, ref: FileRef, resolved: Resolved, *, untrusted: str | None = None) -> str:
     """What a stale or unavailable reference says (SPEC §5.2.3 Evaluation): never "the source now says".
     Each one names the step the kblam-write skill gives, and the file it puts back: restore the bytes the
     record was written against at the reference's own path (a reference is available again once that file
     holds them, whether the record pins them by a commit or by a snapshot), or retire the record
-    (_retire_step) and file a new one. A refused path is not a str, so that one names no file."""
+    (_retire_step) and file a new one. A refused path is not a str, so that one names no file. Where
+    validation refuses the reference for trust (`untrusted` names the path it will not read), the restore
+    cannot work here whatever the file holds, so only the retire step is named."""
     rid = rec.id or "this record"
     if resolved.state is State.STALE:
         return (f"the source changed since {rid} was written; restore {ref.path} to the bytes {rid} was "
@@ -400,6 +433,10 @@ def _state_message(rec: Record, ref: FileRef, resolved: Resolved) -> str:
     if resolved.message == sources.MESSAGE_MISSING and isinstance(ref.path, str):
         return f"the working file {ref.path} is missing; restore it, or {_retire_step(rec)}"
     where = f" of {ref.path}" if isinstance(ref.path, str) else ""
+    if untrusted is not None:
+        retire = _retire_step(rec)
+        return (f"the pinned version {untrusted} cannot be read here: this check reads no file under "
+                f"{STATE_DIR}/, so no restore puts it back. {retire[:1].upper()}{retire[1:]}")
     return f"the pinned version is not present; restore the pinned bytes{where}, or {_retire_step(rec)}"
 
 
@@ -445,7 +482,7 @@ def _challenge_issues(view, reader, rec: Record, status: str) -> list[Issue]:
     issues = []
     if info.resolved is not None and source is not None:
         ref = records.file_ref(source)
-        issues += _reference_issues(rec, "source", "source", ref, info.resolved, status)
+        issues += _reference_issues(rec, "source", "source", ref, info.resolved, status, reader=reader)
         located = _probe(info.resolved, source.get("assertion"))
         if isinstance(located, str):
             issues.append(_error(rec, "source", f"assertion: {located}"))
@@ -496,7 +533,7 @@ def _basis_issues(view, reader, rec: Record, status: str, source: dict | None) -
             continue                                 # schema_issues reports an entry that is not a mapping
         ref = records.file_ref(entry)
         resolved = reader.resolve(ref, pinned_source=pinned_source)
-        issues += _reference_issues(rec, "basis", f"basis[{i}]", ref, resolved, status)
+        issues += _reference_issues(rec, "basis", f"basis[{i}]", ref, resolved, status, reader=reader)
     return issues
 
 
@@ -608,7 +645,7 @@ def _decision_evidence_issues(view, reader, rec: Record, status: str, *,
             ref = records.file_ref(entry)
             resolved = reader.resolve(ref)
             issues += _reference_issues(rec, "decisions", f"decisions[{i}].evidence[{j}]", ref, resolved,
-                                        status, availability=effective)
+                                        status, availability=effective, reader=reader)
     return issues
 
 

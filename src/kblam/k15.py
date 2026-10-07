@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from kblam import paths
+from kblam.config import STATE_DIR
 from kblam.decisions import decision_issues
 from kblam.finding import ID_RE as FINDING_ID_RE
 from kblam.finding import Finding, fingerprint
@@ -127,11 +128,19 @@ def _evidence_issues(view, reader, rec: Record) -> list[Issue]:
             continue                    # K13 reports a reference that is structurally wrong
         path = entry.get("path")
         if not resolved.state.available:
-            issues.append(Issue(rec.path, line, "K15",
-                                f"the evidence {path!r} of {rec.id}'s effective decision is "
-                                f"{resolved.state.value}: {resolved.message}; restore those bytes, then "
-                                f"{recovery}",
-                                "error", rec.id or ""))
+            refused = reader.refused_for_trust(file_ref(entry))
+            if refused is not None:
+                # A validation that does not trust machine state reads nothing under .kblam/, so the
+                # bytes cannot be restored from this clone whatever they hold (SPEC §5.2.6 Committed
+                # state): the line names the step that can work here instead.
+                message = (f"the evidence {path!r} of {rec.id}'s effective decision cannot be read here: "
+                           f"this check reads no file under {STATE_DIR}/, so no restore puts it back. "
+                           f"{recovery[:1].upper()}{recovery[1:]}")
+            else:
+                message = (f"the evidence {path!r} of {rec.id}'s effective decision is "
+                           f"{resolved.state.value}: {resolved.message}; restore those bytes, then "
+                           f"{recovery}")
+            issues.append(Issue(rec.path, line, "K15", message, "error", rec.id or ""))
         primary = primary or _primary(view, entry, path)
     if rec.status in PRIMARY_EVIDENCE and not primary:
         recovery = identity or f"cite one with {command}"

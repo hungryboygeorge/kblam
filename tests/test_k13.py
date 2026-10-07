@@ -14,12 +14,12 @@ from pathlib import Path
 
 import pytest
 
-from conftest import SOURCE_REPO, TRACE_PATH, TRACE_TEXT, ZERO64, dump_record, record_data
+from conftest import DROP, SOURCE_REPO, TRACE_PATH, TRACE_TEXT, ZERO64, dump_record, record_data, record_text
 from kblam import decisions, matching, records, rules, sources, writes
 from kblam.cli import main
 from kblam.decisions import subject_digest
 from kblam.finding import fingerprint, yaml_rt
-from kblam.gitdir import committed_file
+from kblam.gitdir import committed_record
 from kblam.k13 import _use_blocking_issues, challenge_info, k13, use_binding_problems, use_current
 from kblam.review_index import generate_review_index
 from kblam.sources import SourceReader
@@ -1662,18 +1662,41 @@ def test_invalid_identity_has_only_its_schema_error(kb_ready, source_repo, field
                 ("K13", path, rec.key_line(field), "error", "CT-0001", message)]
 
 
-def test_committed_file_answers_for_a_path_git_would_quote(gkb):
-    """The id/file-name line names its git restore only where git's last commit holds the record's path
-    (kblam.gitdir.committed_file). git quotes a path outside ASCII in `ls-tree` output unless it is asked
-    for NUL-terminated records (-z, core.quotePath), and a quoted path never equals the one asked about,
-    so a record at such a path would be told no restore is possible. Read from a real repository: the
-    plain listing quotes résumé.yaml, and committed_file answers True for it."""
-    (gkb.root / "résumé.yaml").write_bytes(b"schema: 1\n")
-    commit(gkb, "a path outside ASCII")
+def test_committed_record_answers_only_for_a_copy_kblam_reads_as_that_record(gkb):
+    """The restore step is built on kblam.gitdir.committed_record, which reads the blob of
+    `git show HEAD:<path>` and answers True only for bytes that parse with the file name's ID: a commit
+    that holds the damage (or a stray file) must not be answered with a restore that would put those same
+    bytes back and print the same step again. A path outside ASCII is no special case here: git prints
+    the blob itself, so nothing needs quoting."""
+    path = "research-review/challenges/SC-0001.yaml"
+    non_ascii = "research-review/challenges/résumé/SC-0002.yaml"
+    gkb.write(path, record_text("SC", "SC-0001"))
+    gkb.write(non_ascii, record_text("SC", "SC-0002"))
+    commit(gkb, "two records")
 
-    assert git(gkb, "ls-tree", "--name-only", "HEAD", "--", "résumé.yaml").stdout != \
-        "résumé.yaml".encode("utf-8") + b"\n"                # git's quoting, the reason for -z
-    assert committed_file(gkb.cfg, "résumé.yaml") is True
+    assert committed_record(gkb.cfg, path) is True
+    assert committed_record(gkb.cfg, non_ascii) is True
+
+    gkb.write(path, record_text("SC", "SC-0001", id=DROP))     # the damage, and it is committed
+    commit(gkb, "the damage")
+    assert committed_record(gkb.cfg, path) is False
+    assert committed_record(gkb.cfg, "research-review/challenges/notes.yaml") is False   # not in HEAD
+    gkb.write("research-review/challenges/SC-0003.yaml", record_text("SC", "SC-0003"))
+    assert committed_record(gkb.cfg, "research-review/challenges/SC-0003.yaml") is False  # worktree only
+    git(gkb, "add", "-A")
+    assert committed_record(gkb.cfg, "research-review/challenges/SC-0003.yaml") is False  # index only
+
+
+def test_committed_record_answers_no_in_a_repository_with_no_commit(gkb):
+    """A repository whose HEAD names no commit (a fresh `git init`) holds nothing to restore: False."""
+    path = "research-review/challenges/SC-0001.yaml"
+    gkb.write(path, record_text("SC", "SC-0001"))
+    git(gkb, "add", "-A")
+    commit(gkb, "the record")
+
+    git(gkb, "symbolic-ref", "HEAD", "refs/heads/unborn")       # HEAD names no commit
+
+    assert committed_record(gkb.cfg, path) is False
 
 
 @pytest.mark.parametrize("status", ["stale", "rejected", "outside-the-vocabulary"])
