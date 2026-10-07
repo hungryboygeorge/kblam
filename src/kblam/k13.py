@@ -274,8 +274,8 @@ def _duplicate_step(holders: list[Record], committed) -> str:
     where git's last commit holds a copy kblam reads as that record, in the file's kind folder). Every
     other duplicate is a hand copy, or a file git's last commit already holds as it stands: putting those
     bytes back changes nothing, kblam never renames a record, and the hooks deny removing a record file,
-    so no command an agent may run puts it right and a person is left. The step then names the files it
-    concerns and says to leave them as they are."""
+    so no command an agent may run puts it right: the step then names the files it concerns and says to
+    leave them as they are and tell the user."""
     strays = [rec for rec in holders if not _reads_as_its_name(rec)]
     if len(strays) == 1 and records.in_kind_folder(strays[0]):
         return records.restore_step(strays[0].path, committed)

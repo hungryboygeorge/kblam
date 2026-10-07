@@ -67,9 +67,9 @@ def by_key(resolutions: list[Resolution]) -> dict[tuple[str, frozenset], Resolut
 def _damaged(where: str, problem: str) -> ResolutionError:
     return ResolutionError(
         f"{where}: {problem}. Only kblam resolve writes {RESOLUTIONS_NAME}, one resolution per line, and it "
-        f"never rewrites a line, so this one was damaged by a merge or a hand edit. Restore the file from git "
-        f"(git log -p -- {RESOLUTIONS_NAME} shows each change) or ask a person to repair that line; kblam "
-        f"will not check findings against a resolution log it cannot read")
+        f"never rewrites a line, so this one was damaged by a merge or a hand edit. kblam never repairs a "
+        f"line and the file is not an agent's to edit, so leave it as it is and tell the user to repair "
+        f"{where}; kblam will not check findings against a resolution log it cannot read")
 
 
 def _problem(record) -> str | None:

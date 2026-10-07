@@ -295,10 +295,14 @@ write raised, with a written reason. An author sends the item IDs to the librari
   `{{kb_root}}/`, and here B is the one being merged away, so remove it instead of editing it. The
   removal leaves A's bytes alone, so the staged copy still puts.
   Deleting a finding file any other way is denied.
-- `kblam rm` and `kblam renumber` refuse a finding that a review record links (records never
-  follow a finding): do what the refusal says (merge the other way, removing the other finding
-  before the put, or renumber the other file), and when it says to tell the user, stop and tell
-  them.
+- `kblam rm` and `kblam renumber` refuse a finding that a review record links; a retired (`stale`)
+  record no longer links, since it is retired only to settle that dead end. Records never follow a
+  finding. Do what the refusal says: merge the other way, removing the other finding before the put,
+  or renumber the other file. When it hands the dead end to the adjudicator, send the IDs it names to
+  the coordinator or librarian and carry on; the adjudicator retires each record that links the
+  finding with the `review decide --status stale` command printed, which records the reason, then
+  runs the rm or the renumber, then files each retired record whose question still applies again
+  against the finding that remains. When it says to tell the user, stop and tell them.
 - `kblam resolve R-XXXXXXXX --distinct "<reason>"` only when Jev misread the item: two findings
   that state distinct facts, or, for a `revision` item, a finding that states a fact directly
   rather than correcting an earlier claim. The reason names what differs (component, operation,

@@ -317,7 +317,8 @@ def test_a_line_that_is_not_a_resolution_is_an_error_naming_the_file_and_line(jk
         resolutions.load(jkb.cfg)
     message = str(caught.value)
     assert message.startswith(f"{RESOLUTIONS_NAME}:3: ") and problem in message
-    assert "restore the file from git" in message.lower()
+    assert f"tell the user to repair {RESOLUTIONS_NAME}:3" in message
+    assert "restore the file from git" not in message.lower()
 
 
 def test_a_file_that_is_not_utf8_is_an_error_naming_the_line(jkb):

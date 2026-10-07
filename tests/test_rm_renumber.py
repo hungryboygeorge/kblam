@@ -387,8 +387,10 @@ def test_renumber_gives_a_new_id_and_rekeys_the_dependents_that_mean_that_file(k
         f"kblam renumber: F-0006 depends_on F-0005 is now F-0010: {new_fp} (findings/tray/F-0006-uses-mine.md), "
         f"since its fingerprint showed it meant findings/calibration/F-0005-sensor.md",
         "kblam renumber: regenerated findings/INDEX.md and .kblam/tree.hash",
-        "kblam renumber: 2 other mention(s) of F-0005 may mean either finding; a person checks each and points it "
-        "at F-0010 where it meant the renumbered one:",
+        "kblam renumber: 2 other mention(s) of F-0005 may mean either finding; check each and, where it "
+        "meant the renumbered finding, change it to F-0010 in the file the line names: kblam edit <its ID>, "
+        "change the staged copy, and kblam put it. For a depends_on line, change its key to F-0010 and its "
+        "value to null, which kblam put stamps.",
         "  findings/pump/F-0008-stale.md:10: depends_on F-0005: deadbeef0000 matches neither file",
         "  findings/pump/F-0009-prose.md:13: the body names F-0005",
     ]

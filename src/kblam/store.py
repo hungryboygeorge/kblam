@@ -130,7 +130,7 @@ class RenumberResult:
     fingerprint: str                            # the renumbered finding's new fingerprint
     kept: list[str] = field(default_factory=list)   # the files that keep the old ID
     rekeyed: list[tuple[str, str]] = field(default_factory=list)  # (dependent ID, its file)
-    mentions: list[str] = field(default_factory=list)  # other mentions of the old ID, for a person to check
+    mentions: list[str] = field(default_factory=list)  # other mentions of the old ID, for the agent to check
     index_path: str = ""
     recorded: bool = False                      # tree.hash advanced (the tree.hash rule, SPEC §8)
     resolutions: int = 0                        # resolutions copied under the new ID (SPEC §6.4)
@@ -972,7 +972,8 @@ def renumber(cfg: Config, path: Path) -> RenumberResult:
     shows it means this file (it equals this file's fingerprint before the change, and no file keeping the
     old ID has that fingerprint) is re-keyed to the new ID with this file's new fingerprint, verified by
     re-parsing as `stamp_dependency` is. The other mentions of the old ID (titles, bodies, depends_on entries
-    whose fingerprint does not settle which file they mean) are listed for the user to check. A resolution
+    whose fingerprint does not settle which file they mean) are listed for the agent to check, with the step
+    that changes one through kblam (SPEC §7). A resolution
     (§6.4) whose side is the old ID at this file's state hash meant this file, so a copy under the new ID is
     appended to kblam.resolutions.jsonl, and the verdicts it settled are not raised again. It regenerates
     INDEX.md and applies the tree.hash rule (§8).
@@ -1055,7 +1056,7 @@ class _RenumberPlan:
     new_fp: str
     carried: list[resolutions.Resolution]
     rewrites: list[tuple[Finding, bytes]]        # (dependent, its bytes with the entry re-keyed)
-    mentions: list[tuple[str, int, str]]         # (path, line, what), for a person to check
+    mentions: list[tuple[str, int, str]]         # (path, line, what), for the agent to check
 
 
 def _renumber_plan(cfg: Config, view: KBView, finding: Finding, kept: list[Finding], new_id: str,

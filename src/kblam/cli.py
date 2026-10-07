@@ -542,7 +542,10 @@ def _cmd_renumber(cfg, args) -> int:
     print(f"kblam renumber: regenerated {result.index_path}" + (" and .kblam/tree.hash" if result.recorded else ""))
     if result.mentions:
         print(f"kblam renumber: {len(result.mentions)} other mention(s) of {result.old_id} may mean either "
-              f"finding; a person checks each and points it at {result.new_id} where it meant the renumbered one:")
+              f"finding; check each and, where it meant the renumbered finding, change it to {result.new_id} "
+              f"in the file the line names: kblam edit <its ID>, change the staged copy, and kblam put it. "
+              f"For a depends_on line, change its key to {result.new_id} and its value to null, which kblam "
+              f"put stamps.")
         for mention in result.mentions:
             print(f"  {mention}")
     else:
@@ -551,7 +554,7 @@ def _cmd_renumber(cfg, args) -> int:
 
 
 def _tree_hash_kept(cfg, because: str | None) -> str:
-    """Why `kblam upgrade` did not advance tree.hash (upgrade.KEPT_*), and what a person does next."""
+    """Why `kblam upgrade` did not advance tree.hash (upgrade.KEPT_*), and what to do next."""
     from kblam import upgrade
 
     fix = "Run kblam validate, fix anything it lists, then run kblam validate --record"
@@ -575,7 +578,7 @@ def _tree_hash_kept(cfg, because: str | None) -> str:
 
 
 def _cmd_upgrade(cfg, args) -> int:
-    """`kblam upgrade` (SPEC §7): what it migrated, step by step, and what a person does next."""
+    """`kblam upgrade` (SPEC §7): what it migrated, step by step, and what to do next."""
     from kblam.upgrade import upgrade
 
     result = upgrade(cfg)

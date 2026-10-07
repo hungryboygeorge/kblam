@@ -481,8 +481,9 @@ def repair(kb) -> None:
 def own_problem_clause(path: str, problem: str, step: str = "") -> str:
     """The clause a renumber dead end prints when the selected file itself would refuse once the records
     that link it are retired: its own problem, and the step to run again once the user has repaired it.
-    `step` is the leave-it sentence, given only when the problem does not carry one itself (a damaged
-    kblam.resolutions.jsonl's problem does not; the ones kblam writes for the file do)."""
+    `step` is the leave-it sentence, added only when the problem does not carry one itself; every problem
+    kblam writes here does (the ones for the file itself, and a damaged kblam.resolutions.jsonl), so a
+    caller passes one only for a problem that does not."""
     leave = f" {step}" if step else ""
     return (f" Then kblam renumber {path} refuses for this file itself: {problem}.{leave} Once it is "
             f"repaired, run kblam renumber {path} again.")
@@ -510,13 +511,13 @@ def case_c_text(kb, reason: str, own: str = "", retire: tuple[str, ...] = ("CT-0
 def test_renumber_says_why_the_unlinked_file_cannot_be_renumbered_yet(kb, at_root, damage, shared):
     """Case C, for each reason: the other file's problem is named, the route through the adjudicator is
     given, and the file the user must repair is named. `shared` marks a damaged kblam.resolutions.jsonl,
-    which blocks the selected file's renumber too, so the route says so and ends with the step to run once
-    the user has repaired it."""
+    which blocks the selected file's renumber too, so the route names that problem for this file as well
+    (the same problem text, which carries its own leave-it step, so the clause adds none)."""
     same_id(kb)
     ct(kb, "CT-0003", MINE)
     reason = damage(kb)
     m.accept_tree(kb)
-    own = own_problem_clause(MINE, reason, STEP_FROM_PROBLEM) if shared else ""
+    own = own_problem_clause(MINE, reason) if shared else ""
     assert refused(kb, "renumber", kb.root / MINE) == message("renumber", case_c_text(kb, reason, own))
 
     repair(kb)
