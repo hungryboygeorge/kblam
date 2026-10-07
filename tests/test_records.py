@@ -229,8 +229,10 @@ def test_missing_schema_key_is_reported_and_the_rest_still_checked():
 
 def test_id_must_match_the_file_name():
     rec = parse("SC", "SC-0001", id="SC-0002")
-    assert rows(rec) == [expect("SC", "K13", "id: 'SC-0002' does not match the file name's ID (SC-0001)",
-                                rec, "id")]
+    assert rows(rec) == [expect("SC", "K13",
+                                "id: 'SC-0002' does not match the file name's ID (SC-0001); restore the "
+                                "record's file from git (git restore research-review/challenges/"
+                                "SC-0001.yaml)", rec, "id")]
 
 
 @pytest.mark.parametrize("value,message", [("X-0001", "id: 'X-0001' is not an ID"),

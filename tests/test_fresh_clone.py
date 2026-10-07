@@ -138,7 +138,7 @@ def test_a_new_clone_of_a_failing_tree_is_blocked_and_recorded_only_once_clean(o
     reason = blocked(call("Stop", stop(clone), monkeypatch, capsys)[1])
     assert "K8 findings/calibration/notes.md" in reason and reason.endswith(POINTER)
     code, out = run(clone, capsys, "index")
-    assert code == 0 and "tree.hash not advanced" in out and read_recorded(clone.cfg) is None
+    assert code == 0 and "the write itself is done" in out and read_recorded(clone.cfg) is None
     code, out = run(clone, capsys, "validate", "--record")
     assert code == 1 and "tree.hash not recorded" in out and read_recorded(clone.cfg) is None
     assert not checked(clone, "F-0001")

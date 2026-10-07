@@ -7,6 +7,8 @@ from dataclasses import replace
 
 import pytest
 
+from kblam.review_index import generate_review_index
+from kblam.rules import validate
 from kblam.treehash import (
     V2_TAG,
     clean_before_v2,
@@ -20,7 +22,7 @@ from kblam.treehash import (
 )
 from kblam.view import KBView, load_view
 
-from conftest import finding_text
+from conftest import finding_text, record_text
 
 CLAIM_A = ("The two sensor curve types agree to about 0.1% (median ratio 1.0017 on line 0), "
            "so they are not two analog gains.")
@@ -247,6 +249,27 @@ def test_clean_before_v2_does_not_bootstrap_a_tree_that_fails_the_rules(kb):
     assert read_recorded(cfg) is None
 
 
+def test_clean_before_v2_bootstraps_a_tree_whose_only_issues_are_warnings(kb):
+    """The bootstrap's validation ignores warnings, as `kblam validate --record` does: a record whose
+    source file is gone reports K13 warnings only while it is open, so the first write bootstraps; a
+    findings-only tree reports no warnings at all (K1-K12), so it bootstraps too."""
+    cfg = kb.cfg
+    kb.add("F-0001", "sensor", CLAIM_A)                    # no records: no warnings to ignore
+    (kb.root / ".kblam" / "tree.hash").unlink()
+    view = load_view(cfg)
+    assert validate(view) == []
+    assert clean_before_v2(cfg, view, has_records=False) is True
+
+    kb.write(f"{cfg.review_dir}/challenges/SC-0001.yaml", record_text("SC"))
+    kb.write(f"{cfg.review_dir}/INDEX.md", generate_review_index(load_view(cfg)))
+    view = load_view(cfg)
+    levels = [issue.level for issue in validate(view)]
+    assert levels and "error" not in levels
+    assert clean_before_v2(cfg, view, has_records=True) is True
+    assert record_after_write_v2(cfg, True, "put") is True
+    assert read_recorded(cfg) == (2, cfg.review_dir, tree_digest_v2(load_view(cfg)))
+
+
 def test_clean_before_v2_never_matches_a_format_1_line(kb):
     kb.add("F-0001", "sensor", CLAIM_A)
     cfg, view = kb.cfg, load_view(kb.cfg)
@@ -315,8 +338,9 @@ def test_record_after_write_v2_warns_about_a_format_1_file_and_leaves_it(kb, cap
 
 
 MISSING_FAILED = ("there is no .kblam/tree.hash (a new clone, or .kblam/ was deleted), and the tree as it was "
-                  "before this write fails kblam validate, so kblam did not record it; tree.hash not advanced. "
-                  "Run kblam validate, fix anything it lists, then run kblam validate --record.\n")
+                  "before this write fails kblam validate, so kblam did not record tree.hash for it; the write "
+                  "itself is done. Run kblam validate, fix anything it lists, then run kblam validate "
+                  "--record.\n")
 
 
 @pytest.mark.parametrize("record", [True, False], ids=["records", "no-records"])

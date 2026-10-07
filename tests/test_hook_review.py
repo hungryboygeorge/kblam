@@ -21,6 +21,8 @@ import pytest
 
 import m611_helpers as m
 from conftest import KBLAM_TOML, NO_EMBEDDINGS, PROMPT_TOML, finding_text, record_text
+from kblam import records
+from kblam.finding import yaml_rt
 from test_check import E1, jkb  # noqa: F401 (jkb is a fixture, and hkb is built on it)
 from test_fresh_clone import git
 from test_hook import POINTER, STATE_TAIL, blocked, call, denied, hkb, stop, tool  # noqa: F401 (hkb too)
@@ -371,9 +373,9 @@ def test_pre_tool_use_on_a_review_path_imports_only_the_hook_code(kb):
 # --- Stop over the review root ---------------------------------------------------------------------
 
 
-STOP_FIX = ("Fix each failure through kblam: a finding with kblam edit <id>, a change to the staged copy and "
-            "kblam put; a record as its failure line says, with the kblam command it names, a change to a free "
-            "field through kblam challenge edit or kblam task edit and kblam put, or a restore of the record's "
+STOP_FIX = ("Fix each failure through kblam. A finding: kblam edit <id>, change the staged copy, kblam put it. "
+            "A record: run the kblam command its failure line names; or change a free field with kblam challenge "
+            "edit or kblam task edit and kblam put it; or, when the line names no command, restore the record's "
             f"file from git. Never write under findings/ or {REVIEW}/ directly. Once the tree is clean, kblam "
             "validate --record accepts the change.")
 
@@ -394,8 +396,33 @@ def test_stop_blocks_on_a_record_changed_out_of_band(review_kb, monkeypatch, cap
                      f"kblam validate:")
     assert failures == [f"K13 {REVIEW}/INDEX.md: INDEX.md is missing; run kblam review index",
                         f"K13 {REVIEW}/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file name's "
-                        f"ID (SC-0001)"]
+                        f"ID (SC-0001); restore the record's file from git (git restore "
+                        f"{REVIEW}/challenges/SC-0001.yaml)"]
     assert (fix, pointer) == (STOP_FIX, POINTER)
+
+
+def test_the_free_field_route_the_fix_sentence_names_clears_the_block(review_kb, monkeypatch, capsys):
+    """D49 for the fix sentence's free-field route: a free field of an installed SC changed by hand fails
+    K13, Stop blocks, and kblam challenge edit, the fix in the staged copy, kblam put and kblam validate
+    --record clear it: the next Stop is silent."""
+    review_kb.add("F-0001", "motor", E1)
+    review_kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", proposition=""))
+
+    code, answer, _ = call("Stop", stop(review_kb), monkeypatch, capsys)
+    assert code == 0
+    assert any("proposition: required" in line for line in blocked(answer).split("\n"))
+    assert blocked(answer).split("\n")[-2:] == [STOP_FIX, POINTER]
+
+    edit = m.kblam(review_kb, "challenge", "edit", "SC-0001")
+    assert edit.code == 0 and edit.err == ""
+    staged = Path(edit.out.strip())
+    data = yaml_rt().load(staged.read_bytes().decode("utf-8"))
+    data["proposition"] = "The printed byte equality follows from the printed byte values"
+    staged.write_bytes(records.dump(data))
+
+    assert m.put_ok(review_kb, staged).code == 0
+    assert m.validate(review_kb, "--record").code == 0
+    assert call("Stop", stop(review_kb), monkeypatch, capsys) == (0, None, "")
 
 
 def test_stop_loop_guard_names_both_roots(review_kb, monkeypatch, capsys):
@@ -531,7 +558,8 @@ def test_the_fix_sentence_names_a_restore_from_git_for_a_record_line_that_names_
     failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
 
     assert failures == [f"K13 {REVIEW}/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file "
-                        f"name's ID (SC-0001)"]
+                        f"name's ID (SC-0001); restore the record's file from git (git restore "
+                        f"{REVIEW}/challenges/SC-0001.yaml)"]
     assert (fix, pointer) == (STOP_FIX, POINTER)
 
     # the route the old sentence offered instead: a staged copy and kblam put cannot fix this line

@@ -18,6 +18,9 @@ from conftest import dump_record, record_data, record_text
 from test_approval import git, gkb  # noqa: F401 (gkb is a fixture)
 
 CLAIM = "The media tray reports its type through two contact pins read at load time."
+# The step every stale or unavailable reference message ends with (SPEC §5.2.3 Evaluation).
+RETIRE_PINNED = ("; restore the pinned bytes, or retire the record and file a new one (kblam review decide "
+                 "SC-0001 --status stale --by NAME --reason TEXT --expect D)")
 
 
 @pytest.mark.parametrize("args", [
@@ -193,7 +196,8 @@ def test_untrusted_validation_never_opens_state_references(kb, monkeypatch, loca
             "--evidence PROVENANCE:PATH:LOCATOR")
     else:
         assert issue.code == "K13"
-        expected = ("basis[0]: " if location == "basis" else "") + "the pinned version is not present"
+        expected = (("basis[0]: " if location == "basis" else "")
+                    + "the pinned version is not present" + RETIRE_PINNED)
         assert issue.message == expected
 
 

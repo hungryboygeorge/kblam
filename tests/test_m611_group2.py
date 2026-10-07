@@ -39,6 +39,9 @@ TREE_HASH = ".kblam/tree.hash"
 TRACE = m.TRACE
 README = "evidence/2026-09-22-ratio/README.md"
 SNAPSHOT = "snapshots/full-scan-trace.md"
+# The step every stale or unavailable reference message ends with (SPEC §5.2.3 Evaluation).
+RETIRE_PINNED = ("; restore the pinned bytes, or retire the record and file a new one (kblam review decide "
+                 "SC-0001 --status stale --by NAME --reason TEXT --expect D)")
 
 # A second version of the trace: line 3 (the line the challenges below quote) holds other text, so a
 # challenge whose assertion is checked against the wrong version is an occurrence error, not a pass.
@@ -330,9 +333,9 @@ def test_a_pinned_version_that_is_gone_is_a_k13_error_for_a_confirmed_challenge(
     assert len(lines) == 2
     # "K13 <path>:<line>: <message>": the source's message, and the basis entry's, which names itself.
     labels = [line.split(": ", 2)[1] for line in lines]
-    assert sorted(labels) == ["basis[0]", "the pinned version is not present"]
+    assert sorted(labels) == ["basis[0]", "the pinned version is not present" + RETIRE_PINNED]
     assert all(line.startswith(f"K13 {CHALLENGES}/SC-0001.yaml:") for line in lines)
-    assert all(line.endswith(": the pinned version is not present") for line in lines)
+    assert all(line.endswith(": the pinned version is not present" + RETIRE_PINNED) for line in lines)
     assert "the working file" not in run.out            # the pinned bytes are gone, not the file
     assert touched == set()
 

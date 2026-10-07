@@ -22,6 +22,7 @@ from: for `git commit -a` or `git commit <paths>`, git hands the hook a temporar
 from __future__ import annotations
 
 import json
+import os
 import posixpath
 import re
 import subprocess
@@ -263,8 +264,8 @@ def _untracked_citations(cfg: Config, view: KBView) -> list[str]:
         warnings.append(warning + f"It is inside the git repository {nested}/, whose files this repository does "
                         f"not track, so git add cannot commit it. If {nested}/ is a source repository, it belongs "
                         f"in [kb] evidence_roots in {CONFIG_NAME}, which only a person changes: ask the user to add "
-                        f"\"{nested}\" there and run kblam approve-config before committing. Otherwise cite a file "
-                        f"that is committed")
+                        f"\"{nested}\" there and to approve the change with kblam approve-config before "
+                        f"committing. Otherwise cite a file that is committed")
     return warnings
 
 
@@ -283,10 +284,13 @@ def _in_nested_repository(cfg: Config, rel: str, roots: list[str]) -> bool:
     """Whether the cited path `rel` lies inside a nested Git repository under one of the evidence roots
     `roots` (SPEC §8 item 4): a folder from the evidence root down to `rel` itself that holds its own
     `.git`, a directory or the file a worktree or submodule has. Nothing above the evidence root is looked
-    at, so the outer repository's own `.git` never counts."""
+    at, so the outer repository's own `.git` never counts. The root and the path are compared with
+    os.path.normcase, so on Windows a root spelled in another case still matches."""
     parts = rel.split("/")
+    folded = os.path.normcase(rel)
     for root in roots:
-        if rel != root and not rel.startswith(root + "/"):
+        prefix = os.path.normcase(root)
+        if folded != prefix and not folded.startswith(prefix + os.sep):
             continue
         for depth in range(len(root.split("/")), len(parts) + 1):
             if (cfg.repo_root.joinpath(*parts[:depth]) / ".git").exists():

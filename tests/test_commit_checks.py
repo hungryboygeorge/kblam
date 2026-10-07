@@ -283,8 +283,8 @@ def in_nested(path: str, finding_id: str, what: str, rule: str, repository: str)
             f"passes {rule} here and fails on every clone. It is inside the git repository {repository}/, whose "
             f"files this repository does not track, so git add cannot commit it. If {repository}/ is a source "
             f"repository, it belongs in [kb] evidence_roots in kblam.toml, which only a person changes: ask the "
-            f"user to add \"{repository}\" there and run kblam approve-config before committing. Otherwise cite a "
-            f"file that is committed\n")
+            f"user to add \"{repository}\" there and to approve the change with kblam approve-config before "
+            f"committing. Otherwise cite a file that is committed\n")
 
 
 def test_a_nested_repository_outside_an_evidence_root_does_not_hold_what_a_finding_cites(gkb, capsys):
@@ -320,6 +320,26 @@ def test_a_nested_repository_outside_an_evidence_root_does_not_hold_what_a_findi
     approval.record_approval(gkb.cfg, (gkb.root / "kblam.toml").read_bytes())   # kblam approve-config
     git(gkb, "add", "kblam.toml")
     assert validate_commit(gkb, capsys) == (0, "kblam validate: OK (1 findings)\n")
+
+
+def test_an_evidence_root_spelled_with_other_case_matches_where_the_filesystem_folds_case(gkb, capsys):
+    """N12: the evidence root and the cited path are compared with os.path.normcase, so where the filesystem
+    folds case an evidence root spelled "Lab" still exempts a verbatim source under lab/ whose own .git lies
+    below it; on a case-sensitive filesystem "Lab" is another folder, so the warning stands. The citation is
+    a verbatim source, so K2's own case-sensitive root check does not stand in the way."""
+    gkb.write("kblam.toml", (gkb.root / "kblam.toml").read_text(encoding="utf-8").replace(
+        "[kb]\n", '[kb]\nevidence_roots = ["evidence", "Lab"]\n'))
+    approval.record_approval(gkb.cfg, (gkb.root / "kblam.toml").read_bytes())
+    commit(gkb, "configure")
+    gkb.write("lab/evidence/run-1/log.txt", "Line one.\n")
+    git(gkb, "init", "-q", "lab")
+    put(gkb, capsys, "F-0001", "motor", CLAIM_A, evidence="[evidence/2026-09-22-ratio/README.md]",
+        body=quote("lab/evidence/run-1/log.txt"))
+    git(gkb, "add", "findings")
+
+    warning = in_nested("lab/evidence/run-1/log.txt", "F-0001", "as a verbatim source", "K10", "lab")
+    assert validate_commit(gkb, capsys) == (0, ("kblam validate: OK (1 findings)\n" if sys.platform == "win32"
+                                                else warning + "kblam validate: OK (1 findings)\n"))
 
 
 # --- kblam.resolutions.jsonl ----------------------------------------------------------------------------

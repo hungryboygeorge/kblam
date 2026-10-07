@@ -38,8 +38,8 @@ BASELINE = ("kblam validate: there was no .kblam/tree.hash (a new clone, or .kbl
             "asked: 2 finding(s) accepted from the repository as checked at their current fingerprints. kblam "
             "audit checks them with Jev")
 MISSING = ("there is no .kblam/tree.hash (a new clone, or .kblam/ was deleted), and the tree as it was before this "
-           "write fails kblam validate, so kblam did not record it; tree.hash not advanced. Run kblam validate, "
-           "fix anything it lists, then run kblam validate --record.")
+           "write fails kblam validate, so kblam did not record tree.hash for it; the write itself is done. Run "
+           "kblam validate, fix anything it lists, then run kblam validate --record.")
 
 
 def unrecorded(command: str) -> str:

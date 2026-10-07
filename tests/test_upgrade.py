@@ -262,8 +262,8 @@ def test_upgrade_on_a_clone_with_records_records_nothing_and_says_what_to_do(kb,
     assert upgraded == m.Run(0, (
         f"kblam upgrade: re-stamped 1 depends_on value(s) in findings/ with v2 fingerprints:\n"
         f"  findings/motor/F-0002-motor.md: F-0001 {current} -> {v2_of(kb, 'F-0001')}\n"
-        f"kblam upgrade: recorded no .kblam/tree.hash: there is none (a new clone, or .kblam/ was deleted), and "
-        f"kblam upgrade does not record one while research-review/ holds review records. {NEXT}\n"
+        f"kblam upgrade: did not record .kblam/tree.hash, which is missing (a new clone, or .kblam/ was "
+        f"deleted): kblam upgrade does not record one while research-review/ holds review records. {NEXT}\n"
         f"kblam upgrade: commit the re-stamped findings, so every clone has them; each other machine runs kblam "
         f"upgrade once for its own .kblam/\n"), unrecorded("upgrade"))
     assert unbootstrapped(kb) and m.registry(kb) is None
@@ -284,8 +284,8 @@ def test_upgrade_on_a_clone_without_records_records_nothing_and_says_what_to_do(
     upgraded = m.kblam(kb, "upgrade")
 
     assert upgraded.code == 0
-    assert (f"kblam upgrade: recorded no .kblam/tree.hash: there is none (a new clone, or .kblam/ was deleted), "
-            f"and the tree as it was before this upgrade failed kblam validate. {NEXT}") in upgraded.out.splitlines()
+    assert (f"kblam upgrade: did not record .kblam/tree.hash, which is missing (a new clone, or .kblam/ was "
+            f"deleted): the tree as it was before this upgrade failed kblam validate. {NEXT}") in upgraded.out.splitlines()
     assert unbootstrapped(kb)
     assert m.validate(kb) == m.Run(0, "kblam validate: OK (2 findings)\n", "")
     assert m.validate(kb, "--record").code == 0

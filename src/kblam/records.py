@@ -226,7 +226,8 @@ def _check_id(rec, top_key, prefix, value, staged, add, argument):
         add(top_key, "id: required" if _missing(value) else f"id: {value!r} is not an ID")
         return
     if rec.id is not None and value != rec.id:
-        add(top_key, f"id: {value!r} does not match the file name's ID ({rec.id})")
+        add(top_key, f"id: {value!r} does not match the file name's ID ({rec.id}); restore the record's file "
+                     f"from git (git restore {rec.path})")
 
 
 def _check_date(rec, top_key, prefix, value, staged, add, argument):

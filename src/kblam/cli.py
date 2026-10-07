@@ -555,7 +555,7 @@ def _tree_hash_kept(cfg, because: str | None) -> str:
     from kblam import upgrade
 
     fix = "Run kblam validate, fix anything it lists, then run kblam validate --record"
-    none = "recorded no .kblam/tree.hash: there is none (a new clone, or .kblam/ was deleted), and "
+    none = "did not record .kblam/tree.hash, which is missing (a new clone, or .kblam/ was deleted): "
     old = "left .kblam/tree.hash as it was: it is in the old format, which cannot vouch for review records, and "
     if because == upgrade.KEPT_NONE_RECORDS:
         return f"{none}kblam upgrade does not record one while {cfg.review_dir}/ holds review records. {fix}"

@@ -7,7 +7,7 @@
 
 [kb]
 root = "findings"
-# A finding citing a file in a source repository under resources/ needs that folder, or resources/, added here.
+# A finding citing a source repository under resources/ needs that folder, or "resources", here.
 evidence_roots = ["evidence"]  # directories that finding evidence may cite; edit for this project
 labels = ["observed", "decoded", "inferred", "unknown", "reported"]
 scopes = ["any"]               # where a finding applies; edit for this project

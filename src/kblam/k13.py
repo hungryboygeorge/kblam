@@ -386,12 +386,21 @@ def _reference_issues(rec: Record, key: str, label: str, ref: FileRef, resolved:
 
 
 def _state_message(rec: Record, ref: FileRef, resolved: Resolved) -> str:
-    """What a stale or unavailable reference says (SPEC §5.2.3 Evaluation): never "the source now says"."""
+    """What a stale or unavailable reference says (SPEC §5.2.3 Evaluation): never "the source now says".
+    Each one names the step the kblam-write skill gives: restore the bytes the record was written
+    against, or retire the record (_retire_step) and file a new one."""
     if resolved.state is State.STALE:
-        return f"the source changed since {rec.id or 'this record'} was written"
+        return f"the source changed since {rec.id or 'this record'} was written; restore the original bytes, " \
+               f"or {_retire_step(rec)}"
     if resolved.message == sources.MESSAGE_MISSING and isinstance(ref.path, str):
-        return f"the working file {ref.path} is missing"
-    return "the pinned version is not present"
+        return f"the working file {ref.path} is missing; restore the original bytes, or {_retire_step(rec)}"
+    return f"the pinned version is not present; restore the pinned bytes, or {_retire_step(rec)}"
+
+
+def _retire_step(rec: Record) -> str:
+    """The way out of a reference that can no longer be restored: retire the record, which is the only
+    thing that clears the reference (a stale record is never reopened), and file a new one."""
+    return f"retire the record and file a new one ({RETIRE.format(rid=rec.id or 'SC-NNNN')})"
 
 
 def _probe(resolved: Resolved, assertion) -> tuple[int, tuple[int, int]] | str | None:

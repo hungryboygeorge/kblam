@@ -119,12 +119,18 @@ def _k14_same_bytes(sc: str, finding: str, blob: str) -> str:
             f"(kblam use review {sc} {finding} 1 --by NAME --proponent NAME). K10 is checked separately.")
 
 
+def _retire(rec_id: str) -> str:
+    """The step a stale or unavailable reference message ends with (SPEC §5.2.3 Evaluation)."""
+    return (f"; restore the original bytes, or retire the record and file a new one (kblam review decide "
+            f"{rec_id} --status stale --by NAME --reason TEXT --expect D)")
+
+
 def _stale_warning(rec_id: str, label: str = "") -> str:
     """The pattern of a K13 stale-reference warning about `rec_id`'s record file, as validate prints it:
     "K13 warning research-review/challenges/SC-0001.yaml:<line>: [label: ]the source changed since
-    SC-0001 was written"."""
+    SC-0001 was written; restore the original bytes, or retire the record and file a new one (...)"."""
     return (rf"K13 warning research-review/challenges/{rec_id}\.yaml:\d+: {re.escape(label)}the source "
-            rf"changed since {rec_id} was written")
+            rf"changed since {rec_id} was written" + re.escape(_retire(rec_id)))
 
 
 # --- the assertion's exact text (A2) --------------------------------------------------------------
