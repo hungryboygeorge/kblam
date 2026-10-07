@@ -255,3 +255,20 @@ def test_a_project_root_in_the_section_is_the_configs_review_root(tmp_path):
         'root = "research-review"', 'root = "review/records"')
     cfg = load_in(tmp_path, f"[kb]\nroot = \"findings\"\n\n{block}")
     assert cfg.review_dir == "review/records"
+
+
+# --- a source repository a finding cites (SPEC §5.2.1, §9) ----------------------------------------
+
+
+def test_the_skill_and_the_template_place_a_cited_source_repository_in_evidence_roots():
+    """A finding citing a file in a source repository under resources/ needs that folder, or an
+    enclosing folder such as resources, in [kb] evidence_roots; a record reference does not change
+    that, and only a person changes kblam.toml, so the skill tells the author to ask the user."""
+    skill = one_line(rendered(SKILL))
+    assert "A finding may cite a file in a source repository under `resources/`" in skill
+    assert "must then be in `[kb] evidence_roots`" in skill
+    assert "only a person changes `kblam.toml`, so ask the user to add it" in skill
+    assert "ask the user to add its folder, or `resources`, to `[kb] evidence_roots`" in skill   # the K2 row
+    template = one_line(init._asset(TEMPLATE).decode("utf-8"))
+    assert ("# A finding citing a file in a source repository under resources/ needs that folder, or "
+            "resources/, added here.") in template

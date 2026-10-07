@@ -62,6 +62,10 @@ Supporting detail after it.
 > text copied exactly from lines 12-13 of that file
 ```
 
+- A finding may cite a file in a source repository under `resources/` (for example
+  `resources/mx-docs/`); that folder, or an enclosing folder such as `resources`, must then be in
+  `[kb] evidence_roots`. A review record that references the source does not change that, and only
+  a person changes `kblam.toml`, so ask the user to add it.
 - The file is at most 300 lines by default (`kblam.toml` sets both limits).
 - A verbatim tag goes on the line directly before a fenced block or blockquote; `:@0x1F0` cites a
   byte offset. The excerpt must occur exactly in that range: copy it, never retype it. To quote a
@@ -81,7 +85,7 @@ or is not approved (see "Checks").
 | Rule | Trigger | Fix |
 |---|---|---|
 | K1 | frontmatter schema, ID, topic, label or scope; an old-format `depends_on` stamp (8 digits) | the field it names; for an old stamp see "Old formats" |
-| K2 | evidence missing, not found or outside the evidence folders; `depends_on` names no finding | cite paths that exist, under an evidence folder |
+| K2 | evidence missing, not found or outside the evidence folders; `depends_on` names no finding | cite paths that exist, under an evidence folder; for a file in a source repository under `resources/`, ask the user to add its folder, or `resources`, to `[kb] evidence_roots` |
 | K3 | a `depends_on` fingerprint is stale or missing | re-read the target; in a staged file set it to `null` |
 | K4 | revision-history language | state the current fact directly |
 | K5 | another finding's ID next to such language | `kblam edit` that finding instead |
@@ -277,14 +281,21 @@ items. The coordinator, or the librarian if one is deployed, decides each item, 
 whose write raised it. The one exception: the librarian may close a `low_confidence` item its own
 write raised, with a written reason. An author sends the item IDs to the librarian and carries on.
 
-- A real restatement (`same_fact`, `restates_and_extends`) is merged: `kblam edit` the existing
-  finding so it carries the new detail, and the new finding stops stating that fact. A finding the
-  merge leaves with nothing of its own to state is removed with
-  `kblam rm F-NNNN --merged-into F-MMMM` (the finding that now states it); deleting a finding file
-  any other way is denied.
+- A real restatement (`same_fact`, `restates_and_extends`) is merged: the finding that stays, A,
+  takes the other finding B's detail, and B is removed with `kblam rm B --merged-into A`. Remove B
+  before the put, not after: `kblam edit A`, add B's detail to the staged copy,
+  `kblam rm B --merged-into A`, then `kblam put <staged file>`; the removal leaves A's bytes
+  alone, so the staged copy still puts. A put of A that states B's fact is refused while B is
+  installed, by K9 ("claim duplicates B") or by a `same_fact` reject (exit 4) whose text says to
+  edit B: two findings that state one fact cannot both be in `{{kb_root}}/`, and here B is the one
+  being merged away, so remove it instead of editing it. When B gives a quantity A lacks,
+  `kblam rm B` is refused for it: `kblam edit A`, add the quantity with its value and unit and leave
+  the claim as it is, put it, then `kblam rm B --merged-into A`, then `kblam edit A` again, add the
+  rest of B's detail and put it. Deleting a finding file any other way is denied.
 - `kblam rm` and `kblam renumber` refuse a finding that a review record links (records never
-  follow a finding): do what the refusal says (merge the other way, renumber the other file), and
-  when it says to tell the user, stop and tell them.
+  follow a finding): do what the refusal says (merge the other way, removing the other finding
+  before the put, or renumber the other file), and when it says to tell the user, stop and tell
+  them.
 - `kblam resolve R-XXXXXXXX --distinct "<reason>"` only when Jev misread the item: two findings
   that state distinct facts, or, for a `revision` item, a finding that states a fact directly
   rather than correcting an earlier claim. The reason names what differs (component, operation,
