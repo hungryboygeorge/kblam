@@ -141,10 +141,12 @@ def challenge_new(cfg: Config, source_path: str, lines: tuple[int, int], by: str
 
 def challenge_edit(cfg: Config, rec_id: str) -> Path:
     """`kblam challenge edit SC-…`: stage a byte-for-byte copy of the installed SC and write its edit-base
-    receipt (receipts.write_edit_base with the sha256 of the installed bytes). Refuses: not an SC ID;
-    no installed record (`<review root>/challenges/<ID>.yaml`); a record that does not parse; a status
-    other than open ("SC-0001 is <status>; only an open challenge can be edited"); a staged copy already
-    present (name it, and say to edit that copy and put it, or delete it to start again)."""
+    receipt (receipts.write_edit_base with the sha256 of the installed bytes). Refuses: not an SC ID; no
+    installed record (`<review root>/challenges/<ID>.yaml`); a record that does not parse; an `id` that
+    differs from the file name's ID (nothing is staged: kblam validate names the step that fixes the
+    installed file); a status other than open ("SC-0001 is <status>; only an open challenge can be
+    edited"); a staged copy already present (name it, and say to edit that copy and put it, or delete it
+    to start again)."""
     with writes.locked(cfg, f"challenge edit {rec_id}", mutating=False):
         return _edit(cfg, "SC", rec_id)
 
@@ -464,7 +466,12 @@ def _stage(cfg: Config, kind: str, rec_id: str, data: dict) -> Path:
 
 
 def _edit(cfg: Config, kind: str, rec_id: str) -> Path:
-    """`challenge edit` and `task edit`: stage a byte-for-byte copy of an open installed record."""
+    """`challenge edit` and `task edit`: stage a byte-for-byte copy of an open installed record.
+
+    An installed record whose `id` differs from its file name's ID is refused before anything is staged:
+    the copy would carry the same bad `id`, `put` would refuse it (the ID is not a free field), and with
+    the copy deleted the author would only stage it again, so the refusal names the check that fixes the
+    installed file instead (kblam validate, and the step its line for the file gives)."""
     word = decisions.KIND_WORDS[kind]
     _check_id(rec_id, kind)
     folder = records.KINDS[kind]
@@ -477,6 +484,11 @@ def _edit(cfg: Config, kind: str, rec_id: str) -> Path:
     rec = records.parse_record(shown, raw)
     if rec.data is None:
         raise StoreError(f"{shown} did not parse ({rec.error}); run kblam validate")
+    if rec.data.get("id") != rec_id:
+        raise StoreError(
+            f"the installed record {shown} has id {rec.data.get('id')!r}, but its file name's ID is "
+            f"{rec_id}, so kblam will not stage a copy of it. Run kblam validate and do what its line for "
+            f"{shown} says, then run kblam {word} edit {rec_id} again")
     staged = cfg.review_staging_dir / f"{rec_id}.yaml"
     if staged.exists():
         raise StoreError(f"{rec_id} is already staged at {display_path(cfg, staged)}; edit that copy and "

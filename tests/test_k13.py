@@ -19,12 +19,14 @@ from kblam import decisions, matching, records, rules, sources, writes
 from kblam.cli import main
 from kblam.decisions import subject_digest
 from kblam.finding import fingerprint, yaml_rt
+from kblam.gitdir import committed_file
 from kblam.k13 import _use_blocking_issues, challenge_info, k13, use_binding_problems, use_current
 from kblam.review_index import generate_review_index
 from kblam.sources import SourceReader
 from kblam.treehash import format_line
 from kblam.view import load_view
 
+from test_approval import commit, git, gkb  # noqa: F401  (gkb is a fixture)
 from test_k14 import LINE3, add_finding, quoted, use as quoted_use
 
 REVIEW = "research-review"
@@ -1658,6 +1660,20 @@ def test_invalid_identity_has_only_its_schema_error(kb_ready, source_repo, field
     assert [(i.code, i.path, i.line, i.level, i.owner, i.message)
             for i in k13_issues(kb_ready)] == [
                 ("K13", path, rec.key_line(field), "error", "CT-0001", message)]
+
+
+def test_committed_file_answers_for_a_path_git_would_quote(gkb):
+    """The id/file-name line names its git restore only where git's last commit holds the record's path
+    (kblam.gitdir.committed_file). git quotes a path outside ASCII in `ls-tree` output unless it is asked
+    for NUL-terminated records (-z, core.quotePath), and a quoted path never equals the one asked about,
+    so a record at such a path would be told no restore is possible. Read from a real repository: the
+    plain listing quotes résumé.yaml, and committed_file answers True for it."""
+    (gkb.root / "résumé.yaml").write_bytes(b"schema: 1\n")
+    commit(gkb, "a path outside ASCII")
+
+    assert git(gkb, "ls-tree", "--name-only", "HEAD", "--", "résumé.yaml").stdout != \
+        "résumé.yaml".encode("utf-8") + b"\n"                # git's quoting, the reason for -z
+    assert committed_file(gkb.cfg, "résumé.yaml") is True
 
 
 @pytest.mark.parametrize("status", ["stale", "rejected", "outside-the-vocabulary"])

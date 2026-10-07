@@ -150,7 +150,8 @@ def put_record(cfg: Config, staged: Path) -> WriteResult:
     """`kblam put <staged SC-/CT-/CU- file>` (SPEC §5.2.5 "What put accepts").
 
     The staged name must match records.FILENAME_RE; it parses (records.parse_record) or is refused
-    with the parse error. The ID comes from the name, and the data's `id` must equal it.
+    with the parse error. The ID comes from the name, and the data's `id` must equal it: a mismatch is
+    refused with the step that unblocks the author (_id_refusal), which the installed record chooses.
 
     First put (no installed record): the allocation receipt (receipts.read_allocation) must exist; the
     staged `id`, `created`, `creator`, `proponent` and bindings must equal the receipt's (for an SC: the
@@ -195,8 +196,7 @@ def put_record(cfg: Config, staged: Path) -> WriteResult:
     if rec.error is not None or not isinstance(rec.data, dict):
         raise StoreError(f"{shown}: {rec.error or 'not a YAML mapping'}; fix it and put it again")
     if rec.data.get("id") != rec_id:
-        raise StoreError(f"{shown}: id is {rec.data.get('id')!r}, but the file name's ID is {rec_id}; the "
-                         f"ID never changes")
+        raise StoreError(_id_refusal(cfg, kind, rec_id, shown, rec.data.get("id")))
     path = _record_path(cfg, kind, rec_id)
 
     with writes.locked(cfg, f"put {rec_id}", mutating=True):
@@ -961,6 +961,36 @@ def _existing(view: KBView, cfg: Config, rec_id: str) -> Record:
 def _record_path(cfg: Config, kind: str, rec_id: str) -> str:
     """A record's canonical path, relative to the repository root."""
     return f"{cfg.review_dir}/{records.KINDS[kind]}/{rec_id}.yaml"
+
+
+def _id_refusal(cfg: Config, kind: str, rec_id: str, shown: str, bad) -> str:
+    """The refusal for a staged record whose `id` does not match its file name, ending in the step that
+    actually unblocks its author. The ID is not a free field, so put can never accept the staged file as
+    it stands; which way out works depends on the installed record, which is read (never through
+    load_view: this runs before the lock) only to choose the wording.
+
+    With no installed record, or one whose own `id` is the file-name ID, the staged `id` is a slip:
+    putting it back is the whole fix. Where the installed record's `id` differs too — a copy staged
+    before the hand edit, or staged by hand — putting the staged `id` back would only meet put's next
+    refusal ("id is not a free field"), so the staged file goes and the installed file is restored. An
+    installed file that does not parse (or is not a mapping, or cannot be read) gets that same step
+    without the "has id … too" clause, its own `id` being unsayable."""
+    head = f"{shown}: id is {bad!r}, but the file name's ID is {rec_id}; the ID never changes"
+    path = _record_path(cfg, kind, rec_id)
+    installed = cfg.review_path / records.KINDS[kind] / f"{rec_id}.yaml"
+    if not installed.is_file():
+        return f"{head}. Set id back to {rec_id} in {shown} and put it again"
+    try:
+        data = records.parse_record(path, installed.read_bytes()).data
+    except OSError:
+        data = None
+    if not isinstance(data, dict):
+        return (f"{head}, and the installed record {path} does not read as {rec_id} either. Delete "
+                f"{shown}, run kblam validate and do what its line for {path} says")
+    if data.get("id") != rec_id:
+        return (f"{head}, and the installed record {path} has id {data.get('id')!r} too. Delete {shown}, "
+                f"run kblam validate and do what its line for {path} says")
+    return f"{head}. Set id back to {rec_id} in {shown} and put it again"
 
 
 def _key(cfg: Config, raw) -> str | None:

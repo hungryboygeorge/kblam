@@ -87,19 +87,21 @@ def committed_file(cfg: Config, path: str) -> bool:
     --source=HEAD <path>` needs. The last commit is read, not the index, because a restore from HEAD
     puts the committed file back and deletes a file that only the index holds, so a `git add` that was
     never committed must not be answered with that command. False outside a git work tree and whenever
-    git cannot answer: an unborn HEAD (no commit yet) and a missing git both count as not holding it."""
+    git cannot answer: an unborn HEAD (no commit yet) and a missing git both count as not holding it.
+    The listing is asked for NUL-terminated (-z), where every path is literal: without it git quotes a
+    path outside ASCII (core.quotePath), and a quoted path never equals the one asked for."""
     if git_common_dir(cfg.repo_root) is None:
         return False
     import subprocess  # only here: the hooks' fast path never calls this
 
     try:
-        done = subprocess.run(["git", "--literal-pathspecs", "ls-tree", "--name-only", "HEAD", "--", path],
+        done = subprocess.run(["git", "--literal-pathspecs", "ls-tree", "-z", "--name-only", "HEAD", "--", path],
                               cwd=cfg.repo_root, capture_output=True, timeout=GIT_TIMEOUT)
     except (OSError, subprocess.TimeoutExpired):
         return False
     if done.returncode != 0:
         return False
-    return path in done.stdout.decode("utf-8", "replace").splitlines()
+    return path in [p for p in done.stdout.decode("utf-8", "replace").split("\0") if p]
 
 
 def tracked_state_problem(tracked: list[str]) -> str:

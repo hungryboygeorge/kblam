@@ -418,16 +418,17 @@ def test_a_staged_id_that_differs_from_the_file_name_is_refused(kb, source_repo)
     """Start: SC-0001 staged and filled by reviewer-a with its allocation receipt, no records installed.
     Hand edit (fixture setup): the staged `id` becomes SC-0009. Command: `kblam put
     .kblam/review-staging/SC-0001.yaml`. Exit 1, stderr "kblam put: .kblam/review-staging/SC-0001.yaml:
-    id is 'SC-0009', but the file name's ID is SC-0001; the ID never changes Load the kblam-write skill
-    for how to fix this.", stdout empty. Files: none (the staged file stays where it is). Validation
-    afterwards: exit 0. A5."""
+    id is 'SC-0009', but the file name's ID is SC-0001; the ID never changes. Set id back to SC-0001 in
+    .kblam/review-staging/SC-0001.yaml and put it again Load the kblam-write skill for how to fix this.",
+    stdout empty. Files: none (the staged file stays where it is). Validation afterwards: exit 0. A5."""
     path = new_challenge(kb, source_repo)
     edit(path, **{**challenge_fields(kb, source_repo), "id": "SC-0009"})
     with changes(kb, source_repo, set()):
         run = m.kblam(kb, "put", str(path))
     check(run, code=1,
           err="kblam put: .kblam/review-staging/SC-0001.yaml: id is 'SC-0009', but the file name's ID is "
-              "SC-0001; the ID never changes Load the kblam-write skill for how to fix this.\n")
+              "SC-0001; the ID never changes. Set id back to SC-0001 in .kblam/review-staging/SC-0001.yaml "
+              "and put it again Load the kblam-write skill for how to fix this.\n")
     assert not m.record_path(kb, "SC-0001").exists()
     validate(kb, source_repo, code=0, out="kblam validate: OK (0 findings)\n")
 
