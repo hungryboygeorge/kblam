@@ -416,14 +416,15 @@ def _cmd_review_list(cfg, args) -> int:
 
 def _add_by(parser) -> None:
     parser.add_argument("--by", required=True, metavar="NAME",
-                        help="the person acting: a name starting with a letter or digit, holding only "
+                        help="who is acting: an agent's name starting with a letter or digit, holding only "
                              "letters, digits, '.', '_', '@' and '-' (SPEC §5.2.2)")
 
 
 def _add_proponent(parser) -> None:
     parser.add_argument("--proponent", required=True, metavar="NAME",
-                        help="the person the record is drafted for: the finding's author for a use, and "
-                             "someone a closing decision must be independent of")
+                        help="who stands behind the finding's claim (for a use, the finding's author); a "
+                             "decision that closes the record, or retires it once decided, needs a --by "
+                             "other than this name")
 
 
 def _add_expect(parser) -> None:
@@ -1087,9 +1088,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="rewrite the rule, the skill, the hook entries and a kblam pre-commit hook to the "
                         "installed version (kblam.toml is never overwritten)")
 
-    p = sub.add_parser("challenge", help="source challenges (§5.2.5): new or edit stages one, put installs "
-                                         "it, pin fixes its source version, decide closes it, and show and "
-                                         "uses read it")
+    p = sub.add_parser("challenge", help="source challenges (§5.2.5): new or edit stages one, kblam put "
+                                         "installs it, pin fixes its source version, kblam review decide "
+                                         "confirms, rejects or retires it, and show and uses read it")
     ch = p.add_subparsers(dest="challenge_command", required=True, metavar="COMMAND")
     s = ch.add_parser("new", help="stage a challenge on a source's lines and print the staged path")
     s.add_argument("source_path", metavar="SOURCE-PATH",
@@ -1118,8 +1119,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("id", metavar="source-challenge-NNNN")
     s.set_defaults(func=_cmd_challenge_uses, command_name="challenge uses")
 
-    p = sub.add_parser("task", help="claim tasks (§5.2.5): new or edit stages one, put installs it, decide "
-                                    "closes it and show reads it")
+    p = sub.add_parser("task", help="claim tasks (§5.2.5): new or edit stages one, kblam put installs it, "
+                                    "kblam review decide closes or retires it, and show reads it")
     ta = p.add_subparsers(dest="task_command", required=True, metavar="COMMAND")
     s = ta.add_parser("new", help="stage a task bound to a finding's current revision and print its path")
     s.add_argument("finding", metavar="F-NNNN")

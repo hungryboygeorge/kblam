@@ -256,7 +256,7 @@ them by itself.
 Each `kblam put` sends the claim paragraph and scope of the new finding, and of up to 30 similar
 existing findings, to Jev, a model from TypeSafe AI, through OpenRouter. The rest of each finding
 is not sent, and the similarity search that chooses them runs locally, with ollama or BM25. The
-Jev check needs an OpenRouter API key with credit, and the Requirements section above gives its
+Jev check needs an OpenRouter API key with credit, and the section "requirements" above gives its
 cost. Whether to send claim text to that service and pay for it is your user's decision; OpenRouter
 describes what it keeps on its
 [privacy and logging page](https://openrouter.ai/docs/features/privacy-and-logging). With the Jev
@@ -347,7 +347,8 @@ record is staged under `.kblam/review-staging/`, edited there and installed only
 hooks deny writing or removing a record under `research-review/`. Commit the records and
 `research-review/INDEX.md` as you commit findings.
 
-Challenge a source when one of its assertions is wrong in one of those three ways:
+Challenge a source when one of its assertions is contradicted, unsupported or carried over from
+another model, product or version without justification:
 `kblam challenge new <source-path> --lines A-B --by NAME`. Task a claim that needs a fresh
 measurement or an independent check:
 `kblam task new <id> --kind replication|confirmation --by NAME --proponent NAME`, where the
@@ -362,11 +363,13 @@ being the finding's author.
 A record's status changes only through
 `kblam review decide <record-id> --status S --by NAME --reason TEXT --expect D`, where D is the
 subject digest that `kblam challenge show`, `kblam task show` or `kblam review list` printed; it
-refuses if the record changed since. Confirming or rejecting a challenge, closing a task and
-approving a use each need a `--by` that is not the challenge's creator, not the task's creator or
-proponent, and not the use's proponent. So send the ID of each record you file to the librarian, or
-to the coordinator if there is none, and carry on. `kblam review rebind` binds a task or use again
-to a finding that was edited since, and `kblam review list --open` lists the open records.
+refuses if the record changed since. Confirming or rejecting a challenge, closing a task, approving
+or withdrawing a use, and retiring any of them once decided each need a `--by` that is not the
+challenge's creator, not the task's creator or proponent, and not the use's proponent. So send the
+ID of each record you file to the librarian, or to the coordinator if there is none, and carry on.
+`kblam review rebind` binds a task or use again to a finding that was edited since, once a reviewer
+has rechecked it (on a decided record whose status it keeps, the same independence applies), and
+`kblam review list --open` lists the open records.
 
 `kblam validate` and the pre-commit hook fail on errors of K13 (record integrity), K14 (a finding
 excerpt that quotes a confirmed challenge's assertion, unless an approved use that is still current
@@ -375,8 +378,12 @@ lists each open task whose binding still holds as pending, without failing. A pu
 such an excerpt is refused, so quote the usable material outside the challenged assertion instead.
 No record changes a finding: a challenge that shows a claim false is followed by a `kblam edit` of
 that finding. `kblam rm` and `kblam renumber` refuse a finding that a record which is not retired
-links. The refusal prints the way out for the adjudicator, so send it to the librarian or the
-coordinator; the adjudicator retires each such record with the
-`kblam review decide ... --status stale` command it gives, runs the `rm` or `renumber`, and files
-each retired record again where its question still applies. The installed `kblam-write` skill gives
-the whole workflow and the fix for each refusal, and SPEC.md §5.2 gives the rules.
+links, and the refusal says what to do. Where the other finding is free, do it: merge the other way,
+or renumber the other file. Where the refusal hands the dead end to the adjudicator, send the IDs
+and paths it names to the librarian, or to the coordinator if there is none, and carry on; the
+adjudicator retires each record that links the finding with the
+`kblam review decide ... --status stale` command the refusal gives, runs the `rm` or `renumber`, and
+files each retired record again where its question still applies. Where the coordinator authored one
+of those records and no librarian is deployed, no agent may decide them, and the refusal says to
+tell the user. The installed `kblam-write` skill gives the whole workflow and the fix for each
+refusal, and SPEC.md §5.2 gives the rules.
