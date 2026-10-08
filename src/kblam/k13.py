@@ -757,6 +757,7 @@ def _use_blocking_issues(view, reader, rec: Record, *, status: str | None = None
     issues += decisions.decision_issues(candidate)
     issues += _identity_issues(projected, candidate, [], trust_state=reader.trust_state)
     projected_reader = sources.SourceReader(view.cfg, projected, trust_state=reader.trust_state)
+    projected_reader.pin_queries = reader.pin_queries   # the same validation: git's answers hold for both
     issues += _decision_evidence_issues(projected, projected_reader, candidate, data["status"],
                                       availability=False)
     return issues

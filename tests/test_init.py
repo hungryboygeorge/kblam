@@ -5,7 +5,9 @@ replace it. Nothing here touches the network (a fresh KB's Stop hook matches tre
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -23,7 +25,10 @@ FOREIGN = {"type": "command", "command": "echo mine", "timeout": 5}
 
 @pytest.fixture
 def repo(tmp_path, monkeypatch) -> Path:
-    """A fresh `git init` repository as the current directory, isolated from system and global git config."""
+    """A fresh `git init` repository as the current directory, isolated from system and global git config.
+    The hook check runs `kblam` from PATH: this checkout's, not one installed elsewhere, even when pytest
+    runs from the venv's python without the venv activated."""
+    monkeypatch.setenv("PATH", str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"])
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))

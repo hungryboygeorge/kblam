@@ -95,7 +95,8 @@ class SourceReader:
       ("snapshot", canonical key, sha256)  a snapshot file
     Each entry holds the bytes (or None). `reads[identity]` counts actual reads; a cache hit does not
     count, so tests can assert one read per identity. `matches` is the per-finding-revision cache that
-    matching.finding_matches uses.
+    matching.finding_matches uses. `pin_queries` keeps the answers to pin verification's other git
+    questions (worktree toplevels, object format, object types, tree entries) for this reader.
     """
 
     def __init__(self, cfg: Config, view, *, trust_state: bool = True) -> None:
@@ -104,6 +105,7 @@ class SourceReader:
         self.trust_state = trust_state
         self.reads: collections.Counter = collections.Counter()
         self.matches: dict = {}
+        self.pin_queries = gitpin.PinQueries()
         self._cache: dict = {}
         self._view_keys: dict[str, dict[str, str]] = {}   # "findings"/"review" -> canonical key -> path
 
@@ -240,7 +242,7 @@ class SourceReader:
         pinned_bytes = None
         reason = ""
         if pin is not None:
-            check = gitpin.verify_pin(self.cfg, raw, expected, pin, read=self.blob)
+            check = gitpin.verify_pin(self.cfg, raw, expected, pin, read=self.blob, queries=self.pin_queries)
             if check.status == "ok":
                 pinned_bytes = check.data
             else:

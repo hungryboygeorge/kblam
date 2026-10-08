@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -71,20 +72,22 @@ def test_a_holder_that_holds_longer_than_the_stale_age_is_not_broken(kb, capsys)
 def test_a_live_pid_does_not_keep_an_unrefreshed_lock(kb, capsys):
     """A lock whose pid is alive (here, this process's) but that nobody refreshes, as when the holder died
     and another process was given its pid: broken once its last refresh is older than the stale age, and
-    not before, however long ago it was taken."""
-    set_lock_config(kb, lock_wait_seconds=0.2, lock_stale_seconds=STALE)
+    not before, however long ago it was taken. The stale age is 30 s here, not STALE, and the age read
+    may be 60 s or a few more: a loaded machine can take seconds between writing the lock and reading it."""
+    set_lock_config(kb, lock_wait_seconds=0.2, lock_stale_seconds=30)
+    cfg = kb.cfg
     write_lock(kb, pid=os.getpid(), held_for=60, refreshed_ago=0)
-    with pytest.raises(LockError, match=r"held by pid \d+ \(kblam put F-0009-held.md\), held for 60s"):
-        with kb_lock(kb.cfg, "new motor"):
+    with pytest.raises(LockError, match=r"held by pid \d+ \(kblam put F-0009-held.md\), held for 6\ds"):
+        with kb_lock(cfg, "new motor"):
             pass
     assert "broke stale lock" not in capsys.readouterr().err
 
-    write_lock(kb, pid=os.getpid(), held_for=60, refreshed_ago=2 * STALE)
-    with kb_lock(kb.cfg, "new motor"):
+    write_lock(kb, pid=os.getpid(), held_for=60, refreshed_ago=2 * 30)
+    with kb_lock(cfg, "new motor"):
         pass
-    assert (f"kblam new motor: broke stale lock .kblam/lock held by pid {os.getpid()} (kblam put "
-            f"F-0009-held.md), held for 60s: its last refresh is older than lock_stale_seconds (0.5s)"
-            in capsys.readouterr().err)
+    assert re.search(rf"kblam new motor: broke stale lock \.kblam/lock held by pid {os.getpid()} \(kblam put "
+                     rf"F-0009-held\.md\), held for 6\ds: its last refresh is older than lock_stale_seconds \(30s\)",
+                     capsys.readouterr().err)
     assert not lock_path(kb).exists()
 
 

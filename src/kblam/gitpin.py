@@ -122,6 +122,42 @@ def oid_length(toplevel: Path) -> int:
     return 64 if not done.returncode and _out(done) == "sha256" else 40
 
 
+def _object_type(toplevel: Path, oid: str) -> str | None:
+    """`git -C <toplevel> cat-file -t <oid>`: the object's type, or None when it is not there."""
+    done = _git(toplevel, "cat-file", "-t", oid)
+    return None if done.returncode else _out(done)
+
+
+class PinQueries:
+    """The git questions verify_pin asks, each asked once per instance and its answer kept, None
+    included. A sources.SourceReader holds one, so each is asked once per validation, as each blob is
+    read once (SPEC §5.2.6); verify_pin without one asks them afresh."""
+
+    def __init__(self) -> None:
+        self._answers: dict = {}
+
+    def _once(self, question: tuple, ask):
+        if question not in self._answers:
+            self._answers[question] = ask()
+        return self._answers[question]
+
+    def toplevel_in(self, directory: Path) -> Path | None:
+        return self._once(("toplevel", str(directory)), lambda: _toplevel_in(directory))
+
+    def owning_worktree(self, path: Path) -> Path | None:
+        directory = _existing(path.parent)
+        return None if directory is None else self.toplevel_in(directory)
+
+    def oid_length(self, toplevel: Path) -> int:
+        return self._once(("oid_length", str(toplevel)), lambda: oid_length(toplevel))
+
+    def object_type(self, toplevel: Path, oid: str) -> str | None:
+        return self._once(("type", str(toplevel), oid), lambda: _object_type(toplevel, oid))
+
+    def tree_blob(self, toplevel: Path, commit: str, rel: str) -> str | None:
+        return self._once(("tree_blob", str(toplevel), commit, rel), lambda: _tree_blob(toplevel, commit, rel))
+
+
 def read_blob(toplevel: Path, blob: str) -> bytes | None:
     """`git -C <toplevel> cat-file blob <blob>`: the raw blob bytes (no filters), or None if absent."""
     done = _git(toplevel, "cat-file", "blob", blob)
@@ -129,12 +165,14 @@ def read_blob(toplevel: Path, blob: str) -> bytes | None:
 
 
 def verify_pin(cfg: Config, raw_path: str, sha256: str, pin: GitPin, *,
-               read: Callable[[Path, str], bytes | None] = read_blob) -> PinCheck:
+               read: Callable[[Path, str], bytes | None] = read_blob,
+               queries: PinQueries | None = None) -> PinCheck:
     """Verify a stored pin (SPEC §5.2.2): cfg.repo_root / pin.repo is the owning worktree of the resolved
     path (paths.resolve); both IDs are lowercase hex of oid_length's length; `cat-file -t <commit>` prints
     commit; `ls-tree <commit> -- <path relative to the toplevel>` maps the path to `blob`; and
-    `read(toplevel, blob)` hashes to sha256. Callers pass `read` to share a cache
-    (sources.SourceReader.blob). A raw_path that paths refuses is invalid."""
+    `read(toplevel, blob)` hashes to sha256. Callers pass `read` and `queries` to share caches
+    (sources.SourceReader.blob and .pin_queries). A raw_path that paths refuses is invalid."""
+    queries = queries if queries is not None else PinQueries()
     try:
         target = paths.resolve(cfg, raw_path)
     except paths.PathRefused as exc:
@@ -147,25 +185,25 @@ def verify_pin(cfg: Config, raw_path: str, sha256: str, pin: GitPin, *,
         return PinCheck("invalid", f"repo {pin.repo!r}: {exc}")
     if not recorded.is_dir():
         return PinCheck("absent", f"the repository {pin.repo} is not here")
-    toplevel = _toplevel_in(recorded)
+    toplevel = queries.toplevel_in(recorded)
     if toplevel is None or not _same(toplevel, recorded):
         return PinCheck("absent", f"{pin.repo} is not the top level of a Git worktree")
-    owner = owning_worktree(target)
+    owner = queries.owning_worktree(target)
     if owner is None or not _same(owner, recorded):
         return PinCheck("invalid", f"{pin.repo} is not the worktree that owns {raw_path}")
-    length = oid_length(toplevel)
+    length = queries.oid_length(toplevel)
     for name, oid in (("commit", pin.commit), ("blob", pin.blob)):
         if not isinstance(oid, str) or len(oid) != length or HEX_RE.fullmatch(oid) is None:
             return PinCheck("invalid", f"{name} {oid!r} is not {length} lowercase hex digits")
-    kind = _git(toplevel, "cat-file", "-t", pin.commit)
-    if kind.returncode:
+    kind = queries.object_type(toplevel, pin.commit)
+    if kind is None:
         return PinCheck("absent", f"commit {pin.commit} is not in {pin.repo}")
-    if _out(kind) != "commit":
-        return PinCheck("invalid", f"{pin.commit} is a {_out(kind)}, not a commit")
+    if kind != "commit":
+        return PinCheck("invalid", f"{pin.commit} is a {kind}, not a commit")
     rel = _under(target, toplevel)
     if not rel:
         return PinCheck("invalid", f"{raw_path} is the worktree itself, not a file in it")
-    found = _tree_blob(toplevel, pin.commit, rel)
+    found = queries.tree_blob(toplevel, pin.commit, rel)
     if found is None:
         return PinCheck("invalid", f"the tree of {pin.commit} holds no blob at {rel}")
     if found != pin.blob:
