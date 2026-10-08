@@ -125,21 +125,25 @@ and the finding is replaced in place. SPEC.md §4 and the installed skill descri
 |---|---|
 | `kblam new <topic> "<title>"` | Stage a skeleton for a new finding and print its path. |
 | `kblam edit <id>` | Stage a copy of an existing finding for rewriting. |
-| `kblam put <file>` | Validate, run the Jev check, and move a staged finding into `findings/`. |
+| `kblam put <file>` | Validate, run the Jev check, and move a staged finding into `findings/`; for a staged review record, validate it and move it into `research-review/`. |
 | `kblam validate` | Run every rule and list open review items; exit 1 on any failure. |
 | `kblam validate --record` | Accept a change made outside kblam (a `git pull`, say) once the tree is clean. |
-| `kblam validate --commit` | Also check the commit itself: it must hold `findings/` as it is on disk, may not change committed evidence, and may not change `kblam.toml` without approval. The pre-commit hook runs this. |
+| `kblam validate --commit` | Also check the commit itself: it must hold `findings/` and `research-review/` as they are on disk, may not change committed evidence, and may not change `kblam.toml` without approval. The pre-commit hook runs this. |
 | `kblam approve-config` | Show how `kblam.toml` changed and, at a terminal, approve it for commits on this machine. |
 | `kblam check [<id> ...]` | Jev-check findings already in the tree: those named, or every one not checked since its claim, label, scope, quantities or evidence last changed. |
 | `kblam check --pending` | Retry the findings Jev could not answer for. |
 | `kblam audit` | Ask every candidate pair and question that has no cached answer. |
 | `kblam resolve <R-id> --distinct "<reason>"` | Close a review or rejected item that Jev misread, and record why in the committed `kblam.resolutions.jsonl`. |
 | `kblam items [--reworded] [--stats]` | List the open items; `--reworded` lists rejected items whose finding later went in changed, and `--stats` counts how each verdict's items closed. |
-| `kblam rm <id> --merged-into <target>` | Remove a finding after a merge moved everything it stated into another. |
-| `kblam renumber <path>` | Give a new ID to one of two findings that share one after two clones' work is merged. |
+| `kblam rm <id> --merged-into <target>` | Remove a finding after a merge moved everything it stated into another. Refused while a review record that is not retired links the finding. |
+| `kblam renumber <path>` | Give a new ID to one of two findings that share one after two clones' work is merged. Refused while a review record that is not retired links that finding. |
 | `kblam ack <dependent> <target>` | After re-reading a rewritten finding, record that a finding depending on it still holds. |
 | `kblam deps <id>` | List a finding's dependencies and dependents, marking stale ones. |
-| `kblam recheck [<id> ...]` | Run findings' `check:` commands, each only once a person has approved it at a terminal on this machine; `--list` shows which are approved. |
+| `kblam challenge new\|edit\|pin\|show\|uses` | Stage a source challenge or a copy of an open one, pin its source's version, print it, or list the finding excerpts a confirmed one affects (see Review records below). |
+| `kblam task new\|edit\|show` | Stage a claim task on a finding or a copy of an open one, or print it. |
+| `kblam use review <challenge> <id> <excerpt-ordinal>` | Stage a checked use of a finding excerpt that a confirmed challenge affects. |
+| `kblam review decide\|rebind\|list\|index` | Record a decision that changes a record's status, bind a task or use again to an edited finding, list the records, or regenerate `research-review/INDEX.md`. |
+| `kblam recheck [<id> ...]` | Run findings' `check:` commands, each only once it is approved on this machine: the agent running it approves each new or changed command with `kblam recheck <id> --approve <digest>`, unless `recheck_person_approval = true` leaves that to a person at a terminal; `--list` shows which are approved. |
 | `kblam upgrade` | Move a knowledge base and this machine's state from an older kblam to the current formats (see below). |
 | `kblam index` | Regenerate `findings/INDEX.md`. |
 | `kblam cost` | Summarise Jev requests, tokens and spend by day and by kind. |
@@ -164,23 +168,24 @@ warns that recalibration is needed. Quantity conflicts still reject, because cod
 
 An open review item, or an unchecked item left when Jev could not be reached, makes
 `kblam validate` fail until the item is closed, and the pre-commit hook refuses commits that
-change `findings/` meanwhile; other commits go through. A review item closes when either of its
-findings is rewritten (the `put` re-checks the pair and raises a new item if a verdict still
-fires), or when `kblam resolve ... --distinct` records that Jev misread it. Resolutions are
-committed, in `kblam.resolutions.jsonl`, so every clone keeps them, and git merges that file line
-by line. An unchecked item closes when `kblam check --pending` gets an answer. This means that
-without an OpenRouter key every `put` succeeds but leaves an unchecked item, and commits to the
-knowledge base are refused. To run without Jev on purpose, delete the `[jev.thresholds]` table from
-`kblam.toml`. kblam then compares only numeric quantities and says so.
+change `findings/`, `research-review/` or `kblam.resolutions.jsonl` meanwhile; other commits go
+through. A review item closes when either of its findings is rewritten (the `put` re-checks the pair
+and raises a new item if a verdict still fires), or when `kblam resolve ... --distinct` records that
+Jev misread it. Resolutions are committed, in `kblam.resolutions.jsonl`, so every clone keeps them,
+and git merges that file line by line. An unchecked item closes when `kblam check --pending` gets an
+answer. This means that without an OpenRouter key every `put` succeeds but leaves an unchecked item,
+and commits to the knowledge base are refused. To run without Jev on purpose, delete the
+`[jev.thresholds]` table from `kblam.toml`. kblam then compares only numeric quantities and says so.
 
 ### Changes that arrive from outside kblam
 
-kblam records a digest of `findings/` in `.kblam/tree.hash` after each of its own writes. A change
-that arrives any other way, such as a `git pull` or a branch checkout, leaves the digest stale, and
-the Stop hook then validates the tree every time an agent stops. Run `kblam validate --record` to
-accept the change: it Jev-checks the findings that changed, validates, and records the new digest
-if everything is clean. On a new clone, where there is no digest yet, it asks Jev nothing: the
-findings are accepted as committed.
+kblam records a digest of `findings/` and `research-review/` in `.kblam/tree.hash` after each of its
+own writes. A change that arrives any other way, such as a `git pull` or a branch checkout, leaves
+the digest stale, and the Stop hook then validates the tree every time an agent stops. Run
+`kblam validate --record` to accept the change: it Jev-checks the findings that changed, validates,
+and records the new digest if everything is clean. On a new clone, where there is no digest yet, it
+asks Jev nothing: the findings are accepted as committed, and kblam starts its list of review record
+IDs from the records present, so that it can report one that later goes missing.
 
 ### Upgrading from an older kblam
 
@@ -203,16 +208,20 @@ never edits `kblam.toml` itself.
 `kblam.toml` holds the project's vocabularies (`labels`, the `scopes` a finding may apply to, and
 optionally the allowed `topics`, which are folders), the folders evidence may lie in, the claim and
 file length limits, the revision-history phrases that K4 and K5 look for, the agent types allowed
-to resolve items and remove findings (`adjudicators`), the lock and recheck timeouts, the Jev model
-and thresholds, the embedding settings, and the wording of the Jev questions. SPEC.md §9 documents every key. The file is committed, so it holds
-nothing machine-specific, and the API key never goes in it; where the key is read from, and where
-requests go beyond OpenRouter and a local ollama, are set per machine as described under Installing.
-Agents are not allowed to edit `kblam.toml`, so change it by hand. Because the hooks cannot catch
-every way a file can change, the pre-commit hook also refuses a commit that changes `kblam.toml`
-until a person has approved that exact version: after editing it, run `kblam approve-config` in a
-terminal, read the diff it shows, and answer `y`. The approval is recorded under `.kblam/` on your
-machine, and it can only be given at an interactive terminal, so an agent cannot give it. A project
-set up before this change gets the new pre-commit hook from `kblam init --update`.
+to resolve items and remove findings (`adjudicators`), the lock and recheck timeouts, who approves
+the `check:` commands that `kblam recheck` runs (`recheck_person_approval`: false by default, so the
+agent running `recheck` approves each one itself, and true to leave that to a person at a terminal),
+the review records' folder and provenance vocabulary (`[review]`), the Jev model and thresholds, the
+embedding settings, and the wording of the Jev questions. SPEC.md §9 documents every key. The file
+is committed, so it holds nothing machine-specific, and the API key never goes in it; where the key
+is read from, and where requests go beyond OpenRouter and a local ollama, are set per machine as
+described under installation. Agents are not allowed to edit `kblam.toml`, so change it by hand.
+Because the hooks cannot catch every way a file can change, the pre-commit hook also refuses a
+commit that changes `kblam.toml` until a person has approved that exact version: after editing it,
+run `kblam approve-config` in a terminal, read the diff it shows, and answer `y`. The approval is
+recorded under `.kblam/` on your machine, and it can only be given at an interactive terminal, so an
+agent cannot give it. A project set up before this change gets the new pre-commit hook from
+`kblam init --update`.
 
 ## For agents
 
@@ -239,9 +248,10 @@ The parts that act while an agent works are built for Claude Code: hooks that de
 the knowledge base, a Stop hook that validates anything that got past them, a rule for reading
 findings and a skill for writing them. With any other agent, `kblam put` still refuses a bad write
 and the git pre-commit hook still refuses a commit while `kblam validate` fails, but nothing stops a
-direct write under `findings/`, and Jev does not compare a finding written that way with the others
-unless someone runs `kblam check`. Such an agent also has to be pointed at the rule and the skill
-that `kblam init` installs under `.claude/`, since only Claude Code loads them by itself.
+direct write under `findings/` or `research-review/`, and Jev does not compare a finding written
+that way with the others unless someone runs `kblam check`. Such an agent also has to be pointed at
+the rule and the skill that `kblam init` installs under `.claude/`, since only Claude Code loads
+them by itself.
 
 Each `kblam put` sends the claim paragraph and scope of the new finding, and of up to 30 similar
 existing findings, to Jev, a model from TypeSafe AI, through OpenRouter. The rest of each finding
@@ -253,9 +263,9 @@ describes what it keeps on its
 check switched off, kblam still applies its deterministic rules and compares numeric quantities.
 
 kblam also assumes that someone other than a finding's author settles the review items the Jev
-check raises: a coordinating agent, a librarian agent or a person. While an item is open,
-`kblam validate` fails, and the pre-commit hook refuses any commit that changes the knowledge
-base.
+check raises, and decides the review records an author files: a librarian agent if one is deployed,
+else a coordinating agent. While an item is open, `kblam validate` fails, and the pre-commit hook
+refuses any commit that changes the knowledge base.
 
 kblam is at version 0.1.0 and was built for one research project. It is installed from its GitHub
 repository, needs Python 3.11 or newer, uv and git, and comes with no warranty and no support.
@@ -263,8 +273,8 @@ CONTRIBUTING.md lists what is not implemented yet.
 
 ### Setting kblam up for a project
 
-The commands are in the Installing and Setting up a repository sections above. An agent running
-them should also know the following.
+The commands are in the sections "installation" and "setting up a knowledge base" above. An agent
+running them should also know the following.
 
 The OpenRouter key belongs to your user. Ask them to save it in `~/kblam/jev!.txt` or to set
 `OPENROUTER_API_KEY`, and never write it into the repository or into `kblam.toml`. A different key
@@ -287,7 +297,7 @@ pre-commit hook refuses a commit of a `kblam.toml` that no person has approved; 
 default scope, `any`, overlaps every other. `kblam validate` should now report OK, and
 `kblam jev-smoke` tests the key and the endpoint for a fraction of a cent. Commit the files `init`
 created or changed. Each further clone of the repository then needs `kblam init` and
-`kblam validate --record`, as the Setting up a repository section explains.
+`kblam validate --record`, as the section "setting up a knowledge base" explains.
 
 The skill tells authors to send the review items and rejected items that their writes raise to a
 coordinator, or to a librarian agent if one is deployed. Agree with your user on who that is, and
@@ -309,18 +319,64 @@ If you are working in a project whose findings kblam manages, the rule and the s
 that project are your instructions, and this README is only background. The project's
 `.claude/rules/kblam-findings.md` loads when you open a finding, and the `kblam-write` skill covers
 writing one; if you have no Skill tool, read `.claude/skills/kblam-write/SKILL.md` as a file. The
-essentials are these. Never write under `findings/`, or under `.kblam/` outside `.kblam/staging/`,
-yourself: the hooks deny it, and the Stop hook catches what they miss. Add or change a finding with
-`kblam new` or `kblam edit`, edit the staged copy, and `kblam put` it. When a put is rejected as a
-duplicate or a conflict, edit the existing finding it names instead of rewording yours until it
-passes. Send the IDs of review and rejected items that your writes raise to the coordinator, or to
-the librarian if there is one, and carry on rather than resolving them yourself. Never edit
-`kblam.toml` either, and never try to approve a change to it; if you need one, such as a new
-scope, ask your user. Treat
-`kblam validate` as the only evidence that the knowledge base is clean, including after your own
-work.
+essentials are these. Never write under `findings/` or `research-review/`, under `.kblam/` outside
+`.kblam/staging/` and `.kblam/review-staging/`, or to `kblam.resolutions.jsonl` yourself: the hooks
+deny it, and the Stop hook catches what they miss under `findings/` and `research-review/`. Add or
+change a finding with `kblam new` or `kblam edit`, edit the staged copy, and `kblam put` it. When a
+put is rejected as a duplicate or a conflict, edit the existing finding it names instead of
+rewording yours until it passes. Send the IDs of review and rejected items that your writes raise to
+the coordinator, or to the librarian if there is one, and carry on rather than resolving them
+yourself. Never edit `kblam.toml` either, and never try to approve a change to it; if you need one,
+such as a new scope, ask your user. Treat `kblam validate` as the only evidence that the knowledge
+base is clean, including after your own work.
 
-Outside Claude Code the hooks do not run, so nothing stops a direct write under `findings/` until
-the pre-commit hook runs `kblam validate`, and that does not ask Jev. Write through `kblam put` all
-the same. If `kblam` is not on your PATH, it has to be installed as described under Installing
-before you write a finding.
+Outside Claude Code the hooks do not run, so nothing stops a direct write under `findings/` or
+`research-review/` until the pre-commit hook runs `kblam validate`, and that does not ask Jev. Write
+through `kblam put` all the same. If `kblam` is not on your PATH, it has to be installed as
+described under installation before you write a finding.
+
+#### Review records
+
+A project can also keep review records: YAML files under `research-review/` that are data about
+evidence and work, not findings. A source challenge (`source-challenge-NNNN`) disputes one assertion
+in one version of a source as `contradicted`, `unsupported` or `wrong_model`, and says which of the
+source's material stays usable. A claim task (`claim-task-NNNN`) asks for a replication or an
+independent confirmation of one finding's claim. A checked use (`checked-use-NNNN`) records that a
+reviewer checked one verbatim excerpt of a finding against a confirmed challenge of its source. A
+record is staged under `.kblam/review-staging/`, edited there and installed only by `kblam put`; the
+hooks deny writing or removing a record under `research-review/`. Commit the records and
+`research-review/INDEX.md` as you commit findings.
+
+Challenge a source when one of its assertions is wrong in one of those three ways:
+`kblam challenge new <source-path> --lines A-B --by NAME`. Task a claim that needs a fresh
+measurement or an independent check:
+`kblam task new <id> --kind replication|confirmation --by NAME --proponent NAME`, where the
+proponent is whoever stands behind the claim. `kblam challenge edit` and `kblam task edit` stage a
+copy of an open record, and `show` prints one. Once a challenge is confirmed,
+`kblam challenge uses <challenge-id>` lists each finding excerpt it affects and the command that
+fixes it: edit the finding, or, where the excerpt draws only on the material the challenge leaves
+usable, stage a use with
+`kblam use review <challenge-id> <id> <excerpt-ordinal> --by NAME --proponent NAME`, the proponent
+being the finding's author.
+
+A record's status changes only through
+`kblam review decide <record-id> --status S --by NAME --reason TEXT --expect D`, where D is the
+subject digest that `kblam challenge show`, `kblam task show` or `kblam review list` printed; it
+refuses if the record changed since. Confirming or rejecting a challenge, closing a task and
+approving a use each need a `--by` that is not the challenge's creator, not the task's creator or
+proponent, and not the use's proponent. So send the ID of each record you file to the librarian, or
+to the coordinator if there is none, and carry on. `kblam review rebind` binds a task or use again
+to a finding that was edited since, and `kblam review list --open` lists the open records.
+
+`kblam validate` and the pre-commit hook fail on errors of K13 (record integrity), K14 (a finding
+excerpt that quotes a confirmed challenge's assertion, unless an approved use that is still current
+covers it) and K15 (a claim task no longer bound to its finding's current revision); `validate`
+lists each open task whose binding still holds as pending, without failing. A put that would add
+such an excerpt is refused, so quote the usable material outside the challenged assertion instead.
+No record changes a finding: a challenge that shows a claim false is followed by a `kblam edit` of
+that finding. `kblam rm` and `kblam renumber` refuse a finding that a record which is not retired
+links. The refusal prints the way out for the adjudicator, so send it to the librarian or the
+coordinator; the adjudicator retires each such record with the
+`kblam review decide ... --status stale` command it gives, runs the `rm` or `renumber`, and files
+each retired record again where its question still applies. The installed `kblam-write` skill gives
+the whole workflow and the fix for each refusal, and SPEC.md §5.2 gives the rules.
