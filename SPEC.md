@@ -1918,17 +1918,17 @@ third party puts into the knowledge base, not an agent on this machine set on ru
   split, or a program that is not found, is reported without asking and counts as a failure, as does
   a program that cannot be started.
 - *Output.* A line as each approved check starts, and one with its result. When a process the check
-  started still holds its output when the log is saved (Windows cannot replace a file a process holds
-  open), kblam copies the bytes into the log a little after the check exits: it holds what was written
-  until then, and the result line says so. For a failure, the last 20 lines of output follow, with
-  control characters escaped, then what to do. Last
-  comes a summary line, which ends with the skill pointer when the exit status is 1. The exit status
-  is 0 when every selected check passed, or when no finding has a check, and 1 otherwise, including
-  when a finding cannot be read, its `check:` is not a string, or a selected check was not approved
-  (so a run that only printed blocks to approve exits 1); with no IDs given, such a finding is
-  reported and the rest still run. An ID that is malformed, not in the KB, unreadable, or without a
-  `check:` refuses the whole run before anything runs. `--list` runs nothing: it prints each command
-  with its state (approved; not approved, and why; or cannot run, and why) and exits 0.
+  started still holds its output when the log is saved (Windows cannot replace a file a process
+  holds open), kblam copies the bytes into the log a little after the check exits: it holds what was
+  written until then, and the result line says so, after the seconds it reports. For a failure, the
+  last 20 lines of output follow, with control characters escaped, then what to do. Last comes a
+  summary line, which ends with the skill pointer when the exit status is 1. The exit status is 0
+  when every selected check passed, or when no finding has a check, and 1 otherwise, including when
+  a finding cannot be read, its `check:` is not a string, or a selected check was not approved (so a
+  run that only printed blocks to approve exits 1); with no IDs given, such a finding is reported
+  and the rest still run. An ID that is malformed, not in the KB, unreadable, or without a `check:`
+  refuses the whole run before anything runs. `--list` runs nothing: it prints each command with its
+  state (approved; not approved, and why; or cannot run, and why) and exits 0.
 - *Logs.* `.kblam/recheck.jsonl` gets one line for each check a run considered: time, ID,
   fingerprint, command sha256, the pinned files with their digests, outcome (`passed`, `failed`,
   `timed_out`, `not_started`, `not_approved` or `declined`), exit code, seconds, whether a terminal
@@ -1939,9 +1939,11 @@ third party puts into the knowledge base, not an agent on this machine set on ru
   when it could not start).
   It is written to a new file that then replaces it, so a link at that name is replaced, never
   written through, and a link at `.kblam/recheck.jsonl` or `.kblam/recheck/` refuses the run. On
-  Windows the replacement is tried again for up to 2 s while a process the check started still holds
-  the file open, and a run removes any temporary output file of its finding that an earlier run left
-  behind (POSIX unlinks such a file at once, so none is ever left there).
+  Windows the replacement is tried again for up to 2 s while that path is not free: error 32 while a
+  process the check started still holds the file being moved, error 5 while another program holds
+  the file it would replace or a directory stands at that name. A run removes any temporary output
+  file of its finding that an earlier run left behind (POSIX unlinks such a file at once, so none is
+  ever left there).
 
 ### 7.1 `kblam init`
 

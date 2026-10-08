@@ -885,13 +885,14 @@ def _recheck_one(cfg, c: recheck.Check, state: recheck.State, terminal: bool, de
     result = recheck.run_check(cfg, c, rerun=rerun)
     recheck.log(cfg, c, result.status, terminal=terminal, approver=state.approver, result=result)
     if result.status == "passed":
-        print(f"kblam recheck: {c.finding_id} passed ({result.detail} after {result.seconds:.1f} s)")
+        print(f"kblam recheck: {c.finding_id} passed ({result.detail} after {result.seconds:.1f} s{result.note})")
         return "passed"
     if result.status == "not_started":
         print(f"kblam recheck: {c.finding_id} could not run: {result.detail}")
         return "could not run"
     output = recheck.output_path(cfg, c.finding_id).relative_to(cfg.repo_root).as_posix()
-    what = result.detail if result.status == "timed_out" else f"{result.detail} after {result.seconds:.1f} s"
+    what = (result.detail if result.status == "timed_out"
+            else f"{result.detail} after {result.seconds:.1f} s{result.note}")
     print(f"kblam recheck: {c.finding_id} FAILED ({what}); its output is in {output}"
           + (", ending:" if result.tail else ", and is empty"))
     for line in result.tail:

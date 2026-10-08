@@ -70,11 +70,16 @@ TAIL_WIDTH = 300                           # characters printed of one such line
 # exits cannot hang the run.
 REPLACE_RETRY_SECONDS = 2.0
 REPLACE_RETRY_INTERVAL = 0.1
-# What the result line adds when the log could only be copied into place that way: the copy is taken a
-# little after the check exits, so it holds everything written until then, and nothing a process it
-# started wrote after that.
-HELD_OUTPUT_DETAIL = ("; a process it started was still running and holding its output, so anything that "
-                      "process wrote after kblam copied the log is not in it")
+# The Windows error numbers that mean something holds the log's path open, so replacing it is worth trying
+# again: ERROR_SHARING_VIOLATION (32), given while a process the check started still holds the file being
+# moved, and ERROR_ACCESS_DENIED (5), given while another program holds the file it would replace, or while
+# a directory stands at that name.
+HELD_OPEN_WINERRORS = (32, 5)
+# What the result line adds after the seconds when the log could only be copied into place that way: the
+# copy is taken a little after the check exits, so it holds everything written until then, and nothing a
+# process it started wrote after that.
+HELD_OUTPUT_NOTE = ("; a process it started was still running and holding its output, so anything that "
+                    "process wrote after kblam copied the log is not in it")
 BATCH_SUFFIXES = (".bat", ".cmd")          # Windows runs these through cmd.exe, which re-parses arguments
 # The two check problems that name no step the reader can take, so cli._approve adds one when it refuses
 # to approve such a check (SPEC §7).
@@ -437,6 +442,8 @@ class Outcome:
     seconds: float = 0.0
     detail: str = ""                               # what happened, for the report
     tail: list[str] = field(default_factory=list)  # the last output lines, escaped
+    note: str = ""                                 # a clause the result line adds after the seconds
+                                                   # (see HELD_OUTPUT_NOTE), never part of `detail`
 
 
 def output_path(cfg: Config, finding_id: str) -> Path:
@@ -503,10 +510,11 @@ def run_check(cfg: Config, check: Check, *, rerun: str) -> Outcome:
     if code is None:
         return Outcome("timed_out", None, seconds, f"timed out after {cfg.recheck_timeout_seconds:g} s; it "
                                                    f"and every process it started were killed", tail)
-    held = "" if moved else HELD_OUTPUT_DETAIL
+    held = "" if moved else HELD_OUTPUT_NOTE
     if code == 0:
-        return Outcome("passed", 0, seconds, f"exit 0{held}", tail)
-    return Outcome("failed", code, seconds, (f"killed by signal {-code}" if code < 0 else f"exit {code}") + held, tail)
+        return Outcome("passed", 0, seconds, "exit 0", tail, held)
+    return Outcome("failed", code, seconds,
+                   f"killed by signal {-code}" if code < 0 else f"exit {code}", tail, held)
 
 
 def _sweeps_leftovers() -> bool:
@@ -537,31 +545,44 @@ def _remove(path: str) -> None:
         pass
 
 
+def _held_open(exc: OSError) -> bool:
+    """Whether Windows refused to replace the log's file for the one reason worth waiting for: something
+    holds that path open. The error numbers are Windows' own (HELD_OPEN_WINERRORS): a process the check
+    started still holds the file being moved, or another program holds the file it would replace, or a
+    directory stands at that name. Waiting is only ever right there -- POSIX unlinks at once, and reports
+    anything else as the error it is -- so this is True only on Windows. A seam, so a test can drive the
+    Windows path on every platform."""
+    return sys.platform == "win32" and getattr(exc, "winerror", None) in HELD_OPEN_WINERRORS
+
+
 def _move_output(cfg: Config, check: Check, temporary: str, target: Path, rerun: str) -> bool:
-    """Put the check's output at `target`: os.replace, tried again for REPLACE_RETRY_SECONDS while Windows
-    refuses the rename because a process the check started still holds the file open (Python opens a file
-    without FILE_SHARE_DELETE, so the rename fails while such a process lives). False when it never became
-    possible: the bytes (readable while shared) are then copied into `target` from a second temporary
-    file, so the log, and the tail printed from it, still exist. RecheckError when the file to move is
-    gone -- another kblam recheck of the same finding removed it -- or when even that copy failed."""
+    """Put the check's output at `target`: os.replace, tried again for REPLACE_RETRY_SECONDS while the
+    operating system refuses the rename because something holds that path open -- a process the check
+    started (Python opens a file without FILE_SHARE_DELETE, so the rename fails while such a process
+    lives), another program reading the log being replaced, or a directory at that name. False when it
+    never became possible: the bytes (readable while shared) are then copied into `target` from a second
+    temporary file, so the log, and the tail printed from it, still exist. RecheckError when the file to
+    move is gone -- another kblam recheck of the same finding removed it -- or when even that copy
+    failed."""
     deadline = time.monotonic() + REPLACE_RETRY_SECONDS
     while True:
         try:
             os.replace(temporary, target)
             return True
         except FileNotFoundError:
-            # Nothing else removes that file: mkstemp made it in a directory that is still there, so the
-            # one way it is gone is another recheck of the same finding, which unlinks it at once on POSIX
-            # and may do so on Windows too.
-            raise RecheckError(f"{check.finding_id}'s output file was removed while its check ran, most likely "
-                               f"by another kblam recheck of {check.finding_id} running at the same time; this "
-                               f"run stopped there, so any check after it did not run: run {rerun} again once "
-                               f"that one has finished; if it fails again, leave it as it is and tell the "
-                               f"user") from None
+            # Nothing else removes that file: mkstemp made it in a directory that is still there. On
+            # Windows, another recheck's sweep can remove it in the moment between its file being closed
+            # and moved; nothing else in kblam removes it.
+            raise RecheckError(f"{check.finding_id}'s output file was removed while its check ran (another "
+                               f"kblam recheck of {check.finding_id} running at the same time can do that); "
+                               f"this run stopped there, so any check after it did not run: run {rerun} again "
+                               f"once any other kblam recheck has finished; if it fails again, leave it as "
+                               f"it is and tell the user") from None
         except PermissionError as exc:
-            # Only the sharing violation Windows gives is worth waiting for, and only the copy that follows
-            # can get past it: any other refusal is the operating system's to report, as before.
-            if sys.platform != "win32" or getattr(exc, "winerror", None) != 32:
+            # Only the refusals Windows gives while something holds the log's path open are worth waiting
+            # for, and only the copy that follows can get past them: any other refusal is the operating
+            # system's to report, as before.
+            if not _held_open(exc):
                 raise
             if time.monotonic() >= deadline:
                 break
@@ -570,9 +591,12 @@ def _move_output(cfg: Config, check: Check, temporary: str, target: Path, rerun:
         _copy_output(temporary, target, check.finding_id)
     except OSError as exc:
         raise RecheckError(f"could not save {check.finding_id}'s output to {shown_path(cfg, target)} "
-                           f"({exc.strerror or exc}) after a process the check started kept its output open; "
-                           f"this run stopped there, so any check after it did not run: wait a minute, then "
-                           f"run {rerun} again; if it fails again, leave it as it is and tell the user") from None
+                           f"({exc.strerror or exc}): the file could not be replaced, and the copy that "
+                           f"followed could not be made either. A process the check started, or another "
+                           f"program, may still hold that path open, and a directory there stops the log "
+                           f"being saved at all; this run stopped there, so any check after it did not "
+                           f"run: find out what is at that path, then run {rerun} again; if it fails again, "
+                           f"leave it as it is and tell the user") from None
     _remove(temporary)
     return False
 
