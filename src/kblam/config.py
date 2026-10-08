@@ -135,7 +135,7 @@ class Config:
 
     @property
     def review_staging_dir(self) -> Path:
-        """SC-/CT-/CU- records being written, awaiting put: the author's to edit (SPEC §5.2.5)."""
+        """Review records being written, awaiting put: the author's to edit (SPEC §5.2.5)."""
         return self.state_dir / "review-staging"
 
     @property

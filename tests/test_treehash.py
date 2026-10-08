@@ -176,7 +176,7 @@ def test_bootstrap_refuses_a_tree_that_fails_the_rules(kb, capsys):
 def test_a_missing_tree_hash_with_a_failing_record_is_not_bootstrapped(kb, capsys):
     """Records take part in the bootstrap's validation: this one fails K13 (its source and the review
     index are missing), so the index write leaves tree.hash missing and says why."""
-    kb.write("research-review/challenges/SC-0001.yaml", record_text("SC"))
+    kb.write("research-review/challenges/source-challenge-0001.yaml", record_text("source-challenge"))
     (kb.root / ".kblam" / "tree.hash").unlink()
     kb.write("findings/calibration/F-0001-sensor.md", finding_text("F-0001", CLAIM_A))
     capsys.readouterr()

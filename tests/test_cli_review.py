@@ -33,9 +33,9 @@ STAGING = ".kblam/review-staging"
 RECEIPTS = ".kblam/review-receipts"
 CHALLENGES = f"{REVIEW}/challenges"
 LINE2 = "Row 101: bytes 0x3A 0x3B"            # TRACE_TEXT line 2
-RANGE_WARNING = (f"the cited range {TRACE}:3-3 overlaps lines 3-3 of SC-0001's assertion without "
+RANGE_WARNING = (f"the cited range {TRACE}:3-3 overlaps lines 3-3 of source-challenge-0001's assertion without "
                  f"quoting it; check that the excerpt does not rely on the challenged text "
-                 f"(kblam challenge uses SC-0001 lists what SC-0001 affects)")
+                 f"(kblam challenge uses source-challenge-0001 lists what source-challenge-0001 affects)")
 
 
 @pytest.fixture(autouse=True)
@@ -121,7 +121,7 @@ def registry_ids(kb):
 
 
 def staged_sc(kb, capsys, source_repo, *, lines: str = "3-3") -> Path:
-    """`challenge new` plus the author's Filling: an SC ready for `put`."""
+    """`challenge new` plus the author's Filling: a source challenge ready for `put`."""
     path = stage(kb, capsys, "challenge", "new", TRACE, "--lines", lines, "--by", "reviewer-a")
     fill(path, **sc_fields(source_repo))
     return path
@@ -133,8 +133,8 @@ def staged_sc(kb, capsys, source_repo, *, lines: str = "3-3") -> Path:
 def test_challenge_new_stages_and_prints_the_path(kb, source_repo, capsys):
     assert run(kb, "challenge", "new", source_repo.kb_path(), "--lines", "2-2",
                "--by", "reviewer-a") == 0
-    assert capsys.readouterr().out == f"{kb.root / STAGING / 'SC-0001.yaml'}\n"
-    assert (kb.root / STAGING / "SC-0001.yaml").is_file()
+    assert capsys.readouterr().out == f"{kb.root / STAGING / 'source-challenge-0001.yaml'}\n"
+    assert (kb.root / STAGING / "source-challenge-0001.yaml").is_file()
 
 
 def test_challenge_new_refuses_lines_outside_the_source(kb, source_repo, capsys):
@@ -142,27 +142,27 @@ def test_challenge_new_refuses_lines_outside_the_source(kb, source_repo, capsys)
     assert run(kb, "challenge", "new", TRACE, "--lines", "3-9", "--by", "reviewer-a") == 1
     assert capsys.readouterr().err == \
         "kblam challenge new: lines 3-9 are outside the source (it has 4 lines)\n"
-    assert not (kb.root / STAGING / "SC-0001.yaml").exists()
+    assert not (kb.root / STAGING / "source-challenge-0001.yaml").exists()
 
 
 def test_challenge_edit_stages_a_copy_with_its_edit_base_receipt(kb, source_repo, capsys):
-    install_record(kb, "SC", sc(source_repo, status="open"))
+    install_record(kb, "source-challenge", sc(source_repo, status="open"))
     accept_tree(kb, capsys)
-    assert run(kb, "challenge", "edit", "SC-0001") == 0
+    assert run(kb, "challenge", "edit", "source-challenge-0001") == 0
     staged = Path(capsys.readouterr().out.strip())
-    assert staged == kb.root / STAGING / "SC-0001.yaml"
-    assert staged.read_bytes() == (kb.root / CHALLENGES / "SC-0001.yaml").read_bytes()
-    assert (kb.root / RECEIPTS / "SC-0001.edit-base.json").is_file()
+    assert staged == kb.root / STAGING / "source-challenge-0001.yaml"
+    assert staged.read_bytes() == (kb.root / CHALLENGES / "source-challenge-0001.yaml").read_bytes()
+    assert (kb.root / RECEIPTS / "source-challenge-0001.edit-base.json").is_file()
 
 
 def test_challenge_show_prints_the_subject_digest_and_the_source(kb, source_repo, capsys):
-    install_record(kb, "SC", sc(source_repo))
+    install_record(kb, "source-challenge", sc(source_repo))
     accept_tree(kb, capsys)
-    assert run(kb, "challenge", "show", "SC-0001") == 0
+    assert run(kb, "challenge", "show", "source-challenge-0001") == 0
     text = capsys.readouterr().out
     assert text.splitlines()[:6] == [
-        "SC-0001 confirmed",
-        f"subject digest: {digest_of(kb, 'SC-0001')}",
+        "source-challenge-0001 confirmed",
+        f"subject digest: {digest_of(kb, 'source-challenge-0001')}",
         f"source: {TRACE}",
         f"version: {source_repo.blob(TRACE_PATH)}",
         "state: current",
@@ -172,29 +172,29 @@ def test_challenge_show_prints_the_subject_digest_and_the_source(kb, source_repo
 
 
 def test_challenge_uses_names_the_excerpt_and_the_command(kb, source_repo, capsys):
-    install_record(kb, "SC", sc(source_repo))
+    install_record(kb, "source-challenge", sc(source_repo))
     add_finding(kb, "3", LINE3)
     accept_tree(kb, capsys)
-    assert run(kb, "challenge", "uses", "SC-0001") == 0
+    assert run(kb, "challenge", "uses", "source-challenge-0001") == 0
     assert capsys.readouterr().out == \
         ("F-0001 findings/calibration/F-0001-ratio.md:15 excerpt 1 same: error; "
-         "kblam use review SC-0001 F-0001 1 --by NAME --proponent NAME\n")
+         "kblam use review source-challenge-0001 F-0001 1 --by NAME --proponent NAME\n")
 
 
 def test_challenge_pin_pins_a_provisional_source(kb, source_repo, capsys):
-    install_record(kb, "SC", sc(source_repo, status="open", pin=False))  # committed, but not pinned
+    install_record(kb, "source-challenge", sc(source_repo, status="open", pin=False))  # committed, but not pinned
     accept_tree(kb, capsys)
-    assert run(kb, "challenge", "pin", "SC-0001", "--expect", digest_of(kb, "SC-0001")) == 0
+    assert run(kb, "challenge", "pin", "source-challenge-0001", "--expect", digest_of(kb, "source-challenge-0001")) == 0
     assert capsys.readouterr().out == \
-        f"kblam challenge pin: SC-0001 pinned (subject digest {digest_of(kb, 'SC-0001')[:12]})\n"
+        f"kblam challenge pin: source-challenge-0001 pinned (subject digest {digest_of(kb, 'source-challenge-0001')[:12]})\n"
 
 
 def test_challenge_pin_refuses_a_pin_that_is_already_there(kb, source_repo, capsys):
-    install_record(kb, "SC", sc(source_repo, status="open"))
+    install_record(kb, "source-challenge", sc(source_repo, status="open"))
     accept_tree(kb, capsys)
-    assert run(kb, "challenge", "pin", "SC-0001", "--expect", digest_of(kb, "SC-0001")) == 1
+    assert run(kb, "challenge", "pin", "source-challenge-0001", "--expect", digest_of(kb, "source-challenge-0001")) == 1
     assert capsys.readouterr().err == \
-        ("kblam challenge pin: SC-0001's source is already pinned; a pin is never replaced. To pin "
+        ("kblam challenge pin: source-challenge-0001's source is already pinned; a pin is never replaced. To pin "
          "another version, write a new challenge\n")
 
 
@@ -206,7 +206,7 @@ def test_task_new_stages_a_task_bound_to_the_finding(kb, source_repo, capsys):
     accept_tree(kb, capsys)
     path = stage(kb, capsys, "task", "new", "F-0001", "--kind", "replication", "--by", "reviewer-a",
                  "--proponent", "researcher-a")
-    assert path == kb.root / STAGING / "CT-0001.yaml"
+    assert path == kb.root / STAGING / "claim-task-0001.yaml"
     data = yaml_rt().load(path.read_bytes().decode("utf-8"))
     assert (data["kind"], data["finding"], data["status"], data["question"]) == \
         ("replication", "F-0001", "open", "")
@@ -221,27 +221,27 @@ def test_task_new_refuses_a_finding_that_is_not_there(kb, capsys):
 
 def test_task_edit_stages_a_copy_and_task_show_prints_the_binding(kb, source_repo, capsys):
     add_finding(kb, "3", LINE3)
-    install_record(kb, "CT", ct(kb))                          # open, bound to F-0001 as it is now
+    install_record(kb, "claim-task", ct(kb))                          # open, bound to F-0001 as it is now
     accept_tree(kb, capsys)
-    assert run(kb, "task", "edit", "CT-0001") == 0
-    assert Path(capsys.readouterr().out.strip()) == kb.root / STAGING / "CT-0001.yaml"
-    assert run(kb, "task", "show", "CT-0001") == 0
+    assert run(kb, "task", "edit", "claim-task-0001") == 0
+    assert Path(capsys.readouterr().out.strip()) == kb.root / STAGING / "claim-task-0001.yaml"
+    assert run(kb, "task", "show", "claim-task-0001") == 0
     text = capsys.readouterr().out
-    assert text.splitlines()[:5] == ["CT-0001 open", f"subject digest: {digest_of(kb, 'CT-0001')}",
+    assert text.splitlines()[:5] == ["claim-task-0001 open", f"subject digest: {digest_of(kb, 'claim-task-0001')}",
                                      "kind: replication", "finding: F-0001",
                                      "proponent: researcher-a"]
     assert "\nbinding: current\n" in text
 
 
 def test_use_review_refuses_a_challenge_that_is_not_confirmed(kb, source_repo, capsys):
-    install_record(kb, "SC", sc(source_repo, status="open"))
+    install_record(kb, "source-challenge", sc(source_repo, status="open"))
     add_finding(kb, "3", LINE3)
     accept_tree(kb, capsys)
-    assert run(kb, "use", "review", "SC-0001", "F-0001", "1", "--by", "reviewer-a",
+    assert run(kb, "use", "review", "source-challenge-0001", "F-0001", "1", "--by", "reviewer-a",
                "--proponent", "researcher-a") == 1
     assert capsys.readouterr().err == \
-        ("kblam use review: SC-0001 is open; only a confirmed challenge can be used (kblam review decide "
-         "SC-0001 --status confirmed --by NAME --reason TEXT --expect D)\n")
+        ("kblam use review: source-challenge-0001 is open; only a confirmed challenge can be used (kblam review decide "
+         "source-challenge-0001 --status confirmed --by NAME --reason TEXT --expect D)\n")
 
 
 # --- review index and review list -----------------------------------------------------------------
@@ -249,7 +249,7 @@ def test_use_review_refuses_a_challenge_that_is_not_confirmed(kb, source_repo, c
 
 def test_review_index_writes_the_index_and_the_tree_hash(kb, source_repo, capsys):
     add_finding(kb, "3", LINE3)
-    install_record(kb, "CT", ct(kb))
+    install_record(kb, "claim-task", ct(kb))
     accept_tree(kb, capsys)
     assert run(kb, "review", "index") == 0
     assert capsys.readouterr().out == \
@@ -260,17 +260,17 @@ def test_review_index_writes_the_index_and_the_tree_hash(kb, source_repo, capsys
 
 def test_review_list_prints_one_line_per_record_and_honours_open(kb, source_repo, capsys):
     add_finding(kb, "3", LINE3)
-    install_record(kb, "SC", sc(source_repo))
-    install_record(kb, "CT", ct(kb))
+    install_record(kb, "source-challenge", sc(source_repo))
+    install_record(kb, "claim-task", ct(kb))
     accept_tree(kb, capsys)
     assert run(kb, "review", "list") == 0
     assert capsys.readouterr().out.splitlines() == [
-        f"SC-0001 challenge confirmed {digest_of(kb, 'SC-0001')[:12]} {TRACE}:3-3 current",
-        f"CT-0001 task open {digest_of(kb, 'CT-0001')[:12]} replication of F-0001 current",
+        f"source-challenge-0001 challenge confirmed {digest_of(kb, 'source-challenge-0001')[:12]} {TRACE}:3-3 current",
+        f"claim-task-0001 task open {digest_of(kb, 'claim-task-0001')[:12]} replication of F-0001 current",
     ]
     assert run(kb, "review", "list", "--open") == 0
     assert capsys.readouterr().out == \
-        f"CT-0001 task open {digest_of(kb, 'CT-0001')[:12]} replication of F-0001 current\n"
+        f"claim-task-0001 task open {digest_of(kb, 'claim-task-0001')[:12]} replication of F-0001 current\n"
 
 
 def test_review_list_prints_nothing_without_records(kb, capsys):
@@ -282,12 +282,12 @@ def test_review_list_prints_nothing_without_records(kb, capsys):
 
 
 def test_review_decide_refuses_a_decision_by_the_creator(kb, source_repo, capsys):
-    install_record(kb, "SC", sc(source_repo, status="open"))   # its creator is reviewer-a
+    install_record(kb, "source-challenge", sc(source_repo, status="open"))   # its creator is reviewer-a
     accept_tree(kb, capsys)
-    assert run(kb, "review", "decide", "SC-0001", "--status", "confirmed", "--by", "reviewer-a",
-               "--reason", "read it myself", "--expect", digest_of(kb, "SC-0001")) == 1
+    assert run(kb, "review", "decide", "source-challenge-0001", "--status", "confirmed", "--by", "reviewer-a",
+               "--reason", "read it myself", "--expect", digest_of(kb, "source-challenge-0001")) == 1
     assert capsys.readouterr().err == \
-        "kblam review decide: reviewer-a is SC-0001's creator; a closing decision needs someone else\n"
+        "kblam review decide: reviewer-a is source-challenge-0001's creator; a closing decision needs someone else\n"
 
 
 def test_review_decide_refused_by_the_records_own_error_lists_it(kb, source_repo, capsys):
@@ -295,60 +295,60 @@ def test_review_decide_refused_by_the_records_own_error_lists_it(kb, source_repo
     needs primary support, so the write is refused and nothing changes."""
     data = sc(source_repo, status="open")
     data["basis"][0]["provenance"] = "inferred"               # not in [review] primary_provenance
-    install_record(kb, "SC", data)
+    install_record(kb, "source-challenge", data)
     accept_tree(kb, capsys)
-    assert run(kb, "review", "decide", "SC-0001", "--status", "confirmed", "--by", "reviewer-b",
-               "--reason", "read the source", "--expect", digest_of(kb, "SC-0001")) == 1
+    assert run(kb, "review", "decide", "source-challenge-0001", "--status", "confirmed", "--by", "reviewer-b",
+               "--reason", "read the source", "--expect", digest_of(kb, "source-challenge-0001")) == 1
     text = capsys.readouterr().out
     assert text.splitlines() == [
-        f"K13 {CHALLENGES}/SC-0001.yaml:24: SC-0001 is confirmed with no primary support; a confirmation "
+        f"K13 {CHALLENGES}/source-challenge-0001.yaml:24: source-challenge-0001 is confirmed with no primary support; a confirmation "
         f"needs a basis entry whose provenance is one of observed, decoded and whose resolved path is "
         f"outside findings/, {REVIEW}/ and the history folders",
-        f"kblam review decide: refused SC-0001 (1 error(s)); {REVIEW}/ is unchanged. Fix what is listed "
+        f"kblam review decide: refused source-challenge-0001 (1 error(s)); {REVIEW}/ is unchanged. Fix what is listed "
         f"above and run it again.",
     ]
-    assert next(r for r in load_view(kb.cfg).records if r.id == "SC-0001").status == "open"
+    assert next(r for r in load_view(kb.cfg).records if r.id == "source-challenge-0001").status == "open"
 
 
 def test_review_decide_refuses_a_stale_expect(kb, source_repo, capsys):
-    install_record(kb, "SC", sc(source_repo))
+    install_record(kb, "source-challenge", sc(source_repo))
     accept_tree(kb, capsys)
-    assert run(kb, "review", "decide", "SC-0001", "--status", "confirmed", "--by", "reviewer-b",
+    assert run(kb, "review", "decide", "source-challenge-0001", "--status", "confirmed", "--by", "reviewer-b",
                "--reason", "read it", "--expect", "a" * 12) == 1
     assert capsys.readouterr().err == \
-        ("kblam review decide: SC-0001 changed since you inspected it; show it again: "
-         "kblam challenge show SC-0001\n")
+        ("kblam review decide: source-challenge-0001 changed since you inspected it; show it again: "
+         "kblam challenge show source-challenge-0001\n")
 
 
 def test_review_rebind_refuses_a_challenge(kb, source_repo, capsys):
-    install_record(kb, "SC", sc(source_repo))
+    install_record(kb, "source-challenge", sc(source_repo))
     accept_tree(kb, capsys)
-    assert run(kb, "review", "rebind", "SC-0001", "--by", "reviewer-b", "--reason", "rechecked it",
-               "--expect", digest_of(kb, "SC-0001")) == 1
+    assert run(kb, "review", "rebind", "source-challenge-0001", "--by", "reviewer-b", "--reason", "rechecked it",
+               "--expect", digest_of(kb, "source-challenge-0001")) == 1
     assert capsys.readouterr().err == \
         ("kblam review rebind: a challenge has no rebind; a changed assertion or judgement is a new "
          "challenge\n")
 
 
 def test_review_rebind_rebinds_a_stale_use(kb, source_repo, capsys):
-    install_record(kb, "SC", sc(source_repo))
+    install_record(kb, "source-challenge", sc(source_repo))
     add_finding(kb, "3", LINE3)
-    install_record(kb, "CU", use(kb))                         # approved, current: validate is clean
+    install_record(kb, "checked-use", use(kb))                         # approved, current: validate is clean
     accept_tree(kb, capsys)
     assert run(kb, "validate") == 0
 
     kb.add("F-0001", "ratio", CLAIM, body=quoted(f"{TRACE}:3", LINE3) + "\n\nAnother detail.\n")
     accept_tree(kb, capsys)
     assert run(kb, "validate") == 1                           # the use no longer holds: K14 fires again
-    assert run(kb, "review", "rebind", "CU-0001", "--by", "reviewer-b", "--reason",
+    assert run(kb, "review", "rebind", "checked-use-0001", "--by", "reviewer-b", "--reason",
                "rechecked the excerpt in the new revision",
-               "--expect", digest_of(kb, "CU-0001")) == 0
+               "--expect", digest_of(kb, "checked-use-0001")) == 0
     text = capsys.readouterr().out
-    assert "K13 warning research-review/uses/CU-0001.yaml: F-0001's file bytes changed since this use " \
+    assert "K13 warning research-review/uses/checked-use-0001.yaml: F-0001's file bytes changed since this use " \
            "was bound" in text
     assert text.splitlines()[-1] == \
-        (f"kblam review rebind: CU-0001 rebound, now approved "
-         f"(subject digest {digest_of(kb, 'CU-0001')[:12]})")
+        (f"kblam review rebind: checked-use-0001 rebound, now approved "
+         f"(subject digest {digest_of(kb, 'checked-use-0001')[:12]})")
     assert run(kb, "validate") == 0
 
 
@@ -368,12 +368,12 @@ def test_put_of_a_staged_finding_is_still_a_finding_put(kb, capsys):
 def test_put_of_a_staged_record_installs_it(kb, source_repo, capsys):
     staged = staged_sc(kb, capsys, source_repo)
     assert run(kb, "put", str(staged)) == 0
-    assert capsys.readouterr().out == "kblam put: SC-0001 -> research-review/challenges/SC-0001.yaml\n"
-    assert (kb.root / CHALLENGES / "SC-0001.yaml").is_file() and not staged.exists()
+    assert capsys.readouterr().out == "kblam put: source-challenge-0001 -> research-review/challenges/source-challenge-0001.yaml\n"
+    assert (kb.root / CHALLENGES / "source-challenge-0001.yaml").is_file() and not staged.exists()
 
 
 def test_a_refused_record_put_writes_nothing(kb, capsys):
-    """The blank task fails schema_issues, which is an error owned by CT-0001: the write is refused."""
+    """The blank task fails schema_issues, which is an error owned by claim-task-0001: the write is refused."""
     add_finding(kb, "3", LINE3)
     accept_tree(kb, capsys)
     staged = stage(kb, capsys, "task", "new", "F-0001", "--kind", "replication", "--by", "reviewer-a",
@@ -381,22 +381,22 @@ def test_a_refused_record_put_writes_nothing(kb, capsys):
     assert run(kb, "put", str(staged)) == 1
     text = capsys.readouterr().out
     first = text.splitlines()[0]
-    where = f"K15 {STAGING}/CT-0001.yaml:"           # the staged file, not the canonical path (D33)
+    where = f"K15 {STAGING}/claim-task-0001.yaml:"           # the staged file, not the canonical path (D33)
     assert first.startswith(where)
     assert staged.read_text(encoding="utf-8").split("\n")[int(first[len(where):].split(":")[0]) - 1] \
         .startswith("question:")
     assert text.splitlines()[-1] == \
-        (f"kblam put: rejected CT-0001 (8 error(s)); {REVIEW}/ is unchanged. Fix the staged file and put "
+        (f"kblam put: rejected claim-task-0001 (8 error(s)); {REVIEW}/ is unchanged. Fix the staged file and put "
          f"it again. {SKILL_POINTER}")
     assert not (kb.root / REVIEW / "tasks").exists() and staged.is_file()
 
 
 def test_a_record_put_without_its_receipt_is_refused_with_the_pointer(kb, capsys):
     """A first put needs the allocation receipt the staging commands write: the pointer suffix is put's."""
-    staged = kb.write(f"{STAGING}/SC-0001.yaml", record_text("SC"))
+    staged = kb.write(f"{STAGING}/source-challenge-0001.yaml", record_text("source-challenge"))
     assert run(kb, "put", str(staged)) == 1
     assert capsys.readouterr().err == \
-        (f"kblam put: SC-0001 has no allocation receipt in {RECEIPTS}/; a first put needs the one kblam "
+        (f"kblam put: source-challenge-0001 has no allocation receipt in {RECEIPTS}/; a first put needs the one kblam "
          f"challenge new, kblam task new or kblam use review wrote. Draft a new challenge and put that. "
          f"{SKILL_POINTER}\n")
     assert staged.is_file() and not (kb.root / CHALLENGES).exists()
@@ -408,7 +408,7 @@ def test_a_record_put_lists_errors_owned_by_other_files(kb, source_repo, capsys)
     staged = staged_sc(kb, capsys, source_repo)
     assert run(kb, "put", str(staged)) == 0
     text = capsys.readouterr().out
-    assert "kblam put: SC-0001 -> research-review/challenges/SC-0001.yaml" in text
+    assert "kblam put: source-challenge-0001 -> research-review/challenges/source-challenge-0001.yaml" in text
     assert "K4 findings/calibration/F-0002-history.md:" in text
     assert text.endswith("kblam put: done, but kblam validate still fails (1 error(s) listed above, owned "
                          "by other findings or records)\n")
@@ -417,9 +417,9 @@ def test_a_record_put_lists_errors_owned_by_other_files(kb, source_repo, capsys)
 def test_editing_a_finding_lists_the_use_it_makes_stale(kb, source_repo, capsys):
     """SPEC §12 M6.11 group 4: a body-only edit keeps the affected excerpt, so the put succeeds, lists the
     use it makes stale and the K14 error it keeps, and validate fails until the use is rebound."""
-    install_record(kb, "SC", sc(source_repo))
+    install_record(kb, "source-challenge", sc(source_repo))
     add_finding(kb, "3", LINE3)
-    install_record(kb, "CU", use(kb))
+    install_record(kb, "checked-use", use(kb))
     accept_tree(kb, capsys)
     assert run(kb, "validate") == 0
     capsys.readouterr()                                       # validate's own output is asserted below
@@ -429,11 +429,11 @@ def test_editing_a_finding_lists_the_use_it_makes_stale(kb, source_repo, capsys)
     staged.write_bytes(staged.read_bytes() + b"\nAnother detail.\n")
     assert run(kb, "put", str(staged)) == 0
     text = capsys.readouterr().out
-    assert ("kblam put: CU-0001 is now stale (this put changed F-0001, which it is bound to); a reviewer "
-            "rechecks it and runs kblam review rebind CU-0001 --by NAME --reason TEXT --expect D. kblam "
+    assert ("kblam put: checked-use-0001 is now stale (this put changed F-0001, which it is bound to); a reviewer "
+            "rechecks it and runs kblam review rebind checked-use-0001 --by NAME --reason TEXT --expect D. kblam "
             "validate fails until then") in text
     # a put reports its own file at the staged path it read (`view.display`, SPEC §5.2.5)
-    assert "K14 .kblam/staging/F-0001-ratio.md:15: SC-0001 challenges this quoted assertion at " \
+    assert "K14 .kblam/staging/F-0001-ratio.md:15: source-challenge-0001 challenges this quoted assertion at " \
            f"{TRACE}@" in text
     assert text.endswith("kblam put: done, but kblam validate still fails (1 error(s) listed above that "
                          "this put did not refuse)\n")
@@ -446,11 +446,11 @@ def test_a_stale_closed_task_is_told_to_rebind_with_evidence(kb, source_repo, ca
     as printed."""
     EVIDENCE = "observed:evidence/2026-09-22-ratio/README.md:row 0"
     add_finding(kb, "3", LINE3)
-    install_record(kb, "CT", ct(kb))                          # open, bound to F-0001 as it is now
+    install_record(kb, "claim-task", ct(kb))                          # open, bound to F-0001 as it is now
     accept_tree(kb, capsys)
-    assert run(kb, "review", "decide", "CT-0001", "--status", "confirmed", "--by", "reviewer-b",
+    assert run(kb, "review", "decide", "claim-task-0001", "--status", "confirmed", "--by", "reviewer-b",
                "--reason", "the capture package repeats the measurement",
-               "--expect", digest_of(kb, "CT-0001"), "--evidence", EVIDENCE) == 0
+               "--expect", digest_of(kb, "claim-task-0001"), "--evidence", EVIDENCE) == 0
     assert run(kb, "validate") == 0
     capsys.readouterr()
 
@@ -458,30 +458,30 @@ def test_a_stale_closed_task_is_told_to_rebind_with_evidence(kb, source_repo, ca
     staged = Path(capsys.readouterr().out.strip())
     staged.write_bytes(staged.read_bytes() + b"\nAnother detail.\n")
     assert run(kb, "put", str(staged)) == 0
-    assert ("kblam put: CT-0001 is now stale (this put changed F-0001, which it is bound to); a reviewer "
-            "rechecks it and runs kblam review rebind CT-0001 --by NAME --reason TEXT --expect D "
+    assert ("kblam put: claim-task-0001 is now stale (this put changed F-0001, which it is bound to); a reviewer "
+            "rechecks it and runs kblam review rebind claim-task-0001 --by NAME --reason TEXT --expect D "
             "--evidence PROVENANCE:PATH:LOCATOR. kblam validate fails until then") in capsys.readouterr().out
 
-    assert run(kb, "review", "rebind", "CT-0001", "--by", "reviewer-b", "--reason",
-               "re-read the finding; the binding holds again", "--expect", digest_of(kb, "CT-0001"),
+    assert run(kb, "review", "rebind", "claim-task-0001", "--by", "reviewer-b", "--reason",
+               "re-read the finding; the binding holds again", "--expect", digest_of(kb, "claim-task-0001"),
                "--evidence", EVIDENCE) == 0
     assert capsys.readouterr().out.splitlines()[-1] == \
-        (f"kblam review rebind: CT-0001 rebound, now confirmed "
-         f"(subject digest {digest_of(kb, 'CT-0001')[:12]})")
+        (f"kblam review rebind: claim-task-0001 rebound, now confirmed "
+         f"(subject digest {digest_of(kb, 'claim-task-0001')[:12]})")
 
 
 def test_a_stale_open_task_is_told_to_rebind_without_evidence(kb, source_repo, capsys):
     """An open task's rebind re-checks nothing, so its line carries no --evidence."""
     add_finding(kb, "3", LINE3)
-    install_record(kb, "CT", ct(kb))
+    install_record(kb, "claim-task", ct(kb))
     accept_tree(kb, capsys)
 
     assert run(kb, "edit", "F-0001") == 0
     staged = Path(capsys.readouterr().out.strip())
     staged.write_bytes(staged.read_bytes() + b"\nAnother detail.\n")
     assert run(kb, "put", str(staged)) == 0
-    assert ("kblam put: CT-0001 is now stale (this put changed F-0001, which it is bound to); a reviewer "
-            "rechecks it and runs kblam review rebind CT-0001 --by NAME --reason TEXT --expect D. kblam "
+    assert ("kblam put: claim-task-0001 is now stale (this put changed F-0001, which it is bound to); a reviewer "
+            "rechecks it and runs kblam review rebind claim-task-0001 --by NAME --reason TEXT --expect D. kblam "
             "validate fails until then") in capsys.readouterr().out
 
 
@@ -490,11 +490,11 @@ def test_a_stale_open_task_is_told_to_rebind_without_evidence(kb, source_repo, c
 
 def test_validate_prints_pending_tasks_without_failing(kb, source_repo, capsys):
     add_finding(kb, "3", LINE3)
-    install_record(kb, "CT", ct(kb))
+    install_record(kb, "claim-task", ct(kb))
     accept_tree(kb, capsys)
     assert run(kb, "validate") == 0
     assert capsys.readouterr().out.splitlines() == [
-        "CT-0001 open replication of F-0001: Does an independent measurement establish the claim?",
+        "claim-task-0001 open replication of F-0001: Does an independent measurement establish the claim?",
         "kblam validate: OK (1 findings); 1 pending task(s)",
     ]
     assert run(kb, "validate", "--record") == 0
@@ -506,7 +506,7 @@ def test_validate_prints_pending_tasks_without_failing(kb, source_repo, capsys):
 def test_a_range_only_k14_warning_passes_validate(kb, source_repo, capsys):
     """SPEC §12 M6.11 group 3: an excerpt whose cited range overlaps the assertion's lines without
     quoting it is a warning, and validate exits 0."""
-    install_record(kb, "SC", sc(source_repo))
+    install_record(kb, "source-challenge", sc(source_repo))
     add_finding(kb, "3", "Row 102: bytes 0x3A 0x3B")
     accept_tree(kb, capsys)
     assert run(kb, "validate") == 0
@@ -517,13 +517,13 @@ def test_a_range_only_k14_warning_passes_validate(kb, source_repo, capsys):
 
 
 def test_validate_record_creates_the_registry_after_a_clone(kb, source_repo, capsys):
-    install_record(kb, "SC", sc(source_repo))
+    install_record(kb, "source-challenge", sc(source_repo))
     accept_tree(kb, capsys)
     assert registry_ids(kb) is None
     assert run(kb, "validate", "--record") == 0
     assert capsys.readouterr().out.splitlines()[-1] == \
         "kblam validate: OK (0 findings); recorded .kblam/tree.hash for this tree"
-    assert registry_ids(kb) == ["SC-0001"]
+    assert registry_ids(kb) == ["source-challenge-0001"]
 
 
 def test_validate_record_leaves_a_kb_without_records_without_a_registry(kb, capsys):
@@ -536,52 +536,52 @@ def test_validate_record_leaves_a_kb_without_records_without_a_registry(kb, caps
 def test_forget_missing_drops_the_gone_ids_and_record_alone_does_not(kb, source_repo, capsys):
     """SPEC §12 M6.11 group 8: `review index` and a plain `validate --record` never forget; only
     --forget-missing does, printing each ID, and the drop stands."""
-    install_record(kb, "SC", sc(source_repo, rec_id="SC-0001"))
-    install_record(kb, "SC", sc(source_repo, rec_id="SC-0002", lines=(2, 2), text=LINE2))
+    install_record(kb, "source-challenge", sc(source_repo, rec_id="source-challenge-0001"))
+    install_record(kb, "source-challenge", sc(source_repo, rec_id="source-challenge-0002", lines=(2, 2), text=LINE2))
     accept_tree(kb, capsys)
     assert run(kb, "review", "index") == 0                    # a write creates the registry
     assert capsys.readouterr().out == \
         f"kblam review index: wrote {REVIEW}/INDEX.md and .kblam/tree.hash\n"
-    assert registry_ids(kb) == ["SC-0001", "SC-0002"]
+    assert registry_ids(kb) == ["source-challenge-0001", "source-challenge-0002"]
 
-    (kb.root / CHALLENGES / "SC-0002.yaml").unlink()          # the record is gone (a clone without it)
+    (kb.root / CHALLENGES / "source-challenge-0002.yaml").unlink()          # the record is gone (a clone without it)
     assert run(kb, "review", "index") == 0
     assert capsys.readouterr().out == f"kblam review index: wrote {REVIEW}/INDEX.md\n"
-    assert registry_ids(kb) == ["SC-0001", "SC-0002"]         # the index never forgets
+    assert registry_ids(kb) == ["source-challenge-0001", "source-challenge-0002"]         # the index never forgets
 
     assert run(kb, "validate", "--record") == 1
     text = capsys.readouterr().out
     assert text.splitlines() == [
-        f"K13 {CHALLENGES}/SC-0002.yaml: SC-0002 is missing from {REVIEW}/; records are never deleted or "
-        f"renamed; git's last commit does not hold a file at {CHALLENGES}/SC-0002.yaml, so leave it as it "
+        f"K13 {CHALLENGES}/source-challenge-0002.yaml: source-challenge-0002 is missing from {REVIEW}/; records are never deleted or "
+        f"renamed; git's last commit does not hold a file at {CHALLENGES}/source-challenge-0002.yaml, so leave it as it "
         f"is and tell the user",
         "kblam validate: 1 error(s) in research-review/; tree.hash not recorded",
     ]
-    assert registry_ids(kb) == ["SC-0001", "SC-0002"]
+    assert registry_ids(kb) == ["source-challenge-0001", "source-challenge-0002"]
 
     assert run(kb, "validate", "--record", "--forget-missing") == 0
     assert capsys.readouterr().out.splitlines() == [
-        f"kblam validate --record: forgot SC-0002 (no record in {REVIEW}/)",
+        f"kblam validate --record: forgot source-challenge-0002 (no record in {REVIEW}/)",
         "kblam validate: OK (0 findings); recorded .kblam/tree.hash for this tree",
     ]
-    assert registry_ids(kb) == ["SC-0001"]
+    assert registry_ids(kb) == ["source-challenge-0001"]
 
 
 def test_forgetting_stands_when_the_validation_after_it_fails(kb, source_repo, capsys):
     """The drop is the flag's explicit purpose, so it is written even when the validation fails."""
-    install_record(kb, "SC", sc(source_repo, rec_id="SC-0001"))
+    install_record(kb, "source-challenge", sc(source_repo, rec_id="source-challenge-0001"))
     accept_tree(kb, capsys)
     assert run(kb, "review", "index") == 0
-    assert registry_ids(kb) == ["SC-0001"]
+    assert registry_ids(kb) == ["source-challenge-0001"]
     capsys.readouterr()                                       # the index's own output is not asserted here
-    (kb.root / CHALLENGES / "SC-0001.yaml").unlink()
+    (kb.root / CHALLENGES / "source-challenge-0001.yaml").unlink()
     assert run(kb, "review", "index") == 0                    # the index drops the gone record
     kb.add("F-0002", "history", "The first curve type was superseded by the second.")   # K4: still an error
-    assert registry_ids(kb) == ["SC-0001"]                    # the index never forgets (SPEC group 8)
+    assert registry_ids(kb) == ["source-challenge-0001"]                    # the index never forgets (SPEC group 8)
 
     assert run(kb, "validate", "--record", "--forget-missing") == 1
     lines = capsys.readouterr().out.splitlines()
-    assert f"kblam validate --record: forgot SC-0001 (no record in {REVIEW}/)" in lines
+    assert f"kblam validate --record: forgot source-challenge-0001 (no record in {REVIEW}/)" in lines
     assert any(line.startswith("K4 findings/calibration/F-0002-history.md:") for line in lines)
     assert lines[-1] == "kblam validate: 1 error(s) in findings/; tree.hash not recorded"
     assert registry_ids(kb) == []
@@ -590,11 +590,11 @@ def test_forgetting_stands_when_the_validation_after_it_fails(kb, source_repo, c
 def test_the_error_count_names_each_root_that_holds_an_error(kb, source_repo, capsys):
     """validate's count names findings/ for a finding's error, the review root for a record's, and both
     when both hold one."""
-    install_record(kb, "SC", sc(source_repo, rec_id="SC-0001"))
+    install_record(kb, "source-challenge", sc(source_repo, rec_id="source-challenge-0001"))
     accept_tree(kb, capsys)
     assert run(kb, "review", "index") == 0                    # a write creates the registry
     capsys.readouterr()
-    (kb.root / CHALLENGES / "SC-0001.yaml").unlink()          # K13: a registered record is missing
+    (kb.root / CHALLENGES / "source-challenge-0001.yaml").unlink()          # K13: a registered record is missing
     assert run(kb, "validate") == 1
     assert capsys.readouterr().out.splitlines()[-1] == f"kblam validate: 2 error(s) in {REVIEW}/"
     kb.add("F-0002", "history", "The first curve type was superseded by the second.")   # K4: a finding's
@@ -623,9 +623,9 @@ def test_forget_missing_without_record_reads_no_config(tmp_path, capsys):
     ["challenge", "new", TRACE, "--lines", "4-3", "--by", "reviewer-a"],
     ["challenge", "new", TRACE, "--lines", "３-３", "--by", "reviewer-a"],   # not decimal digits
     ["task", "new", "F-0001", "--kind", "repeat", "--by", "reviewer-a", "--proponent", "researcher-a"],
-    ["use", "review", "SC-0001", "F-0001", "first", "--by", "reviewer-a", "--proponent", "researcher-a"],
-    ["use", "edit", "CU-0001"],                               # there is no use edit
-    ["review", "move", "CU-0001"],                            # there is no review move
+    ["use", "review", "source-challenge-0001", "F-0001", "first", "--by", "reviewer-a", "--proponent", "researcher-a"],
+    ["use", "edit", "checked-use-0001"],                               # there is no use edit
+    ["review", "move", "checked-use-0001"],                            # there is no review move
 ])
 def test_bad_arguments_are_usage_errors(kb, argv, capsys):
     with pytest.raises(SystemExit) as caught:
@@ -653,68 +653,68 @@ def test_the_full_cli_round_trip(kb, source_repo, capsys):
 
     staged = staged_sc(kb, capsys, source_repo)
     assert run(kb, "put", str(staged)) == 0
-    assert capsys.readouterr().out == "kblam put: SC-0001 -> research-review/challenges/SC-0001.yaml\n"
+    assert capsys.readouterr().out == "kblam put: source-challenge-0001 -> research-review/challenges/source-challenge-0001.yaml\n"
 
-    assert run(kb, "challenge", "uses", "SC-0001") == 0        # open: nothing relates to it yet
-    assert capsys.readouterr().out == "SC-0001 is open; only a confirmed challenge affects findings\n"
+    assert run(kb, "challenge", "uses", "source-challenge-0001") == 0        # open: nothing relates to it yet
+    assert capsys.readouterr().out == "source-challenge-0001 is open; only a confirmed challenge affects findings\n"
 
-    assert run(kb, "review", "decide", "SC-0001", "--status", "confirmed", "--by", "reviewer-b",
+    assert run(kb, "review", "decide", "source-challenge-0001", "--status", "confirmed", "--by", "reviewer-b",
                "--reason", "read the source and pinned it",
-               "--expect", digest_of(kb, "SC-0001")) == 0
+               "--expect", digest_of(kb, "source-challenge-0001")) == 0
     text = capsys.readouterr().out
-    assert f"kblam review decide: SC-0001 is now confirmed " \
-           f"(subject digest {digest_of(kb, 'SC-0001')[:12]})\n" in text
-    assert "kblam review decide: SC-0001 now affects F-0001; run kblam challenge uses SC-0001 for each " \
+    assert f"kblam review decide: source-challenge-0001 is now confirmed " \
+           f"(subject digest {digest_of(kb, 'source-challenge-0001')[:12]})\n" in text
+    assert "kblam review decide: source-challenge-0001 now affects F-0001; run kblam challenge uses source-challenge-0001 for each " \
            "excerpt and the command that fixes it\n" in text
     assert text.endswith("kblam review decide: done, but kblam validate still fails (1 error(s) listed "
                          "above, owned by other findings or records)\n")
 
-    assert run(kb, "challenge", "uses", "SC-0001") == 0
+    assert run(kb, "challenge", "uses", "source-challenge-0001") == 0
     assert capsys.readouterr().out == \
         ("F-0001 findings/calibration/F-0001-ratio.md:15 excerpt 1 same: error; "
-         "kblam use review SC-0001 F-0001 1 --by NAME --proponent NAME\n")
+         "kblam use review source-challenge-0001 F-0001 1 --by NAME --proponent NAME\n")
 
-    use_staged = stage(kb, capsys, "use", "review", "SC-0001", "F-0001", "1", "--by", "reviewer-a",
+    use_staged = stage(kb, capsys, "use", "review", "source-challenge-0001", "F-0001", "1", "--by", "reviewer-a",
                        "--proponent", "researcher-a")
-    assert use_staged == kb.root / STAGING / "CU-0001.yaml"
+    assert use_staged == kb.root / STAGING / "checked-use-0001.yaml"
     fill(use_staged, **cu_fields())
     assert run(kb, "put", str(use_staged)) == 0                # an open use does not cover the excerpt
     assert capsys.readouterr().out.endswith(
         "kblam put: done, but kblam validate still fails (1 error(s) listed above, owned by other "
         "findings or records)\n")
 
-    assert run(kb, "review", "decide", "CU-0001", "--status", "approved", "--by", "reviewer-b",
+    assert run(kb, "review", "decide", "checked-use-0001", "--status", "approved", "--by", "reviewer-b",
                "--reason", "the excerpt really is used only for the printed bytes",
-               "--expect", digest_of(kb, "CU-0001")) == 0
+               "--expect", digest_of(kb, "checked-use-0001")) == 0
     assert capsys.readouterr().out == \
-        (f"kblam review decide: CU-0001 is now approved "
-         f"(subject digest {digest_of(kb, 'CU-0001')[:12]})\n")
+        (f"kblam review decide: checked-use-0001 is now approved "
+         f"(subject digest {digest_of(kb, 'checked-use-0001')[:12]})\n")
 
     task_staged = stage(kb, capsys, "task", "new", "F-0001", "--kind", "replication",
                         "--by", "reviewer-a", "--proponent", "researcher-a")
     fill(task_staged, **ct_fields())
     assert run(kb, "put", str(task_staged)) == 0
-    assert capsys.readouterr().out == "kblam put: CT-0001 -> research-review/tasks/CT-0001.yaml\n"
+    assert capsys.readouterr().out == "kblam put: claim-task-0001 -> research-review/tasks/claim-task-0001.yaml\n"
 
     assert run(kb, "validate") == 0                            # the open task is pending, not a failure
     assert capsys.readouterr().out.splitlines() == [
-        "CT-0001 open replication of F-0001: Does an independent measurement establish the claim?",
+        "claim-task-0001 open replication of F-0001: Does an independent measurement establish the claim?",
         "kblam validate: OK (1 findings); 1 pending task(s)",
     ]
 
-    assert run(kb, "review", "decide", "CT-0001", "--status", "confirmed", "--by", "reviewer-b",
+    assert run(kb, "review", "decide", "claim-task-0001", "--status", "confirmed", "--by", "reviewer-b",
                "--reason", "the capture package repeats the measurement",
-               "--expect", digest_of(kb, "CT-0001"),
+               "--expect", digest_of(kb, "claim-task-0001"),
                "--evidence", "observed:evidence/2026-09-22-ratio/README.md:row 0") == 0
     assert capsys.readouterr().out == \
-        (f"kblam review decide: CT-0001 is now confirmed "
-         f"(subject digest {digest_of(kb, 'CT-0001')[:12]})\n")
+        (f"kblam review decide: claim-task-0001 is now confirmed "
+         f"(subject digest {digest_of(kb, 'claim-task-0001')[:12]})\n")
     assert run(kb, "validate") == 0
     assert capsys.readouterr().out == "kblam validate: OK (1 findings)\n"
 
     assert run(kb, "review", "list") == 0
     assert capsys.readouterr().out.splitlines() == [
-        f"SC-0001 challenge confirmed {digest_of(kb, 'SC-0001')[:12]} {TRACE}:3-3 current",
-        f"CT-0001 task confirmed {digest_of(kb, 'CT-0001')[:12]} replication of F-0001 current",
-        f"CU-0001 use approved {digest_of(kb, 'CU-0001')[:12]} SC-0001 in F-0001 excerpt 1 current",
+        f"source-challenge-0001 challenge confirmed {digest_of(kb, 'source-challenge-0001')[:12]} {TRACE}:3-3 current",
+        f"claim-task-0001 task confirmed {digest_of(kb, 'claim-task-0001')[:12]} replication of F-0001 current",
+        f"checked-use-0001 use approved {digest_of(kb, 'checked-use-0001')[:12]} source-challenge-0001 in F-0001 excerpt 1 current",
     ]

@@ -21,7 +21,7 @@ from kblam.view import load_view
 from conftest import ZERO64, finding_text, record_text
 
 REVIEW = "research-review"
-SC = f"{REVIEW}/challenges/SC-0001.yaml"
+SC = f"{REVIEW}/challenges/source-challenge-0001.yaml"
 CLAIM_A = ("The two sensor curve types agree to about 0.1% (median ratio 1.0017 on line 0), "
            "so they are not two analog gains.")
 CLAIM_B = "The motor warm-up drift settles within 90 seconds of power-on at 4000 rpm."
@@ -46,7 +46,7 @@ def clean_now(kb) -> bool:
 def test_a_locked_command_recovers_an_interrupted_write(kb, capsys):
     """SPEC §5.2.6 Interrupted writes: the next command that takes the lock recovers first."""
     kb.add("F-0001", "sensor", CLAIM_A)
-    kb.write(SC, record_text("SC"))
+    kb.write(SC, record_text("source-challenge"))
     recorded = (kb.cfg.state_dir / "tree.hash").read_bytes()
     journal.begin(kb.cfg, "put F-0002-motor.md", [SC, f"{REVIEW}/INDEX.md"])
     kb.write(".kblam/tree.hash", NOT_A_RECORD)             # the interrupted write left this
@@ -61,7 +61,7 @@ def test_a_locked_command_recovers_an_interrupted_write(kb, capsys):
             "what it reports, then kblam validate --record") in err
     assert not kb.cfg.journal_path.exists()
     assert (kb.cfg.state_dir / "tree.hash").read_bytes() == recorded
-    assert registry.read_ids(kb.cfg) == {"SC-0001"}        # the journal-listed record is registered
+    assert registry.read_ids(kb.cfg) == {"source-challenge-0001"}        # the journal-listed record is registered
     view = load_view(kb.cfg)
     assert (kb.findings / "INDEX.md").read_bytes() == generate_index(view)
     assert (kb.cfg.review_path / "INDEX.md").read_bytes() == generate_review_index(view)
@@ -98,7 +98,7 @@ def test_a_failed_recovery_keeps_the_journal_and_refuses_the_command(kb, monkeyp
 def test_a_changed_review_root_refuses_a_mutating_command_only(kb):
     """SPEC §5.2.6: every mutating command refuses a changed root; staging commands do not."""
     kb.add("F-0001", "sensor", CLAIM_A)
-    kb.write(SC, record_text("SC"))
+    kb.write(SC, record_text("source-challenge"))
     kb.write(".kblam/tree.hash", format_line("research-notes", ZERO64))
     with pytest.raises(StoreError, match="the review root changed from research-notes to research-review "
                                          "in kblam.toml; schema 1 fixes it at init"):
@@ -121,9 +121,9 @@ def test_the_first_write_after_a_clone_recreates_the_registry(kb, first):
     """SPEC §5.2.6: kblam creates the registry from the records present at its first write after a clone."""
     kb.add("F-0001", "sensor", CLAIM_A)
     kb.add("F-0002", "motor", CLAIM_B, topic="motor", extra="depends_on:\n  F-0001: deadbeef\n")
-    kb.write(SC, record_text("SC"))
+    kb.write(SC, record_text("source-challenge"))
     kb.reindex()                                          # from here the registry exists with the record
-    assert registry.read_ids(kb.cfg) == {"SC-0001"}
+    assert registry.read_ids(kb.cfg) == {"source-challenge-0001"}
     (kb.cfg.state_dir / "review-ids").unlink()            # as a fresh clone of the same tree has it
 
     if first == "index":
@@ -133,7 +133,7 @@ def test_the_first_write_after_a_clone_recreates_the_registry(kb, first):
     else:
         assert store.put(kb.cfg, stage(kb, "F-0003", "tray", claim=CLAIM_C, topic="tray")).ok
 
-    assert registry.read_ids(kb.cfg) == {"SC-0001"}
+    assert registry.read_ids(kb.cfg) == {"source-challenge-0001"}
 
 
 def test_a_kb_with_no_records_gets_no_registry(kb):
@@ -150,10 +150,10 @@ def test_a_kb_with_no_records_gets_no_registry(kb):
 
 def test_registry_after_is_none_until_a_record_is_present(kb):
     assert writes.registry_after(kb.cfg, set(), set()) is None              # no registry, no record
-    assert writes.registry_after(kb.cfg, {"SC-0001"}, set()) == {"SC-0001"}  # created from them
-    registry.write_ids(kb.cfg, {"SC-0001"})
-    assert writes.registry_after(kb.cfg, {"SC-0001"}, set()) is None        # unchanged: not rewritten
-    assert writes.registry_after(kb.cfg, {"SC-0001"}, {"CT-0002"}) == {"SC-0001", "CT-0002"}
+    assert writes.registry_after(kb.cfg, {"source-challenge-0001"}, set()) == {"source-challenge-0001"}  # created from them
+    registry.write_ids(kb.cfg, {"source-challenge-0001"})
+    assert writes.registry_after(kb.cfg, {"source-challenge-0001"}, set()) is None        # unchanged: not rewritten
+    assert writes.registry_after(kb.cfg, {"source-challenge-0001"}, {"claim-task-0002"}) == {"source-challenge-0001", "claim-task-0002"}
 
 
 # --- apply --------------------------------------------------------------------------------------
@@ -162,7 +162,7 @@ def test_registry_after_is_none_until_a_record_is_present(kb):
 def test_apply_advances_tree_hash_and_writes_in_the_specs_order(kb, monkeypatch):
     """SPEC §5.2.6: the journal first, then records and findings, then indexes, then the registry."""
     kb.add("F-0001", "sensor", CLAIM_A)
-    kb.write(SC, record_text("SC"))
+    kb.write(SC, record_text("source-challenge"))
     kb.reindex()                                          # the fixture accepts the tree, as --record would
     seen = []
     real_write = atomic_write
@@ -175,12 +175,12 @@ def test_apply_advances_tree_hash_and_writes_in_the_specs_order(kb, monkeypatch)
     recorded = writes.apply(kb.cfg, "put F-0002-motor.md",
                             [("findings/motor/F-0002-motor.md", b"---\nid: F-0002\n---\n"),
                              ("findings/INDEX.md", b"# Findings\n")],
-                            registry_ids={"SC-0001"}, clean_before=clean_now(kb))
+                            registry_ids={"source-challenge-0001"}, clean_before=clean_now(kb))
     assert recorded is True
     assert seen == [("journal.json", False), ("F-0002-motor.md", True), ("INDEX.md", True),
                     ("review-ids", True), ("tree.hash", True)]
     assert not kb.cfg.journal_path.exists()
-    assert registry.read_ids(kb.cfg) == {"SC-0001"}
+    assert registry.read_ids(kb.cfg) == {"source-challenge-0001"}
     assert read_recorded(kb.cfg) == (2, kb.cfg.review_dir, tree_digest_v2(load_view(kb.cfg)))
 
 
@@ -196,7 +196,7 @@ def test_apply_journals_only_a_change_of_more_than_one_file(kb, monkeypatch):
     assert calls == []
     writes.apply(kb.cfg, "index", two, registry_ids=None, clean_before=clean_now(kb))
     assert calls == [["findings/INDEX.md", "findings/notes.md"]]
-    writes.apply(kb.cfg, "index", one, registry_ids={"SC-0001"}, clean_before=clean_now(kb))
+    writes.apply(kb.cfg, "index", one, registry_ids={"source-challenge-0001"}, clean_before=clean_now(kb))
     assert calls[-1] == ["findings/INDEX.md", ".kblam/review-ids"]  # the registry counts as a file
 
 

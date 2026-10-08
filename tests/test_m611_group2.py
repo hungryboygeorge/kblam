@@ -41,7 +41,7 @@ README = "evidence/2026-09-22-ratio/README.md"
 SNAPSHOT = "snapshots/full-scan-trace.md"
 # The step every stale or unavailable reference message ends with (SPEC §5.2.3 Evaluation).
 RETIRE_PINNED = (f"; restore the pinned bytes of {TRACE}, or retire the record and file a new one (kblam "
-                 "review decide SC-0001 --status stale --by NAME --reason TEXT --expect D)")
+                 "review decide source-challenge-0001 --status stale --by NAME --reason TEXT --expect D)")
 
 # A second version of the trace: line 3 (the line the challenges below quote) holds other text, so a
 # challenge whose assertion is checked against the wrong version is an occurrence error, not a pass.
@@ -118,7 +118,7 @@ def kb_worktree(repo: SourceRepo) -> dict:
 
 
 PIN_REFUSED = (f"kblam challenge pin: the blob at {TRACE} in its worktree's HEAD does not hold exactly "
-               f"these bytes, so SC-0001's source stays provisional. Commit them and pin it again, or "
+               f"these bytes, so source-challenge-0001's source stays provisional. Commit them and pin it again, or "
                f"pin a copy with --snapshot PATH\n")
 
 
@@ -129,15 +129,15 @@ def test_a_dirty_working_file_is_unpinned_and_pinned_only_by_snapshot(kb, source
     """Start: the nested source repository resources/mx-docs, whose notes/full-scan-trace.md is
     committed and then edited without a commit; no records. `kblam challenge new
     resources/mx-docs/notes/full-scan-trace.md --lines 3-3 --by reviewer-a` exits 0 and stages
-    SC-0001, changing .kblam/review-staging/SC-0001.yaml and .kblam/review-receipts/SC-0001.json:
+    source-challenge-0001, changing .kblam/review-staging/source-challenge-0001.yaml and .kblam/review-receipts/source-challenge-0001.json:
     its source carries the working file's sha256 and no pin, because HEAD's blob holds other bytes
     (SPEC §5.2.2: pin automatically only when the blob has exactly the working bytes). `kblam put`
-    exits 0 and installs it (research-review/challenges/SC-0001.yaml, research-review/INDEX.md,
+    exits 0 and installs it (research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md,
     .kblam/review-ids, .kblam/tree.hash; the staged file goes), and `validate` exits 0.
-    `kblam challenge pin SC-0001` then exits 1 with "the blob at ... does not hold exactly these
-    bytes, so SC-0001's source stays provisional ... or pin a copy with --snapshot PATH", changing
-    nothing. `kblam challenge pin SC-0001 --snapshot snapshots/full-scan-trace.md`, a copy of the
-    dirty bytes, exits 0 with "SC-0001 pinned" and writes the record and .kblam/tree.hash alone;
+    `kblam challenge pin source-challenge-0001` then exits 1 with "the blob at ... does not hold exactly these
+    bytes, so source-challenge-0001's source stays provisional ... or pin a copy with --snapshot PATH", changing
+    nothing. `kblam challenge pin source-challenge-0001 --snapshot snapshots/full-scan-trace.md`, a copy of the
+    dirty bytes, exits 0 with "source-challenge-0001 pinned" and writes the record and .kblam/tree.hash alone;
     `validate` exits 0 and `challenge show` prints "version: snapshots/full-scan-trace.md" and
     "state: current" (the working file still holds those bytes). The working file is then rewritten
     once more: `challenge show` prints "state: pinned" with the same assertion line, and `validate`
@@ -148,7 +148,7 @@ def test_a_dirty_working_file_is_unpinned_and_pinned_only_by_snapshot(kb, source
     src_before = source_repo.snapshot()
 
     staged, touched = changes(kb, lambda: m.stage_challenge(kb, source_repo, "3-3", by="reviewer-a"))
-    assert touched == {f"{STAGING}/SC-0001.yaml", f"{RECEIPTS}/SC-0001.json"}
+    assert touched == {f"{STAGING}/source-challenge-0001.yaml", f"{RECEIPTS}/source-challenge-0001.json"}
     data = plain_data(yaml_rt().load(staged.path.read_bytes().decode("utf-8")))
     assert data["source"]["sha256"] == sha256_hex(dirty.encode("utf-8"))
     assert (data["source"]["repo"], data["source"]["commit"], data["source"]["blob"],
@@ -157,11 +157,11 @@ def test_a_dirty_working_file_is_unpinned_and_pinned_only_by_snapshot(kb, source
 
     run, touched = changes(kb, lambda: m.put(kb, staged))
     m.ok(run, "put")
-    assert touched == {f"{CHALLENGES}/SC-0001.yaml", f"{REVIEW}/INDEX.md", REGISTRY, TREE_HASH,
-                       f"{STAGING}/SC-0001.yaml"}
+    assert touched == {f"{CHALLENGES}/source-challenge-0001.yaml", f"{REVIEW}/INDEX.md", REGISTRY, TREE_HASH,
+                       f"{STAGING}/source-challenge-0001.yaml"}
     validates_clean(kb)
 
-    run, touched = changes(kb, lambda: m.pin_challenge(kb, "SC-0001"))
+    run, touched = changes(kb, lambda: m.pin_challenge(kb, "source-challenge-0001"))
     assert run.code == 1
     assert run.err == PIN_REFUSED
     assert touched == set()
@@ -169,18 +169,18 @@ def test_a_dirty_working_file_is_unpinned_and_pinned_only_by_snapshot(kb, source
     assert source_repo.snapshot() == src_before     # no command has written in the source repository
 
     kb.write(SNAPSHOT, dirty)
-    run, touched = changes(kb, lambda: m.pin_challenge(kb, "SC-0001", snapshot=SNAPSHOT))
+    run, touched = changes(kb, lambda: m.pin_challenge(kb, "source-challenge-0001", snapshot=SNAPSHOT))
     m.ok(run, "challenge pin")
-    assert run.out == (f"kblam challenge pin: SC-0001 pinned "
-                       f"(subject digest {m.expect(kb, 'SC-0001')[:12]})\n")
-    assert touched == {f"{CHALLENGES}/SC-0001.yaml", TREE_HASH}
-    source = source_of(kb, "SC-0001")
+    assert run.out == (f"kblam challenge pin: source-challenge-0001 pinned "
+                       f"(subject digest {m.expect(kb, 'source-challenge-0001')[:12]})\n")
+    assert touched == {f"{CHALLENGES}/source-challenge-0001.yaml", TREE_HASH}
+    source = source_of(kb, "source-challenge-0001")
     assert source["snapshot"] == SNAPSHOT
     assert (source["repo"], source["commit"], source["blob"]) == (None, None, None)
     assert source_repo.snapshot() == src_before
 
     validates_clean(kb)
-    show, touched = changes(kb, lambda: m.kblam(kb, "challenge", "show", "SC-0001"))
+    show, touched = changes(kb, lambda: m.kblam(kb, "challenge", "show", "source-challenge-0001"))
     m.ok(show, "challenge show")
     assert f"version: {SNAPSHOT}" in show.out
     assert "state: current" in show.out      # the working file still holds the snapped bytes
@@ -190,7 +190,7 @@ def test_a_dirty_working_file_is_unpinned_and_pinned_only_by_snapshot(kb, source
     # pinned: the record is never re-targeted to the new working bytes (SPEC §5.2.2).
     source_repo.write(TRACE_PATH, dirty + "Row 105: and again.\n")
     src_before = source_repo.snapshot()
-    show, touched = changes(kb, lambda: m.kblam(kb, "challenge", "show", "SC-0001"))
+    show, touched = changes(kb, lambda: m.kblam(kb, "challenge", "show", "source-challenge-0001"))
     m.ok(show, "challenge show")
     assert f"version: {SNAPSHOT}" in show.out
     assert "state: pinned" in show.out
@@ -201,10 +201,10 @@ def test_a_dirty_working_file_is_unpinned_and_pinned_only_by_snapshot(kb, source
 
 
 def test_a_pinned_challenge_is_read_at_its_blob_while_the_worktree_is_dirty(kb, source_repo):
-    """Start: SC-0001 confirmed on resources/mx-docs/notes/full-scan-trace.md lines 3-3, pinned to the
+    """Start: source-challenge-0001 confirmed on resources/mx-docs/notes/full-scan-trace.md lines 3-3, pinned to the
     owner's HEAD commit and blob (reviewer-a created it, reviewer-b confirmed it); validate exits 0.
     The working file is then rewritten without a commit, so its bytes differ from the pinned ones.
-    `kblam challenge show SC-0001` exits 0 and prints "version: <blob>" and "state: pinned", and the
+    `kblam challenge show source-challenge-0001` exits 0 and prints "version: <blob>" and "state: pinned", and the
     assertion text it prints is still the pinned line -- a pinned reference is read at its blob and
     needs no working file (SPEC §5.2.2), so the judgement stays at the version it was made on.
     `kblam validate` exits 0 with no K13 line. Neither command changes a file, and the source
@@ -234,12 +234,12 @@ def test_a_pinned_challenge_is_read_at_its_blob_while_the_worktree_is_dirty(kb, 
 def test_a_crlf_checkout_of_an_lf_blob_is_pinned_only_by_snapshot(kb, source_repo):
     """Start: the nested source repository configured with core.autocrlf=true, so checking the
     committed LF trace out again gives a CRLF working file that differs from the blob. `kblam
-    challenge new ... --lines 3-3 --by reviewer-a` exits 0: SC-0001's sha256 is the CRLF file's,
+    challenge new ... --lines 3-3 --by reviewer-a` exits 0: source-challenge-0001's sha256 is the CRLF file's,
     its assertion is the LF line (a source is read as LF-normalised text), and its source is
     unpinned because HEAD's blob holds the LF bytes -- a CRLF checkout is not pinned automatically
-    (SPEC §5.2.2). `kblam put` exits 0 and `validate` exits 0. `kblam challenge pin SC-0001` exits 1
+    (SPEC §5.2.2). `kblam put` exits 0 and `validate` exits 0. `kblam challenge pin source-challenge-0001` exits 1
     with "... does not hold exactly these bytes ... or pin a copy with --snapshot PATH" and changes
-    nothing; `kblam challenge pin SC-0001 --snapshot snapshots/full-scan-trace.md`, a copy of the
+    nothing; `kblam challenge pin source-challenge-0001 --snapshot snapshots/full-scan-trace.md`, a copy of the
     CRLF bytes, exits 0 and writes the record and .kblam/tree.hash alone. `validate` then exits 0 and
     `challenge show` prints "version: snapshots/full-scan-trace.md" and "state: current"; once the
     working file is checked out again as LF, the same show prints "state: pinned" -- the snapshot
@@ -252,7 +252,7 @@ def test_a_crlf_checkout_of_an_lf_blob_is_pinned_only_by_snapshot(kb, source_rep
     src_before = source_repo.snapshot()
 
     staged, touched = changes(kb, lambda: m.stage_challenge(kb, source_repo, "3-3", by="reviewer-a"))
-    assert touched == {f"{STAGING}/SC-0001.yaml", f"{RECEIPTS}/SC-0001.json"}
+    assert touched == {f"{STAGING}/source-challenge-0001.yaml", f"{RECEIPTS}/source-challenge-0001.json"}
     data = plain_data(yaml_rt().load(staged.path.read_bytes().decode("utf-8")))
     assert data["source"]["sha256"] == sha256_hex(crlf)
     assert (data["source"]["repo"], data["source"]["commit"], data["source"]["blob"]) == (None, None, None)
@@ -260,25 +260,25 @@ def test_a_crlf_checkout_of_an_lf_blob_is_pinned_only_by_snapshot(kb, source_rep
 
     run, touched = changes(kb, lambda: m.put(kb, staged))
     m.ok(run, "put")
-    assert touched == {f"{CHALLENGES}/SC-0001.yaml", f"{REVIEW}/INDEX.md", REGISTRY, TREE_HASH,
-                       f"{STAGING}/SC-0001.yaml"}
+    assert touched == {f"{CHALLENGES}/source-challenge-0001.yaml", f"{REVIEW}/INDEX.md", REGISTRY, TREE_HASH,
+                       f"{STAGING}/source-challenge-0001.yaml"}
     validates_clean(kb)
 
-    run, touched = changes(kb, lambda: m.pin_challenge(kb, "SC-0001"))
+    run, touched = changes(kb, lambda: m.pin_challenge(kb, "source-challenge-0001"))
     assert run.code == 1
     assert run.err == PIN_REFUSED
     assert touched == set()
     assert source_repo.snapshot() == src_before     # no command has written in the source repository
 
     kb.write(SNAPSHOT, crlf)
-    run, touched = changes(kb, lambda: m.pin_challenge(kb, "SC-0001", snapshot=SNAPSHOT))
+    run, touched = changes(kb, lambda: m.pin_challenge(kb, "source-challenge-0001", snapshot=SNAPSHOT))
     m.ok(run, "challenge pin")
-    assert touched == {f"{CHALLENGES}/SC-0001.yaml", TREE_HASH}
-    assert source_of(kb, "SC-0001")["snapshot"] == SNAPSHOT
+    assert touched == {f"{CHALLENGES}/source-challenge-0001.yaml", TREE_HASH}
+    assert source_of(kb, "source-challenge-0001")["snapshot"] == SNAPSHOT
     assert source_repo.snapshot() == src_before
 
     validates_clean(kb)
-    show, touched = changes(kb, lambda: m.kblam(kb, "challenge", "show", "SC-0001"))
+    show, touched = changes(kb, lambda: m.kblam(kb, "challenge", "show", "source-challenge-0001"))
     m.ok(show, "challenge show")
     assert f"version: {SNAPSHOT}" in show.out
     assert "state: current" in show.out      # the CRLF working file still holds the snapped bytes
@@ -291,7 +291,7 @@ def test_a_crlf_checkout_of_an_lf_blob_is_pinned_only_by_snapshot(kb, source_rep
     source_repo.git("checkout", "--", TRACE_PATH)
     assert (source_repo.root / TRACE_PATH).read_bytes() == TRACE_TEXT.encode("utf-8")
     src_before = source_repo.snapshot()
-    show, touched = changes(kb, lambda: m.kblam(kb, "challenge", "show", "SC-0001"))
+    show, touched = changes(kb, lambda: m.kblam(kb, "challenge", "show", "source-challenge-0001"))
     m.ok(show, "challenge show")
     assert f"version: {SNAPSHOT}" in show.out
     assert "state: pinned" in show.out
@@ -305,15 +305,15 @@ def test_a_crlf_checkout_of_an_lf_blob_is_pinned_only_by_snapshot(kb, source_rep
 
 
 def test_a_pinned_version_that_is_gone_is_a_k13_error_for_a_confirmed_challenge(kb, source_repo):
-    """Start: SC-0001 confirmed (reviewer-a created it, reviewer-b confirmed it -- "the actor" for the
+    """Start: source-challenge-0001 confirmed (reviewer-a created it, reviewer-b confirmed it -- "the actor" for the
     decision) with its source pinned to the second commit's blob and no snapshot; validate exits 0.
     The first commit is then checked out and the second commit and its blob are pruned, so no copy
     with the pinned bytes can be read while the working file still holds other bytes. `kblam
-    validate` exits 1 and reports K13 twice for SC-0001, once for the source and once for its basis
+    validate` exits 1 and reports K13 twice for source-challenge-0001, once for the source and once for its basis
     entry, each "the pinned version is not present" -- never "the source now says ..." (SPEC §5.2.3
     Evaluation), because a pinned reference is unavailable, not stale; the Severity table makes that
     an error on an effective record and a warning while the challenge is open, which the next test
-    shows. `kblam challenge show SC-0001` exits 0 and prints "state: unavailable". Neither command
+    shows. `kblam challenge show source-challenge-0001` exits 0 and prints "state: unavailable". Neither command
     changes a file, and the source repository is unchanged (Acceptance 1, Acceptance 2)."""
     first = source_repo.head()
     source_repo.commit(TRACE_PATH, V2_TEXT, "row 102 reworded")
@@ -334,7 +334,7 @@ def test_a_pinned_version_that_is_gone_is_a_k13_error_for_a_confirmed_challenge(
     # "K13 <path>:<line>: <message>": the source's message, and the basis entry's, which names itself.
     labels = [line.split(": ", 2)[1] for line in lines]
     assert sorted(labels) == ["basis[0]", "the pinned version is not present" + RETIRE_PINNED]
-    assert all(line.startswith(f"K13 {CHALLENGES}/SC-0001.yaml:") for line in lines)
+    assert all(line.startswith(f"K13 {CHALLENGES}/source-challenge-0001.yaml:") for line in lines)
     assert all(line.endswith(": the pinned version is not present" + RETIRE_PINNED) for line in lines)
     assert "the working file" not in run.out            # the pinned bytes are gone, not the file
     assert touched == set()
@@ -348,7 +348,7 @@ def test_a_pinned_version_that_is_gone_is_a_k13_error_for_a_confirmed_challenge(
 
 
 def test_a_pinned_version_that_is_gone_is_a_warning_while_the_challenge_is_open(kb, source_repo):
-    """Start: SC-0001 open (reviewer-a created it) with its source pinned to the second commit's blob
+    """Start: source-challenge-0001 open (reviewer-a created it) with its source pinned to the second commit's blob
     and no snapshot; validate exits 0. The first commit is checked out and the second commit and its
     blob are pruned. `kblam validate` then exits 0: the same two K13 lines as for a confirmed
     challenge are printed with level "warning", because an unavailable reference is a warning while a
@@ -371,7 +371,7 @@ def test_a_pinned_version_that_is_gone_is_a_warning_while_the_challenge_is_open(
     assert run.code == 0
     lines = [line for line in run.out.splitlines() if "the pinned version is not present" in line]
     assert len(lines) == 2
-    assert all(line.startswith(f"K13 warning {CHALLENGES}/SC-0001.yaml:") for line in lines)
+    assert all(line.startswith(f"K13 warning {CHALLENGES}/source-challenge-0001.yaml:") for line in lines)
     assert "kblam validate: OK (0 findings)" in run.out
     assert touched == set()
     assert source_repo.snapshot() == src_before
@@ -381,11 +381,11 @@ def test_a_pinned_version_that_is_gone_is_a_warning_while_the_challenge_is_open(
 
 
 def test_a_blob_the_commits_tree_does_not_hold_at_that_path_is_a_k13_error(kb, source_repo):
-    """Start: SC-0001 open (reviewer-a created it) pinned to the trace's commit and blob; validate
+    """Start: source-challenge-0001 open (reviewer-a created it) pinned to the trace's commit and blob; validate
     exits 0. The record is then hand-edited to name another blob that exists in the same repository
     (the blob of notes/other.md, committed afterwards) -- no command writes a wrong pin, since
     `challenge pin` never replaces one and a decided record cannot be edited. `kblam validate` exits
-    1 and reports K13 twice for SC-0001, once for the source and once for its basis entry: "the tree
+    1 and reports K13 twice for source-challenge-0001, once for the source and once for its basis entry: "the tree
     of <commit> holds <trace blob> at notes/full-scan-trace.md, not <other blob>" (SPEC §5.2.2 Git
     pins: the commit's tree must hold the blob at the path). The command changes no file, and the
     source repository is unchanged (Acceptance 1)."""
@@ -418,11 +418,11 @@ def test_a_nested_source_repository_pins_to_its_own_toplevel_not_the_kb_root(kb,
     and it holds the nested source repository resources/mx-docs. `kblam challenge new
     evidence/2026-09-22-ratio/README.md --lines 1-1 --by reviewer-a` and `challenge new
     resources/mx-docs/notes/full-scan-trace.md --lines 3-3 --by reviewer-a`, each followed by `kblam
-    put`, exit 0; the first pair changes research-review/challenges/SC-0001.yaml,
+    put`, exit 0; the first pair changes research-review/challenges/source-challenge-0001.yaml,
     research-review/INDEX.md, .kblam/review-ids, .kblam/tree.hash and
-    .kblam/review-receipts/SC-0001.json, and the second the same with SC-0002 (each staged file is
-    created by its `challenge new` and removed by its `put`). SC-0001 records repo "." (the KB's own
-    worktree) and SC-0002 records repo "resources/mx-docs", with the owning commit and blob: a nested
+    .kblam/review-receipts/source-challenge-0001.json, and the second the same with source-challenge-0002 (each staged file is
+    created by its `challenge new` and removed by its `put`). source-challenge-0001 records repo "." (the KB's own
+    worktree) and source-challenge-0002 records repo "resources/mx-docs", with the owning commit and blob: a nested
     repository is a worktree in its own right, so the pin names it rather than the enclosing one
     (SPEC §5.2.2 Git pins). `kblam validate` then exits 0 and changes nothing. Neither command
     commits, stages or checks anything out in either worktree: the nested source repository's whole
@@ -435,13 +435,13 @@ def test_a_nested_source_repository_pins_to_its_own_toplevel_not_the_kb_root(kb,
     src_before, kb_before = source_repo.snapshot(), kb_worktree(kb_repo)
 
     own, touched = changes(kb, lambda: m.challenge(kb, source_repo, 1, by="reviewer-a", path=README))
-    assert touched == {f"{CHALLENGES}/SC-0001.yaml", f"{REVIEW}/INDEX.md", REGISTRY, TREE_HASH,
-                       f"{RECEIPTS}/SC-0001.json"}
+    assert touched == {f"{CHALLENGES}/source-challenge-0001.yaml", f"{REVIEW}/INDEX.md", REGISTRY, TREE_HASH,
+                       f"{RECEIPTS}/source-challenge-0001.json"}
     assert source_repo.snapshot() == src_before
     assert kb_worktree(kb_repo) == kb_before
     nested, touched = changes(kb, lambda: m.challenge(kb, source_repo, "3-3", by="reviewer-a"))
-    assert touched == {f"{CHALLENGES}/SC-0002.yaml", f"{REVIEW}/INDEX.md", REGISTRY, TREE_HASH,
-                       f"{RECEIPTS}/SC-0002.json"}
+    assert touched == {f"{CHALLENGES}/source-challenge-0002.yaml", f"{REVIEW}/INDEX.md", REGISTRY, TREE_HASH,
+                       f"{RECEIPTS}/source-challenge-0002.json"}
     assert source_repo.snapshot() == src_before
     assert kb_worktree(kb_repo) == kb_before
 
@@ -466,9 +466,9 @@ def test_a_source_in_a_submodule_pins_to_the_submodule(kb, source_repo):
     the nested source repository as the submodule vendor/mx-specs, whose checkout holds the file.
     `kblam challenge new resources/mx-docs/vendor/mx-specs/MX-100/pinout.md --lines 1-1 --by
     reviewer-a`, followed by `kblam put`, exits 0 and changes
-    research-review/challenges/SC-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
-    .kblam/tree.hash and .kblam/review-receipts/SC-0001.json (the staged file is created by
-    `challenge new` and removed by `put`); SC-0001 records that submodule's toplevel, commit and blob
+    research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
+    .kblam/tree.hash and .kblam/review-receipts/source-challenge-0001.json (the staged file is created by
+    `challenge new` and removed by `put`); source-challenge-0001 records that submodule's toplevel, commit and blob
     -- a submodule is a repository in its own right and its `.git` is a file, so the pin names it,
     not the parent (SPEC §5.2.2 Git pins). `kblam validate` exits 0 and changes nothing. Both
     repositories' whole snapshots -- HEAD, refs, index and every working byte -- are equal before and
@@ -490,8 +490,8 @@ def test_a_source_in_a_submodule_pins_to_the_submodule(kb, source_repo):
     src_before, sub_before = source_repo.snapshot(), sub_repo.snapshot()
 
     sc, touched = changes(kb, lambda: m.challenge(kb, source_repo, 1, by="reviewer-a", path=raw))
-    assert touched == {f"{CHALLENGES}/SC-0001.yaml", f"{REVIEW}/INDEX.md", REGISTRY, TREE_HASH,
-                       f"{RECEIPTS}/SC-0001.json"}
+    assert touched == {f"{CHALLENGES}/source-challenge-0001.yaml", f"{REVIEW}/INDEX.md", REGISTRY, TREE_HASH,
+                       f"{RECEIPTS}/source-challenge-0001.json"}
     assert source_repo.snapshot() == src_before
     assert sub_repo.snapshot() == sub_before
     source = source_of(kb, sc)
@@ -511,9 +511,9 @@ def test_a_source_in_a_linked_worktree_pins_to_the_linked_worktree(kb, source_re
     """Start: resources/mx-docs-alt is a linked worktree of the nested source repository (branch
     "alt"), whose checkout of notes/full-scan-trace.md is committed and clean. `kblam challenge new
     resources/mx-docs-alt/notes/full-scan-trace.md --lines 3-3 --by reviewer-a`, followed by `kblam
-    put`, exits 0 and changes research-review/challenges/SC-0001.yaml, research-review/INDEX.md,
-    .kblam/review-ids, .kblam/tree.hash and .kblam/review-receipts/SC-0001.json (the staged file is
-    created by `challenge new` and removed by `put`); SC-0001 records repo "resources/mx-docs-alt"
+    put`, exits 0 and changes research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md,
+    .kblam/review-ids, .kblam/tree.hash and .kblam/review-receipts/source-challenge-0001.json (the staged file is
+    created by `challenge new` and removed by `put`); source-challenge-0001 records repo "resources/mx-docs-alt"
     with that worktree's HEAD commit and the trace's blob -- a linked worktree is a worktree in its
     own right, and its `.git` is a file (SPEC §5.2.2 Git pins). `kblam validate` exits 0 and changes
     nothing. The linked worktree's whole snapshot -- HEAD, refs, index and every working byte, which
@@ -531,8 +531,8 @@ def test_a_source_in_a_linked_worktree_pins_to_the_linked_worktree(kb, source_re
     src_before, linked_before = source_repo.snapshot(), linked_repo.snapshot()
 
     sc, touched = changes(kb, lambda: m.challenge(kb, source_repo, "3-3", by="reviewer-a", path=raw))
-    assert touched == {f"{CHALLENGES}/SC-0001.yaml", f"{REVIEW}/INDEX.md", REGISTRY, TREE_HASH,
-                       f"{RECEIPTS}/SC-0001.json"}
+    assert touched == {f"{CHALLENGES}/source-challenge-0001.yaml", f"{REVIEW}/INDEX.md", REGISTRY, TREE_HASH,
+                       f"{RECEIPTS}/source-challenge-0001.json"}
     assert source_repo.snapshot() == src_before
     assert linked_repo.snapshot() == linked_before
     source = source_of(kb, sc)
@@ -568,9 +568,9 @@ def test_a_sha256_repository_records_64_hex_object_ids(kb, sha256_repo):
     """Start: resources/sha256-docs is a repository whose object format is SHA-256, with the trace
     committed. `kblam challenge new
     resources/sha256-docs/notes/full-scan-trace.md --lines 3-3 --by reviewer-a`, followed by `kblam
-    put`, exits 0 and changes research-review/challenges/SC-0001.yaml, research-review/INDEX.md,
-    .kblam/review-ids, .kblam/tree.hash and .kblam/review-receipts/SC-0001.json (the staged file is
-    created by `challenge new` and removed by `put`); SC-0001 records that repository's toplevel, HEAD
+    put`, exits 0 and changes research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md,
+    .kblam/review-ids, .kblam/tree.hash and .kblam/review-receipts/source-challenge-0001.json (the staged file is
+    created by `challenge new` and removed by `put`); source-challenge-0001 records that repository's toplevel, HEAD
     commit and blob as 64 lowercase hex digits -- the length `git rev-parse --show-object-format`
     implies (SPEC §5.2.2 Git pins). `kblam validate` exits 0 (the pin verifies), changes nothing, and
     the repository's whole snapshot is equal before and after both commands. The test skips, naming
@@ -579,8 +579,8 @@ def test_a_sha256_repository_records_64_hex_object_ids(kb, sha256_repo):
     src_before = sha256_repo.snapshot()
 
     sc, touched = changes(kb, lambda: m.challenge(kb, sha256_repo, "3-3", by="reviewer-a", path=raw))
-    assert touched == {f"{CHALLENGES}/SC-0001.yaml", f"{REVIEW}/INDEX.md", REGISTRY, TREE_HASH,
-                       f"{RECEIPTS}/SC-0001.json"}
+    assert touched == {f"{CHALLENGES}/source-challenge-0001.yaml", f"{REVIEW}/INDEX.md", REGISTRY, TREE_HASH,
+                       f"{RECEIPTS}/source-challenge-0001.json"}
     source = source_of(kb, sc)
     assert source["repo"] == "resources/sha256-docs"
     assert source["commit"] == sha256_repo.head()
@@ -600,15 +600,15 @@ def test_a_sha256_repository_records_64_hex_object_ids(kb, sha256_repo):
 
 def test_two_versions_of_one_path_are_checked_at_their_own_blobs_and_read_once(kb, source_repo,
                                                                               monkeypatch):
-    """Start: SC-0001 (reviewer-a created it at the first commit) quotes line 3 of the trace as it was
-    then, and SC-0002 (reviewer-a, at the second commit) quotes line 3 as the second commit reworded
+    """Start: source-challenge-0001 (reviewer-a created it at the first commit) quotes line 3 of the trace as it was
+    then, and source-challenge-0002 (reviewer-a, at the second commit) quotes line 3 as the second commit reworded
     it; both are `challenge new` plus `kblam put` pairs, open and pinned to their own commit and
     blob, and each pair changes research-review/challenges/<ID>.yaml, research-review/INDEX.md,
     .kblam/review-ids, .kblam/tree.hash and .kblam/review-receipts/<ID>.json (its staged file is
     created by its `challenge new` and removed by its `put`), while the source repository's whole
     snapshot stays equal. A third commit then gives the working file other bytes again, so neither
-    record is current. `kblam validate` exits 0: SC-0001's assertion is found in the bytes of its own
-    blob and SC-0002's in its own, each at the exact pinned version (a resolver that mixed the two
+    record is current. `kblam validate` exits 0: source-challenge-0001's assertion is found in the bytes of its own
+    blob and source-challenge-0002's in its own, each at the exact pinned version (a resolver that mixed the two
     versions would report an occurrence error), and a counting wrapper shows the one source reader
     reads the working file once and each of the two blobs once (SPEC §5.2.6: two versions of one path
     never share an entry, and each distinct identity is read once per validation). `kblam challenge
@@ -616,16 +616,16 @@ def test_two_versions_of_one_path_are_checked_at_their_own_blobs_and_read_once(k
     source repository is unchanged (Acceptance 1, Acceptance 2)."""
     src_before = source_repo.snapshot()
     older, touched = changes(kb, lambda: m.challenge(kb, source_repo, "3-3", by="reviewer-a"))
-    assert touched == {f"{CHALLENGES}/SC-0001.yaml", f"{REVIEW}/INDEX.md", REGISTRY, TREE_HASH,
-                       f"{RECEIPTS}/SC-0001.json"}
+    assert touched == {f"{CHALLENGES}/source-challenge-0001.yaml", f"{REVIEW}/INDEX.md", REGISTRY, TREE_HASH,
+                       f"{RECEIPTS}/source-challenge-0001.json"}
     assert source_repo.snapshot() == src_before
     first_blob = source_repo.blob(TRACE_PATH)
 
     source_repo.commit(TRACE_PATH, V2_TEXT, "row 102 reworded")
     src_before = source_repo.snapshot()
     newer, touched = changes(kb, lambda: m.challenge(kb, source_repo, "3-3", by="reviewer-a"))
-    assert touched == {f"{CHALLENGES}/SC-0002.yaml", f"{REVIEW}/INDEX.md", REGISTRY, TREE_HASH,
-                       f"{RECEIPTS}/SC-0002.json"}
+    assert touched == {f"{CHALLENGES}/source-challenge-0002.yaml", f"{REVIEW}/INDEX.md", REGISTRY, TREE_HASH,
+                       f"{RECEIPTS}/source-challenge-0002.json"}
     assert source_repo.snapshot() == src_before
     second_blob = source_repo.blob(TRACE_PATH)
 

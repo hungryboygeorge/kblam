@@ -26,8 +26,8 @@ def source(path: str, *, sha256: str = ZERO64, occurrence: int = 1, lines=(3, 3)
 
 
 def record(rec_kind: str, rec_id: str, **fields) -> records.Record:
-    """A parsed record of `rec_kind` ("SC", "CT" or "CU"), as parse_record returns one, without touching
-    a filesystem. `fields` reach record_data; a CT's own `kind` field is set here, because
+    """A parsed record of `rec_kind` ("source-challenge", "claim-task" or "checked-use"), as parse_record returns one, without touching
+    a filesystem. `fields` reach record_data; a claim task's own `kind` field is set here, because
     record_data's first parameter would capture that name."""
     task_kind = fields.pop("kind", None)
     data = record_data(rec_kind, rec_id, **fields)
@@ -53,29 +53,29 @@ GOLDEN = (
     "\n"
     "| ID | Lines | Classification | Status | Findings |\n"
     "|---|---|---|---|---|\n"
-    "| SC-0001 | 63-65 | contradicted | confirmed | F-0012 |\n"
-    "| SC-0004 | 70-70 | unsupported | open |  |\n"
-    "| SC-0002 | 3-3 | wrong_model | rejected | F-0012, F-0003 |\n"
+    "| source-challenge-0001 | 63-65 | contradicted | confirmed | F-0012 |\n"
+    "| source-challenge-0004 | 70-70 | unsupported | open |  |\n"
+    "| source-challenge-0002 | 3-3 | wrong_model | rejected | F-0012, F-0003 |\n"
     "\n"
     "### resources/mx-docs/notes/other-trace.md\n"
     "\n"
     "| ID | Lines | Classification | Status | Findings |\n"
     "|---|---|---|---|---|\n"
-    "| SC-0003 | 2-4 | contradicted | stale | F-0007 |\n"
+    "| source-challenge-0003 | 2-4 | contradicted | stale | F-0007 |\n"
     "\n"
     "## Tasks\n"
     "\n"
     "| ID | Finding | Kind | Status | Question |\n"
     "|---|---|---|---|---|\n"
-    "| CT-0002 | F-0001 | confirmation | confirmed | Does a second capture reproduce the ratio? |\n"
-    "| CT-0001 | F-0002 | replication | open | Does an independent measurement establish the claim \\| "
+    "| claim-task-0002 | F-0001 | confirmation | confirmed | Does a second capture reproduce the ratio? |\n"
+    "| claim-task-0001 | F-0002 | replication | open | Does an independent measurement establish the claim \\| "
     "at 0.1%? Across both rows. |\n"
     "\n"
     "## Uses\n"
     "\n"
     "| ID | Challenge | Finding | Excerpt | Disposition | Status |\n"
     "|---|---|---|---|---|---|\n"
-    "| CU-0001 | SC-0001 | F-0012 | 2 | rewritten_claim | approved |\n"
+    "| checked-use-0001 | source-challenge-0001 | F-0012 | 2 | rewritten_claim | approved |\n"
 ).encode("utf-8")
 
 EMPTY = (
@@ -100,23 +100,23 @@ def test_review_index_golden(kb):
     "./" and the backslash spelling of one path are one group, headed by the first row's spelling);
     tasks by finding, ID; uses by challenge, ID."""
     view = view_of(kb, [
-        record("SC", "SC-0001", source=source("./" + TRACE, sha256="a" * 64, lines=(63, 65)),
+        record("source-challenge", "source-challenge-0001", source=source("./" + TRACE, sha256="a" * 64, lines=(63, 65)),
                status="confirmed", classification="contradicted", linked_findings=["F-0012"]),
-        record("SC", "SC-0002", source=source(TRACE.replace("/", "\\"), sha256="b" * 64, lines=(3, 3)),
+        record("source-challenge", "source-challenge-0002", source=source(TRACE.replace("/", "\\"), sha256="b" * 64, lines=(3, 3)),
                status="rejected", classification="wrong_model", linked_findings=["F-0012", "F-0003"]),
-        record("SC", "SC-0004", source=source(TRACE, sha256="a" * 64, occurrence=2, lines=(70, 70)),
+        record("source-challenge", "source-challenge-0004", source=source(TRACE, sha256="a" * 64, occurrence=2, lines=(70, 70)),
                status="open", classification="unsupported", linked_findings=[]),
-        record("SC", "SC-0003", source=source(OTHER, sha256="c" * 64, lines=(2, 4)),
+        record("source-challenge", "source-challenge-0003", source=source(OTHER, sha256="c" * 64, lines=(2, 4)),
                status="stale", classification="contradicted", linked_findings=["F-0007"]),
-        records.Record(path=f"{REVIEW}/challenges/SC-0009.yaml", id="SC-0009", kind="SC", data=None,
+        records.Record(path=f"{REVIEW}/challenges/source-challenge-0009.yaml", id="source-challenge-0009", kind="source-challenge", data=None,
                        raw=b"\xff\xfe", error="not UTF-8"),
         records.Record(path=f"{REVIEW}/tasks/notes.yaml", id=None, kind=None,
-                       data=record_data("CT", "CT-0010"), raw=b""),
-        record("CT", "CT-0001", finding="F-0002", kind="replication", status="open",
+                       data=record_data("claim-task", "claim-task-0010"), raw=b""),
+        record("claim-task", "claim-task-0001", finding="F-0002", kind="replication", status="open",
                question="Does an independent measurement establish the claim | at 0.1%?\nAcross both rows."),
-        record("CT", "CT-0002", finding="F-0001", kind="confirmation", status="confirmed",
+        record("claim-task", "claim-task-0002", finding="F-0001", kind="confirmation", status="confirmed",
                question="Does a second capture reproduce the ratio?"),
-        record("CU", "CU-0001", challenge="SC-0001", finding="F-0012", disposition="rewritten_claim",
+        record("checked-use", "checked-use-0001", challenge="source-challenge-0001", finding="F-0012", disposition="rewritten_claim",
                status="approved",
                citation={"ordinal": 2, "path": TRACE, "range": [63, 65], "tag_sha256": ZERO64}),
     ])
@@ -132,10 +132,10 @@ def test_review_index_without_records(kb):
 def test_review_index_leaves_out_unparsed_and_unnamed(kb):
     """A record whose data did not parse, and one whose name gives no kind, are both left out."""
     view = view_of(kb, [
-        records.Record(path=f"{REVIEW}/challenges/SC-0001.yaml", id="SC-0001", kind="SC", data=None,
+        records.Record(path=f"{REVIEW}/challenges/source-challenge-0001.yaml", id="source-challenge-0001", kind="source-challenge", data=None,
                        raw=b"\xff\xfe", error="not UTF-8"),
         records.Record(path=f"{REVIEW}/tasks/notes.yaml", id=None, kind=None,
-                       data=record_data("CT", "CT-0001"), raw=b""),
+                       data=record_data("claim-task", "claim-task-0001"), raw=b""),
     ])
     assert generate_review_index(view) == EMPTY
 
@@ -147,24 +147,24 @@ def test_review_index_refused_path_keys_as_written(kb, monkeypatch):
             raise paths.PathRefused("absolute path")
         return raw
     monkeypatch.setattr(paths, "canonical_key", refuse)
-    view = view_of(kb, [record("SC", "SC-0001", source=source("/outside/trace.md"))])
+    view = view_of(kb, [record("source-challenge", "source-challenge-0001", source=source("/outside/trace.md"))])
     text = generate_review_index(view).decode("utf-8")
     assert "### /outside/trace.md" in text
-    assert "| SC-0001 | 3-3 | contradicted | open |  |" in text
+    assert "| source-challenge-0001 | 3-3 | contradicted | open |  |" in text
 
 
 def test_review_index_escapes_cells(kb):
     """A `|` is escaped and a newline collapsed, as index._cell does; the document is LF, one final \n."""
     view = view_of(kb, [
-        record("CT", "CT-0001", question="Does the ratio hold | within 0.1%?\nAcross both rows."),
-        record("CU", "CU-0001", citation={"ordinal": 3, "path": TRACE, "range": [1, 2],
+        record("claim-task", "claim-task-0001", question="Does the ratio hold | within 0.1%?\nAcross both rows."),
+        record("checked-use", "checked-use-0001", citation={"ordinal": 3, "path": TRACE, "range": [1, 2],
                                           "tag_sha256": ZERO64}),
     ])
     out = generate_review_index(view)
     text = out.decode("utf-8")
-    assert ("| CT-0001 | F-0001 | replication | open | "
+    assert ("| claim-task-0001 | F-0001 | replication | open | "
             "Does the ratio hold \\| within 0.1%? Across both rows. |") in text
-    assert "| CU-0001 | SC-0001 | F-0001 | 3 | unaffected_raw_bytes | open |" in text
+    assert "| checked-use-0001 | source-challenge-0001 | F-0001 | 3 | unaffected_raw_bytes | open |" in text
     assert text.splitlines()[0] == HEADER
     assert "\r" not in text
     assert out.endswith(b"\n") and not out.endswith(b"\n\n")
@@ -172,10 +172,10 @@ def test_review_index_escapes_cells(kb):
 
 def test_review_index_uses_order_by_challenge_then_id(kb):
     view = view_of(kb, [
-        record("CU", "CU-0001", challenge="SC-0002"),
-        record("CU", "CU-0002", challenge="SC-0001"),
+        record("checked-use", "checked-use-0001", challenge="source-challenge-0002"),
+        record("checked-use", "checked-use-0002", challenge="source-challenge-0001"),
     ])
     rows = [line for line in generate_review_index(view).decode("utf-8").splitlines()
-            if line.startswith("| CU-")]
-    assert rows == ["| CU-0002 | SC-0001 | F-0001 | 1 | unaffected_raw_bytes | open |",
-                    "| CU-0001 | SC-0002 | F-0001 | 1 | unaffected_raw_bytes | open |"]
+            if line.startswith("| checked-use-")]
+    assert rows == ["| checked-use-0002 | source-challenge-0001 | F-0001 | 1 | unaffected_raw_bytes | open |",
+                    "| checked-use-0001 | source-challenge-0002 | F-0001 | 1 | unaffected_raw_bytes | open |"]

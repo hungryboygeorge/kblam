@@ -67,7 +67,7 @@ def left_alone(rec) -> str:
 def code_of(kind: str, key: str) -> str:
     """An independent expectation of the §5.2.2/§5.2.3 split, including proponent as common."""
     common = ("schema", "id", "created", "creator", "status", "decisions", "proponent")
-    return "K13" if kind != "CT" or key in common else "K15"
+    return "K13" if kind != "claim-task" or key in common else "K15"
 
 
 def source_ref(**fields) -> dict:
@@ -118,8 +118,8 @@ def decision(**fields) -> dict:
     ("not a name", "proponent: 'not a name' is not a name"),
 ])
 def test_ct_proponent_is_a_common_format_k13_error(value, message):
-    rec = parse("CT", proponent=value)
-    assert rows(rec) == [expect("CT", "K13", message, rec,
+    rec = parse("claim-task", proponent=value)
+    assert rows(rec) == [expect("claim-task", "K13", message, rec,
                                key="proponent" if value is not DROP else None)]
 
 
@@ -127,77 +127,78 @@ def test_ct_proponent_is_a_common_format_k13_error(value, message):
 
 
 def test_parse_reads_the_file_name_and_the_mapping():
-    text = record_text("SC", "SC-0007")
-    rec = parse_record(record_path("SC", "SC-0007"), text.encode("utf-8"))
-    assert (rec.id, rec.kind, rec.error) == ("SC-0007", "SC", None)
-    assert rec.data["id"] == "SC-0007" and rec.data["schema"] == 1
+    text = record_text("source-challenge", "source-challenge-0007")
+    rec = parse_record(record_path("source-challenge", "source-challenge-0007"), text.encode("utf-8"))
+    assert (rec.id, rec.kind, rec.error) == ("source-challenge-0007", "source-challenge", None)
+    assert rec.data["id"] == "source-challenge-0007" and rec.data["schema"] == 1
     assert rec.meta is not None and rec.raw == text.encode("utf-8")
     assert rec.status == "open"
     assert schema_issues(rec, staged=False) == []
 
 
-@pytest.mark.parametrize("name", ["SC-0001.yml", "SC-1.yaml", "index.yaml", "SC-0001.yaml.txt",
+@pytest.mark.parametrize("name", ["source-challenge-0001.yml", "source-challenge-1.yaml", "index.yaml",
+                                  "source-challenge-0001.yaml.txt",
                                   "sc-0001.yaml"])
 def test_a_file_name_that_is_not_an_id_gives_no_id_or_kind(name):
-    rec = parse_record(f"research-review/challenges/{name}", record_text("SC").encode("utf-8"))
+    rec = parse_record(f"research-review/challenges/{name}", record_text("source-challenge").encode("utf-8"))
     assert (rec.id, rec.kind) == (None, None)
     # How the review root names its files is K13's own check (§5.2.4), not schema_issues'.
     assert schema_issues(rec, staged=False) == []
 
 
 def test_not_utf8():
-    rec = parse("SC", body=b"\xff\xfe\x00 not utf-8 \x80")
+    rec = parse("source-challenge", body=b"\xff\xfe\x00 not utf-8 \x80")
     assert rec.data is None and rec.meta is None and rec.error == "not UTF-8"
-    assert rows(rec) == [expect("SC", "K13", f"not UTF-8; {left_alone(rec)}")]
+    assert rows(rec) == [expect("source-challenge", "K13", f"not UTF-8; {left_alone(rec)}")]
 
 
-@pytest.mark.parametrize("text", ["schema: 1\nid: [unclosed\n", "schema: 1\n\tid: SC-0001\n"])
+@pytest.mark.parametrize("text", ["schema: 1\nid: [unclosed\n", "schema: 1\n\tid: source-challenge-0001\n"])
 def test_invalid_yaml(text):
-    rec = parse("SC", body=text)
+    rec = parse("source-challenge", body=text)
     assert rec.data is None and rec.error.startswith("not valid YAML: ")
-    assert rows(rec) == [expect("SC", "K13", f"{rec.error}; {left_alone(rec)}")]
+    assert rows(rec) == [expect("source-challenge", "K13", f"{rec.error}; {left_alone(rec)}")]
 
 
 @pytest.mark.parametrize("text", ["", "- schema\n- 1\n", "just a scalar\n", "null\n"])
 def test_not_a_yaml_mapping(text):
-    rec = parse("SC", body=text)
+    rec = parse("source-challenge", body=text)
     assert rec.data is None and rec.error == "not a YAML mapping"
-    assert rows(rec) == [expect("SC", "K13", f"not a YAML mapping; {left_alone(rec)}")]
+    assert rows(rec) == [expect("source-challenge", "K13", f"not a YAML mapping; {left_alone(rec)}")]
 
 
 def test_crlf_and_a_bom_parse_like_lf():
-    text = record_text("SC")
-    plain = parse_record(record_path("SC", "SC-0001"), text.encode("utf-8"))
+    text = record_text("source-challenge")
+    plain = parse_record(record_path("source-challenge", "source-challenge-0001"), text.encode("utf-8"))
     for raw in (text.replace("\n", "\r\n").encode("utf-8"), b"\xef\xbb\xbf" + text.encode("utf-8")):
-        rec = parse("SC", body=raw)
+        rec = parse("source-challenge", body=raw)
         assert rec.error is None and rec.data == plain.data
 
 
 def test_key_line_and_status():
-    rec = parse("SC")
+    rec = parse("source-challenge")
     assert rec.key_line("source") == line_of(rec, "source")
     assert rec.key_line("nope") == 0
-    assert parse("SC", status="confirmed").status == "confirmed"
-    assert parse("SC", status=5).status is None
-    assert parse("SC", body=b"not utf-8 \xff").status is None
+    assert parse("source-challenge", status="confirmed").status == "confirmed"
+    assert parse("source-challenge", status=5).status is None
+    assert parse("source-challenge", body=b"not utf-8 \xff").status is None
 
 
 # --- the whole record ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("kind", ["SC", "CT", "CU"])
+@pytest.mark.parametrize("kind", ["source-challenge", "claim-task", "checked-use"])
 @pytest.mark.parametrize("staged", [False, True])
 def test_a_valid_record_has_no_issues(kind, staged):
     assert rows(parse(kind), staged=staged) == []
 
 
-@pytest.mark.parametrize("kind", ["SC", "CT", "CU"])
+@pytest.mark.parametrize("kind", ["source-challenge", "claim-task", "checked-use"])
 def test_unknown_top_level_key_is_K13_even_for_a_task(kind):
     rec = parse(kind, colour="blue")
     assert rows(rec) == [expect(kind, "K13", "unknown key 'colour'", rec, "colour")]
 
 
-DROPPED = [(kind, key) for kind in ("SC", "CT", "CU") for key in KEYS[kind]]
+DROPPED = [(kind, key) for kind in ("source-challenge", "claim-task", "checked-use") for key in KEYS[kind]]
 
 
 @pytest.mark.parametrize("kind,key", DROPPED)
@@ -211,7 +212,7 @@ def test_missing_top_level_key(kind, key):
 
 
 def test_issues_are_reported_in_field_order_with_unknown_keys_first():
-    rec = parse("SC", colour="blue", usable=DROP, limits=None)
+    rec = parse("source-challenge", colour="blue", usable=DROP, limits=None)
     assert [i.message for i in schema_issues(rec, staged=False)] == [
         "unknown key 'colour'", "missing key 'usable'", "limits: required"]
 
@@ -220,22 +221,22 @@ def test_issues_are_reported_in_field_order_with_unknown_keys_first():
 
 
 def test_unsupported_schema_version_stops_the_rest():
-    rec = parse("SC", schema=2, proposition=DROP, colour="blue", limits=None)
-    assert rows(rec) == [expect("SC", "K13", "unsupported schema version 2", rec, "schema")]
+    rec = parse("source-challenge", schema=2, proposition=DROP, colour="blue", limits=None)
+    assert rows(rec) == [expect("source-challenge", "K13", "unsupported schema version 2", rec, "schema")]
 
 
 @pytest.mark.parametrize("value,message", [(True, "unsupported schema version True"),
                                            ("1", "unsupported schema version 1"),
                                            (1.0, "unsupported schema version 1.0")])
 def test_schema_must_be_the_integer_1(value, message):
-    rec = parse("SC", schema=value)
-    assert rows(rec) == [expect("SC", "K13", message, rec, "schema")]
+    rec = parse("source-challenge", schema=value)
+    assert rows(rec) == [expect("source-challenge", "K13", message, rec, "schema")]
 
 
 def test_missing_schema_key_is_reported_and_the_rest_still_checked():
-    rec = parse("SC", schema=DROP, limits=None)
-    assert rows(rec) == [expect("SC", "K13", "missing key 'schema'"),
-                         expect("SC", "K13", "limits: required", rec, "limits")]
+    rec = parse("source-challenge", schema=DROP, limits=None)
+    assert rows(rec) == [expect("source-challenge", "K13", "missing key 'schema'"),
+                         expect("source-challenge", "K13", "limits: required", rec, "limits")]
 
 
 def test_id_must_match_the_file_name():
@@ -243,24 +244,24 @@ def test_id_must_match_the_file_name():
     holds a copy kblam reads as the record the file name gives, so the restore puts it back — and says
     what that undoes. Where it does not (a hand rename, a copy, a file only `git add`ed, a commit that
     holds the damage itself) no step an agent may run is named."""
-    rec = parse("SC", "SC-0001", id="SC-0002")
-    assert rows(rec) == [expect("SC", "K13",
-                                "id: 'SC-0002' does not match the file name's ID (SC-0001); git's last "
-                                "commit does not hold a file at research-review/challenges/SC-0001.yaml, "
+    rec = parse("source-challenge", "source-challenge-0001", id="source-challenge-0002")
+    assert rows(rec) == [expect("source-challenge", "K13",
+                                "id: 'source-challenge-0002' does not match the file name's ID (source-challenge-0001); git's last "
+                                "commit does not hold a file at research-review/challenges/source-challenge-0001.yaml, "
                                 "and records are never renamed, so leave it as it is and tell the user",
                                 rec, "id")]
     committed = [i.message for i in schema_issues(rec, staged=False, committed=lambda path: True)]
-    assert committed == ["id: 'SC-0002' does not match the file name's ID (SC-0001); restore the record's "
+    assert committed == ["id: 'source-challenge-0002' does not match the file name's ID (source-challenge-0001); restore the record's "
                          "file from git (git restore --source=HEAD --staged --worktree "
-                         "research-review/challenges/SC-0001.yaml), which puts back the file as git's last "
+                         "research-review/challenges/source-challenge-0001.yaml), which puts back the file as git's last "
                          "commit holds it and undoes any kblam put or decision made to it since; if one "
                          "was, leave it as it is and tell the user instead"]
 
 
 MISFILED = ["research-review/challenges/notes.yaml",          # a stray file, no ID in its name
-            "research-review/challenges/CT-0001.yaml",        # a record under another kind's folder
-            "research-review/tasks/SC-0001.yaml",
-            "research-review/SC-0001.yaml"]                   # directly under the review root
+            "research-review/challenges/claim-task-0001.yaml",        # a record under another kind's folder
+            "research-review/tasks/source-challenge-0001.yaml",
+            "research-review/source-challenge-0001.yaml"]                   # directly under the review root
 
 
 @pytest.mark.parametrize("path", MISFILED)
@@ -281,36 +282,36 @@ def test_a_misfiled_record_keeps_its_id_error_bare():
     """A record named under another kind's folder is not the record its file name gives: the id/file-name
     mismatch keeps its diagnostic and names no step, while the same record in its own folder keeps the
     restore."""
-    misfiled = parse_record("research-review/challenges/CT-0001.yaml",
-                            dump_record(build("CT", "CT-0001", id="CT-0002")).encode("utf-8"))
-    kept = parse("CT", "CT-0001", id="CT-0002")
+    misfiled = parse_record("research-review/challenges/claim-task-0001.yaml",
+                            dump_record(build("claim-task", "claim-task-0001", id="claim-task-0002")).encode("utf-8"))
+    kept = parse("claim-task", "claim-task-0001", id="claim-task-0002")
     assert [issue.message for issue in
             schema_issues(misfiled, staged=False, committed=lambda path: True)] == [
-        "id: 'CT-0002' does not match the file name's ID (CT-0001)"]
+        "id: 'claim-task-0002' does not match the file name's ID (claim-task-0001)"]
     assert [issue.message for issue in
             schema_issues(kept, staged=False, committed=lambda path: True)] == [
-        "id: 'CT-0002' does not match the file name's ID (CT-0001); restore the record's file from git "
+        "id: 'claim-task-0002' does not match the file name's ID (claim-task-0001); restore the record's file from git "
         f"(git restore --source=HEAD --staged --worktree {kept.path}), which puts back the file as git's "
         "last commit holds it and undoes any kblam put or decision made to it since; if one was, leave "
         "it as it is and tell the user instead"]
 
 
 @pytest.mark.parametrize("value,message", [("X-0001", "id: 'X-0001' is not an ID"),
-                                           ("SC-1", "id: 'SC-1' is not an ID"),
+                                           ("source-challenge-1", "id: 'source-challenge-1' is not an ID"),
                                            (5, "id: 5 is not an ID"),
                                            (None, "id: required")])
 def test_id_syntax(value, message):
     """An installed record's bad `id` names the step that fixes the file (its file name's ID stands, so
     its author cannot put a corrected copy); the same errors in a staged record name no step."""
-    rec = parse("SC", id=value)
-    assert rows(rec) == [expect("SC", "K13", f"{message}; {left_alone(rec)}", rec, "id")]
-    staged = [] if value is None else [expect("SC", "K13", message, rec, "id")]
+    rec = parse("source-challenge", id=value)
+    assert rows(rec) == [expect("source-challenge", "K13", f"{message}; {left_alone(rec)}", rec, "id")]
+    staged = [] if value is None else [expect("source-challenge", "K13", message, rec, "id")]
     assert rows(rec, staged=True) == staged
 
 
 def test_created_accepts_a_date_object_and_an_iso_string():
-    assert rows(parse("SC", created=date(2026, 9, 28))) == []
-    assert rows(parse("SC", created="2026-09-28")) == []
+    assert rows(parse("source-challenge", created=date(2026, 9, 28))) == []
+    assert rows(parse("source-challenge", created="2026-09-28")) == []
 
 
 @pytest.mark.parametrize("value,message", [("28-09-2026", "created: expected a date (YYYY-MM-DD)"),
@@ -319,26 +320,26 @@ def test_created_accepts_a_date_object_and_an_iso_string():
                                            (20260928, "created: expected a date (YYYY-MM-DD)"),
                                            (None, "created: required")])
 def test_created_must_be_a_yyyy_mm_dd_date(value, message):
-    rec = parse("SC", created=value)
-    assert rows(rec) == [expect("SC", "K13", message, rec, "created")]
+    rec = parse("source-challenge", created=value)
+    assert rows(rec) == [expect("source-challenge", "K13", message, rec, "created")]
 
 
 @pytest.mark.parametrize("value", ["reviewer a", "@reviewer", "-reviewer", "", 5, None])
 def test_creator_must_be_a_name(value):
-    rec = parse("SC", creator=value)
+    rec = parse("source-challenge", creator=value)
     message = "creator: required" if value in ("", None) else f"creator: {value!r} is not a name"
-    assert rows(rec) == [expect("SC", "K13", message, rec, "creator")]
-    assert rows(parse("SC", creator="reviewer.a@host-1_x")) == []
+    assert rows(rec) == [expect("source-challenge", "K13", message, rec, "creator")]
+    assert rows(parse("source-challenge", creator="reviewer.a@host-1_x")) == []
 
 
 def test_proponent_is_a_name_in_both_kinds():
-    for kind in ("CT", "CU"):
+    for kind in ("claim-task", "checked-use"):
         rec = parse(kind, proponent="not a name")
         assert rows(rec) == [expect(kind, code_of(kind, "proponent"),
                                     "proponent: 'not a name' is not a name", rec, "proponent")]
 
 
-@pytest.mark.parametrize("kind,value", [("SC", "approved"), ("CT", "approved"), ("CU", "rejected")])
+@pytest.mark.parametrize("kind,value", [("source-challenge", "approved"), ("claim-task", "approved"), ("checked-use", "rejected")])
 def test_status_is_the_kinds_vocabulary(kind, value):
     """A status its kind has no vocabulary for is the same damage as a bad `id` line: no decision takes
     the record anywhere from it, and the hooks deny an agent a hand edit, so the message names the step
@@ -350,9 +351,9 @@ def test_status_is_the_kinds_vocabulary(kind, value):
 
 # --- blank values and staging -------------------------------------------------------------------
 
-BLANK_FIELDS = {"SC": ["proposition", "scope", "classification", "basis", "usable", "limits"],
-                "CT": ["question", "method", "outcomes", "controls", "stop", "expected_evidence"],
-                "CU": ["reason"]}
+BLANK_FIELDS = {"source-challenge": ["proposition", "scope", "classification", "basis", "usable", "limits"],
+                "claim-task": ["question", "method", "outcomes", "controls", "stop", "expected_evidence"],
+                "checked-use": ["reason"]}
 BLANKS = [(kind, field) for kind, fields in BLANK_FIELDS.items() for field in fields]
 
 
@@ -364,7 +365,7 @@ def test_blank_requires_staging_and_a_staged_blank_is_allowed(kind, field):
     assert rows(parse(kind, **{field: "   "}), staged=True) == []
 
 
-@pytest.mark.parametrize("kind", ["SC", "CT", "CU"])
+@pytest.mark.parametrize("kind", ["source-challenge", "claim-task", "checked-use"])
 def test_a_staged_record_with_every_free_field_blank(kind):
     fields = BLANK_FIELDS[kind]
     rec = parse(kind, **{field: None for field in fields})
@@ -372,7 +373,7 @@ def test_a_staged_record_with_every_free_field_blank(kind):
     assert [i.message for i in schema_issues(rec, staged=False)] == [f"{field}: required" for field in fields]
 
 
-@pytest.mark.parametrize("kind,field", [("SC", "proposition"), ("CT", "question"), ("CU", "reason")])
+@pytest.mark.parametrize("kind,field", [("source-challenge", "proposition"), ("claim-task", "question"), ("checked-use", "reason")])
 def test_a_staged_value_that_is_present_is_still_checked(kind, field):
     rec = parse(kind, **{field: 5})
     assert rows(rec, staged=True) == [expect(kind, code_of(kind, field),
@@ -380,17 +381,17 @@ def test_a_staged_value_that_is_present_is_still_checked(kind, field):
 
 
 @pytest.mark.parametrize("kind,field,message", [
-    ("SC", "scope", "scope: expected a list of non-empty strings"),
-    ("SC", "basis", "basis: expected a list of basis entries"),
-    ("CT", "controls", "controls: expected a list of non-empty strings"),
-    ("CT", "expected_evidence", "expected_evidence: expected a list of non-empty strings")])
+    ("source-challenge", "scope", "scope: expected a list of non-empty strings"),
+    ("source-challenge", "basis", "basis: expected a list of basis entries"),
+    ("claim-task", "controls", "controls: expected a list of non-empty strings"),
+    ("claim-task", "expected_evidence", "expected_evidence: expected a list of non-empty strings")])
 def test_a_staged_blank_list_is_allowed_but_a_wrong_type_is_not(kind, field, message):
     assert rows(parse(kind, **{field: []}), staged=True) == []
     rec = parse(kind, **{field: "not a list"})
     assert rows(rec, staged=True) == [expect(kind, code_of(kind, field), message, rec, field)]
 
 
-@pytest.mark.parametrize("kind,field", [("SC", "scope"), ("CT", "controls"), ("CT", "expected_evidence")])
+@pytest.mark.parametrize("kind,field", [("source-challenge", "scope"), ("claim-task", "controls"), ("claim-task", "expected_evidence")])
 def test_a_blank_list_entry(kind, field):
     rec = parse(kind, **{field: ["ok", ""]})
     assert rows(rec) == [expect(kind, code_of(kind, field), f"{field}[1]: required", rec, field)]
@@ -403,39 +404,39 @@ def test_a_blank_list_entry(kind, field):
 # --- linked findings ----------------------------------------------------------------------------
 
 def test_linked_findings():
-    assert rows(parse("SC", linked_findings=[])) == []
-    assert rows(parse("SC", linked_findings=["F-0001", "F-0002"])) == []
-    rec = parse("SC", linked_findings=["F-0001", "F-1"])
-    assert rows(rec) == [expect("SC", "K13", "linked_findings[1]: 'F-1' is not a finding ID (F-NNNN)",
+    assert rows(parse("source-challenge", linked_findings=[])) == []
+    assert rows(parse("source-challenge", linked_findings=["F-0001", "F-0002"])) == []
+    rec = parse("source-challenge", linked_findings=["F-0001", "F-1"])
+    assert rows(rec) == [expect("source-challenge", "K13", "linked_findings[1]: 'F-1' is not a finding ID (F-NNNN)",
                                 rec, "linked_findings")]
-    rec = parse("SC", linked_findings=None)
-    assert rows(rec) == [expect("SC", "K13", "linked_findings: required", rec, "linked_findings")]
+    rec = parse("source-challenge", linked_findings=None)
+    assert rows(rec) == [expect("source-challenge", "K13", "linked_findings: required", rec, "linked_findings")]
     assert rows(rec, staged=True) == []
-    rec = parse("SC", linked_findings="F-0001")
-    assert rows(rec) == [expect("SC", "K13", "linked_findings: expected a list of finding IDs",
+    rec = parse("source-challenge", linked_findings="F-0001")
+    assert rows(rec) == [expect("source-challenge", "K13", "linked_findings: expected a list of finding IDs",
                                 rec, "linked_findings")]
 
 
 # --- file references ----------------------------------------------------------------------------
 
 def test_a_valid_source_and_its_pins():
-    assert rows(parse("SC")) == []
-    assert rows(parse("SC", source=source_ref(repo=SOURCE_REPO, commit=OID, blob=OID64))) == []
-    assert rows(parse("SC", source=source_ref(snapshot="evidence/2026-09-27-trace/README.md"))) == []
+    assert rows(parse("source-challenge")) == []
+    assert rows(parse("source-challenge", source=source_ref(repo=SOURCE_REPO, commit=OID, blob=OID64))) == []
+    assert rows(parse("source-challenge", source=source_ref(snapshot="evidence/2026-09-27-trace/README.md"))) == []
 
 
 def test_source_keys():
-    rec = parse("SC", source=source_ref(colour="blue"))
-    assert rows(rec) == [expect("SC", "K13", "source: unknown key 'colour'", rec, "source")]
+    rec = parse("source-challenge", source=source_ref(colour="blue"))
+    assert rows(rec) == [expect("source-challenge", "K13", "source: unknown key 'colour'", rec, "source")]
     ref = source_ref()
     del ref["sha256"]
-    rec = parse("SC", source=ref)
-    assert rows(rec) == [expect("SC", "K13", "source: missing key 'sha256'", rec, "source")]
-    rec = parse("SC", source=None)
-    assert rows(rec) == [expect("SC", "K13", "source: required", rec, "source")]
+    rec = parse("source-challenge", source=ref)
+    assert rows(rec) == [expect("source-challenge", "K13", "source: missing key 'sha256'", rec, "source")]
+    rec = parse("source-challenge", source=None)
+    assert rows(rec) == [expect("source-challenge", "K13", "source: required", rec, "source")]
     assert rows(rec, staged=True) == []
-    rec = parse("SC", source="a/path.md")
-    assert rows(rec) == [expect("SC", "K13", "source: expected a file reference with an assertion",
+    rec = parse("source-challenge", source="a/path.md")
+    assert rows(rec) == [expect("source-challenge", "K13", "source: expected a file reference with an assertion",
                                 rec, "source")]
 
 
@@ -443,25 +444,25 @@ def test_source_keys():
                                         ("../notes/trace.md", "'..' segment"),
                                         ("notes/x:y.md", "':' (an alternate data stream)")])
 def test_path_syntax_is_checked_where_a_path_appears(raw, reason):
-    rec = parse("SC", source=source_ref(path=raw))
-    assert rows(rec) == [expect("SC", "K13", f"source.path: {reason}", rec, "source")]
-    rec = parse("SC", source=source_ref(snapshot=raw))
-    assert rows(rec) == [expect("SC", "K13", f"source.snapshot: {reason}", rec, "source")]
-    rec = parse("SC", basis=[basis_entry(path=raw)])
-    assert rows(rec) == [expect("SC", "K13", f"basis[0].path: {reason}", rec, "basis")]
-    rec = parse("CU", citation=citation(path=raw))
-    assert rows(rec) == [expect("CU", "K13", f"citation.path: {reason}", rec, "citation")]
+    rec = parse("source-challenge", source=source_ref(path=raw))
+    assert rows(rec) == [expect("source-challenge", "K13", f"source.path: {reason}", rec, "source")]
+    rec = parse("source-challenge", source=source_ref(snapshot=raw))
+    assert rows(rec) == [expect("source-challenge", "K13", f"source.snapshot: {reason}", rec, "source")]
+    rec = parse("source-challenge", basis=[basis_entry(path=raw)])
+    assert rows(rec) == [expect("source-challenge", "K13", f"basis[0].path: {reason}", rec, "basis")]
+    rec = parse("checked-use", citation=citation(path=raw))
+    assert rows(rec) == [expect("checked-use", "K13", f"citation.path: {reason}", rec, "citation")]
 
 
 def test_repo_commit_and_blob_are_all_set_or_all_null():
-    rec = parse("SC", source=source_ref(commit=OID))
-    assert rows(rec) == [expect("SC", "K13", "source: repo, commit and blob must be all set or all null",
+    rec = parse("source-challenge", source=source_ref(commit=OID))
+    assert rows(rec) == [expect("source-challenge", "K13", "source: repo, commit and blob must be all set or all null",
                                 rec, "source")]
-    rec = parse("SC", source=source_ref(repo=SOURCE_REPO, commit=OID))
-    assert rows(rec) == [expect("SC", "K13", "source: repo, commit and blob must be all set or all null",
+    rec = parse("source-challenge", source=source_ref(repo=SOURCE_REPO, commit=OID))
+    assert rows(rec) == [expect("source-challenge", "K13", "source: repo, commit and blob must be all set or all null",
                                 rec, "source")]
-    assert rows(parse("SC", source=source_ref(repo=SOURCE_REPO, commit=OID, blob=OID))) == []
-    assert rows(parse("SC", source=source_ref(repo=None, commit=None, blob=None))) == []
+    assert rows(parse("source-challenge", source=source_ref(repo=SOURCE_REPO, commit=OID, blob=OID))) == []
+    assert rows(parse("source-challenge", source=source_ref(repo=None, commit=None, blob=None))) == []
 
 
 @pytest.mark.parametrize("field,message", [
@@ -471,233 +472,233 @@ def test_repo_commit_and_blob_are_all_set_or_all_null():
 def test_hex_and_object_id_syntax(field, message):
     ref = source_ref(repo=SOURCE_REPO, commit=OID, blob=OID)
     ref[field] = "Zz" * 20 if field == "sha256" else "A" * 40
-    rec = parse("SC", source=ref)
-    assert rows(rec) == [expect("SC", "K13", message, rec, "source")]
+    rec = parse("source-challenge", source=ref)
+    assert rows(rec) == [expect("source-challenge", "K13", message, rec, "source")]
 
 
 def test_a_missing_reference_path():
-    rec = parse("SC", source=source_ref(path=None))
-    assert rows(rec) == [expect("SC", "K13", "source.path: required", rec, "source")]
+    rec = parse("source-challenge", source=source_ref(path=None))
+    assert rows(rec) == [expect("source-challenge", "K13", "source.path: required", rec, "source")]
 
 
-# --- the SC's assertion, basis and judgement ----------------------------------------------------
+# --- the source challenge's assertion, basis and judgement ---------------------------------------
 
 def test_assertion_is_a_mapping_of_its_four_keys():
-    rec = parse("SC", source=source_ref(assertion=None))
-    assert rows(rec) == [expect("SC", "K13", "source.assertion: required", rec, "source")]
+    rec = parse("source-challenge", source=source_ref(assertion=None))
+    assert rows(rec) == [expect("source-challenge", "K13", "source.assertion: required", rec, "source")]
     assert rows(rec, staged=True) == []
-    rec = parse("SC", source=source_ref(assertion=assertion(colour=1)))
-    assert rows(rec) == [expect("SC", "K13", "source.assertion: unknown key 'colour'", rec, "source")]
+    rec = parse("source-challenge", source=source_ref(assertion=assertion(colour=1)))
+    assert rows(rec) == [expect("source-challenge", "K13", "source.assertion: unknown key 'colour'", rec, "source")]
     entry = assertion()
     del entry["occurrence"]
-    rec = parse("SC", source=source_ref(assertion=entry))
-    assert rows(rec) == [expect("SC", "K13", "source.assertion: missing key 'occurrence'", rec, "source")]
-    rec = parse("SC", source=source_ref(assertion="row 102"))
-    assert rows(rec) == [expect("SC", "K13", "source.assertion: expected a mapping of lines, text, "
+    rec = parse("source-challenge", source=source_ref(assertion=entry))
+    assert rows(rec) == [expect("source-challenge", "K13", "source.assertion: missing key 'occurrence'", rec, "source")]
+    rec = parse("source-challenge", source=source_ref(assertion="row 102"))
+    assert rows(rec) == [expect("source-challenge", "K13", "source.assertion: expected a mapping of lines, text, "
                                              "sha256 and occurrence", rec, "source")]
 
 
 @pytest.mark.parametrize("lines", [[3], [5, 3], [0, 3], [3, "5"], "3-5", []])
 def test_assertion_lines_are_a_line_range(lines):
-    rec = parse("SC", source=source_ref(assertion=assertion(lines=lines)))
-    assert rows(rec) == [expect("SC", "K13", "source.assertion.lines: expected [A, B] with 1 <= A <= B",
+    rec = parse("source-challenge", source=source_ref(assertion=assertion(lines=lines)))
+    assert rows(rec) == [expect("source-challenge", "K13", "source.assertion.lines: expected [A, B] with 1 <= A <= B",
                                 rec, "source")]
 
 
 def test_assertion_text_sha256_and_occurrence():
-    rec = parse("SC", source=source_ref(assertion=assertion(text="")))
-    assert rows(rec) == [expect("SC", "K13", "source.assertion.text: required", rec, "source")]
-    rec = parse("SC", source=source_ref(assertion=assertion(sha256=None)))
-    assert rows(rec) == [expect("SC", "K13", "source.assertion.sha256: required", rec, "source")]
-    rec = parse("SC", source=source_ref(assertion=assertion(occurrence=0)))
-    assert rows(rec) == [expect("SC", "K13", "source.assertion.occurrence: expected an integer >= 1",
+    rec = parse("source-challenge", source=source_ref(assertion=assertion(text="")))
+    assert rows(rec) == [expect("source-challenge", "K13", "source.assertion.text: required", rec, "source")]
+    rec = parse("source-challenge", source=source_ref(assertion=assertion(sha256=None)))
+    assert rows(rec) == [expect("source-challenge", "K13", "source.assertion.sha256: required", rec, "source")]
+    rec = parse("source-challenge", source=source_ref(assertion=assertion(occurrence=0)))
+    assert rows(rec) == [expect("source-challenge", "K13", "source.assertion.occurrence: expected an integer >= 1",
                                 rec, "source")]
-    rec = parse("SC", source=source_ref(assertion=assertion(sha256=None, occurrence=None)))
+    rec = parse("source-challenge", source=source_ref(assertion=assertion(sha256=None, occurrence=None)))
     assert rows(rec, staged=True) == []
 
 
 def test_booleans_are_not_integers():
-    rec = parse("SC", source=source_ref(assertion=assertion(occurrence=True)))
-    assert rows(rec) == [expect("SC", "K13", "source.assertion.occurrence: expected an integer >= 1",
+    rec = parse("source-challenge", source=source_ref(assertion=assertion(occurrence=True)))
+    assert rows(rec) == [expect("source-challenge", "K13", "source.assertion.occurrence: expected an integer >= 1",
                                 rec, "source")]
-    rec = parse("SC", source=source_ref(assertion=assertion(lines=[True, True])))
-    assert rows(rec) == [expect("SC", "K13", "source.assertion.lines: expected [A, B] with 1 <= A <= B",
+    rec = parse("source-challenge", source=source_ref(assertion=assertion(lines=[True, True])))
+    assert rows(rec) == [expect("source-challenge", "K13", "source.assertion.lines: expected [A, B] with 1 <= A <= B",
                                 rec, "source")]
-    rec = parse("CU", citation=citation(ordinal=True))
-    assert rows(rec) == [expect("CU", "K13", "citation.ordinal: expected an integer >= 1", rec, "citation")]
-    rec = parse("CU", citation=citation(range=[True]))
-    assert rows(rec) == [expect("CU", "K13", "citation.range: expected [A, B] with 1 <= A <= B, "
+    rec = parse("checked-use", citation=citation(ordinal=True))
+    assert rows(rec) == [expect("checked-use", "K13", "citation.ordinal: expected an integer >= 1", rec, "citation")]
+    rec = parse("checked-use", citation=citation(range=[True]))
+    assert rows(rec) == [expect("checked-use", "K13", "citation.range: expected [A, B] with 1 <= A <= B, "
                                              "or [N] with N >= 0", rec, "citation")]
 
 
 def test_basis_entries():
-    assert rows(parse("SC")) == []
-    rec = parse("SC", basis=[])
-    assert rows(rec) == [expect("SC", "K13", "basis: required", rec, "basis")]
+    assert rows(parse("source-challenge")) == []
+    rec = parse("source-challenge", basis=[])
+    assert rows(rec) == [expect("source-challenge", "K13", "basis: required", rec, "basis")]
     assert rows(rec, staged=True) == []
-    rec = parse("SC", basis=[basis_entry(), basis_entry(role="foo")])
-    assert rows(rec) == [expect("SC", "K13",
+    rec = parse("source-challenge", basis=[basis_entry(), basis_entry(role="foo")])
+    assert rows(rec) == [expect("source-challenge", "K13",
                                 "basis[1].role: 'foo' is not one of counterevidence, "
                                 "internal-inconsistency, missing-support, model-mismatch", rec, "basis")]
 
 
 def test_basis_entry_keys_and_values():
-    rec = parse("SC", basis=[basis_entry(colour="blue")])
-    assert rows(rec) == [expect("SC", "K13", "basis[0]: unknown key 'colour'", rec, "basis")]
+    rec = parse("source-challenge", basis=[basis_entry(colour="blue")])
+    assert rows(rec) == [expect("source-challenge", "K13", "basis[0]: unknown key 'colour'", rec, "basis")]
     entry = basis_entry()
     del entry["role"]
-    rec = parse("SC", basis=[entry])
-    assert rows(rec) == [expect("SC", "K13", "basis[0]: missing key 'role'", rec, "basis")]
-    rec = parse("SC", basis=[basis_entry(provenance="Bad Name")])
-    assert rows(rec) == [expect("SC", "K13", "basis[0].provenance: 'Bad Name' is not a name", rec, "basis")]
-    rec = parse("SC", basis=[basis_entry(locator="")])
-    assert rows(rec) == [expect("SC", "K13", "basis[0].locator: required", rec, "basis")]
-    rec = parse("SC", basis=["a/path.md"])
-    assert rows(rec) == [expect("SC", "K13", "basis[0]: expected a basis entry", rec, "basis")]
+    rec = parse("source-challenge", basis=[entry])
+    assert rows(rec) == [expect("source-challenge", "K13", "basis[0]: missing key 'role'", rec, "basis")]
+    rec = parse("source-challenge", basis=[basis_entry(provenance="Bad Name")])
+    assert rows(rec) == [expect("source-challenge", "K13", "basis[0].provenance: 'Bad Name' is not a name", rec, "basis")]
+    rec = parse("source-challenge", basis=[basis_entry(locator="")])
+    assert rows(rec) == [expect("source-challenge", "K13", "basis[0].locator: required", rec, "basis")]
+    rec = parse("source-challenge", basis=["a/path.md"])
+    assert rows(rec) == [expect("source-challenge", "K13", "basis[0]: expected a basis entry", rec, "basis")]
 
 
 def test_a_staged_basis_entry_may_leave_its_hash_and_pin_null():
-    rec = parse("SC", basis=[basis_entry(sha256=None, repo=None, commit=None, blob=None)])
-    assert rows(rec) == [expect("SC", "K13", "basis[0].sha256: required", rec, "basis")]
+    rec = parse("source-challenge", basis=[basis_entry(sha256=None, repo=None, commit=None, blob=None)])
+    assert rows(rec) == [expect("source-challenge", "K13", "basis[0].sha256: required", rec, "basis")]
     assert rows(rec, staged=True) == []
-    assert rows(parse("SC", basis=[basis_entry()])) == []       # provisional: no pin needed
+    assert rows(parse("source-challenge", basis=[basis_entry()])) == []       # provisional: no pin needed
 
 
 def test_scope_classification_usable_and_limits():
-    rec = parse("SC", classification="wrong")
-    assert rows(rec) == [expect("SC", "K13",
+    rec = parse("source-challenge", classification="wrong")
+    assert rows(rec) == [expect("source-challenge", "K13",
                                 "classification: 'wrong' is not one of contradicted, unsupported, "
                                 "wrong_model", rec, "classification")]
-    rec = parse("SC", scope=["MX-100", ""], usable="", limits=None)
+    rec = parse("source-challenge", scope=["MX-100", ""], usable="", limits=None)
     assert [i.message for i in schema_issues(rec, staged=False)] == [
         "scope[1]: required", "usable: required", "limits: required"]
     assert rows(rec, staged=True) == []
 
 
-# --- the CT's fields ----------------------------------------------------------------------------
+# --- the claim task's fields ---------------------------------------------------------------------
 
 def test_task_fields():
-    rec = parse("CT", kind="other")
-    assert rows(rec) == [expect("CT", "K15", "kind: 'other' is not one of replication, confirmation",
+    rec = parse("claim-task", kind="other")
+    assert rows(rec) == [expect("claim-task", "K15", "kind: 'other' is not one of replication, confirmation",
                                 rec, "kind")]
-    assert rows(parse("CT", kind="confirmation")) == []
-    rec = parse("CT", finding="SC-0001")
-    assert rows(rec) == [expect("CT", "K15", "finding: 'SC-0001' is not a finding ID (F-NNNN)",
+    assert rows(parse("claim-task", kind="confirmation")) == []
+    rec = parse("claim-task", finding="source-challenge-0001")
+    assert rows(rec) == [expect("claim-task", "K15", "finding: 'source-challenge-0001' is not a finding ID (F-NNNN)",
                                 rec, "finding")]
-    rec = parse("CT", claim_fingerprint="3fa9c1d")
-    assert rows(rec) == [expect("CT", "K15", "claim_fingerprint: expected 12 lowercase hex digits",
+    rec = parse("claim-task", claim_fingerprint="3fa9c1d")
+    assert rows(rec) == [expect("claim-task", "K15", "claim_fingerprint: expected 12 lowercase hex digits",
                                 rec, "claim_fingerprint")]
-    rec = parse("CT", base_file_sha256="abc")
-    assert rows(rec) == [expect("CT", "K15", "base_file_sha256: expected 64 lowercase hex digits",
+    rec = parse("claim-task", base_file_sha256="abc")
+    assert rows(rec) == [expect("claim-task", "K15", "base_file_sha256: expected 64 lowercase hex digits",
                                 rec, "base_file_sha256")]
-    assert rows(parse("CT", finding="F-0014", claim_fingerprint="0badf00d0000")) == []
+    assert rows(parse("claim-task", finding="F-0014", claim_fingerprint="0badf00d0000")) == []
 
 
 def test_outcomes_has_exactly_its_three_keys():
-    assert rows(parse("CT")) == []
-    rec = parse("CT", outcomes={"supports": "a", "refutes": "b"})
-    assert rows(rec) == [expect("CT", "K15", "outcomes: missing key 'inconclusive'", rec, "outcomes")]
-    rec = parse("CT", outcomes={"supports": "a", "refutes": "b", "inconclusive": "c", "maybe": "d"})
-    assert rows(rec) == [expect("CT", "K15", "outcomes: unknown key 'maybe'", rec, "outcomes")]
-    rec = parse("CT", outcomes={"supports": "", "refutes": "b", "inconclusive": "c"})
-    assert rows(rec) == [expect("CT", "K15", "outcomes.supports: required", rec, "outcomes")]
-    rec = parse("CT", outcomes={"supports": "a", "refutes": "b", "inconclusive": None})
+    assert rows(parse("claim-task")) == []
+    rec = parse("claim-task", outcomes={"supports": "a", "refutes": "b"})
+    assert rows(rec) == [expect("claim-task", "K15", "outcomes: missing key 'inconclusive'", rec, "outcomes")]
+    rec = parse("claim-task", outcomes={"supports": "a", "refutes": "b", "inconclusive": "c", "maybe": "d"})
+    assert rows(rec) == [expect("claim-task", "K15", "outcomes: unknown key 'maybe'", rec, "outcomes")]
+    rec = parse("claim-task", outcomes={"supports": "", "refutes": "b", "inconclusive": "c"})
+    assert rows(rec) == [expect("claim-task", "K15", "outcomes.supports: required", rec, "outcomes")]
+    rec = parse("claim-task", outcomes={"supports": "a", "refutes": "b", "inconclusive": None})
     assert rows(rec, staged=True) == []
-    rec = parse("CT", outcomes=[])
-    assert rows(rec) == [expect("CT", "K15", "outcomes: expected a mapping of supports, refutes, "
+    rec = parse("claim-task", outcomes=[])
+    assert rows(rec) == [expect("claim-task", "K15", "outcomes: expected a mapping of supports, refutes, "
                                              "inconclusive", rec, "outcomes")]
 
 
 def test_ct_field_codes():
-    rec = parse("CT", question=None)
-    assert rows(rec) == [expect("CT", "K15", "question: required", rec, "question")]
-    rec = parse("CT", colour="blue")
-    assert rows(rec) == [expect("CT", "K13", "unknown key 'colour'", rec, "colour")]
-    rec = parse("CT", decisions=[decision(bind="xy")])
-    assert rows(rec) == [expect("CT", "K13", "decisions[0].bind: expected 64 lowercase hex digits",
+    rec = parse("claim-task", question=None)
+    assert rows(rec) == [expect("claim-task", "K15", "question: required", rec, "question")]
+    rec = parse("claim-task", colour="blue")
+    assert rows(rec) == [expect("claim-task", "K13", "unknown key 'colour'", rec, "colour")]
+    rec = parse("claim-task", decisions=[decision(bind="xy")])
+    assert rows(rec) == [expect("claim-task", "K13", "decisions[0].bind: expected 64 lowercase hex digits",
                                 rec, "decisions")]
 
 
-# --- the CU's fields ----------------------------------------------------------------------------
+# --- the checked use's fields --------------------------------------------------------------------
 
 def test_use_fields():
-    assert rows(parse("CU")) == []
-    rec = parse("CU", challenge="CT-0001")
-    assert rows(rec) == [expect("CU", "K13", "challenge: 'CT-0001' is not a challenge ID (SC-NNNN)",
+    assert rows(parse("checked-use")) == []
+    rec = parse("checked-use", challenge="claim-task-0001")
+    assert rows(rec) == [expect("checked-use", "K13", "challenge: 'claim-task-0001' is not a challenge ID (source-challenge-NNNN)",
                                 rec, "challenge")]
-    rec = parse("CU", disposition="other")
-    assert rows(rec) == [expect("CU", "K13", "disposition: 'other' is not one of "
+    rec = parse("checked-use", disposition="other")
+    assert rows(rec) == [expect("checked-use", "K13", "disposition: 'other' is not one of "
                                              "unaffected_raw_bytes, rewritten_claim", rec, "disposition")]
-    rec = parse("CU", finding_fingerprint="0BADF00D")
-    assert rows(rec) == [expect("CU", "K13", "finding_fingerprint: expected 12 lowercase hex digits",
+    rec = parse("checked-use", finding_fingerprint="0BADF00D")
+    assert rows(rec) == [expect("checked-use", "K13", "finding_fingerprint: expected 12 lowercase hex digits",
                                 rec, "finding_fingerprint")]
-    rec = parse("CU", finding_file_sha256="x")
-    assert rows(rec) == [expect("CU", "K13", "finding_file_sha256: expected 64 lowercase hex digits",
+    rec = parse("checked-use", finding_file_sha256="x")
+    assert rows(rec) == [expect("checked-use", "K13", "finding_file_sha256: expected 64 lowercase hex digits",
                                 rec, "finding_file_sha256")]
-    rec = parse("CU", challenge_bind="x")
-    assert rows(rec) == [expect("CU", "K13", "challenge_bind: expected 64 lowercase hex digits",
+    rec = parse("checked-use", challenge_bind="x")
+    assert rows(rec) == [expect("checked-use", "K13", "challenge_bind: expected 64 lowercase hex digits",
                                 rec, "challenge_bind")]
 
 
 def test_citation_accepts_a_line_range_and_an_offset_range():
-    assert rows(parse("CU", citation=citation(range=[63, 65]))) == []
-    assert rows(parse("CU", citation=citation(range=[0]))) == []
-    assert rows(parse("CU", citation=citation(range=[4096]))) == []
+    assert rows(parse("checked-use", citation=citation(range=[63, 65]))) == []
+    assert rows(parse("checked-use", citation=citation(range=[0]))) == []
+    assert rows(parse("checked-use", citation=citation(range=[4096]))) == []
 
 
 @pytest.mark.parametrize("value", [[5, 3], [], [1, 2, 3], "63-65", [0, 0], None])
 def test_citation_range_shape(value):
-    rec = parse("CU", citation=citation(range=value))
+    rec = parse("checked-use", citation=citation(range=value))
     message = "citation.range: required" if value is None else \
         "citation.range: expected [A, B] with 1 <= A <= B, or [N] with N >= 0"
-    assert rows(rec) == [expect("CU", "K13", message, rec, "citation")]
+    assert rows(rec) == [expect("checked-use", "K13", message, rec, "citation")]
 
 
 def test_citation_keys_and_values():
-    rec = parse("CU", citation=citation(ordinal=0))
-    assert rows(rec) == [expect("CU", "K13", "citation.ordinal: expected an integer >= 1",
+    rec = parse("checked-use", citation=citation(ordinal=0))
+    assert rows(rec) == [expect("checked-use", "K13", "citation.ordinal: expected an integer >= 1",
                                 rec, "citation")]
-    rec = parse("CU", citation=citation(colour="blue"))
-    assert rows(rec) == [expect("CU", "K13", "citation: unknown key 'colour'", rec, "citation")]
+    rec = parse("checked-use", citation=citation(colour="blue"))
+    assert rows(rec) == [expect("checked-use", "K13", "citation: unknown key 'colour'", rec, "citation")]
     entry = citation()
     del entry["tag_sha256"]
-    rec = parse("CU", citation=entry)
-    assert rows(rec) == [expect("CU", "K13", "citation: missing key 'tag_sha256'", rec, "citation")]
-    rec = parse("CU", citation=citation(tag_sha256=None))
-    assert rows(rec) == [expect("CU", "K13", "citation.tag_sha256: required", rec, "citation")]
-    rec = parse("CU", citation=None)
-    assert rows(rec) == [expect("CU", "K13", "citation: required", rec, "citation")]
+    rec = parse("checked-use", citation=entry)
+    assert rows(rec) == [expect("checked-use", "K13", "citation: missing key 'tag_sha256'", rec, "citation")]
+    rec = parse("checked-use", citation=citation(tag_sha256=None))
+    assert rows(rec) == [expect("checked-use", "K13", "citation.tag_sha256: required", rec, "citation")]
+    rec = parse("checked-use", citation=None)
+    assert rows(rec) == [expect("checked-use", "K13", "citation: required", rec, "citation")]
     assert rows(rec, staged=True) == []
 
 
 # --- decisions ----------------------------------------------------------------------------------
 
 def test_decisions_may_be_empty_at_every_stage():
-    assert rows(parse("SC", decisions=[])) == []
-    assert rows(parse("SC", decisions=[]), staged=True) == []
-    rec = parse("SC", decisions=None)
-    assert rows(rec) == [expect("SC", "K13", "decisions: required", rec, "decisions")]
+    assert rows(parse("source-challenge", decisions=[])) == []
+    assert rows(parse("source-challenge", decisions=[]), staged=True) == []
+    rec = parse("source-challenge", decisions=None)
+    assert rows(rec) == [expect("source-challenge", "K13", "decisions: required", rec, "decisions")]
     assert rows(rec, staged=True) == []
-    rec = parse("SC", decisions=5)
-    assert rows(rec) == [expect("SC", "K13", "decisions: expected a list of decision entries",
+    rec = parse("source-challenge", decisions=5)
+    assert rows(rec) == [expect("source-challenge", "K13", "decisions: expected a list of decision entries",
                                 rec, "decisions")]
 
 
 def test_a_valid_decision():
-    assert rows(parse("SC", status="confirmed", decisions=[decision()])) == []
-    assert rows(parse("CT", status="confirmed", decisions=[decision()])) == []
+    assert rows(parse("source-challenge", status="confirmed", decisions=[decision()])) == []
+    assert rows(parse("claim-task", status="confirmed", decisions=[decision()])) == []
 
 
 def test_decision_entry_shape():
-    rec = parse("SC", decisions=["nope"])
-    assert rows(rec) == [expect("SC", "K13", "decisions[0]: expected a mapping of decision fields",
+    rec = parse("source-challenge", decisions=["nope"])
+    assert rows(rec) == [expect("source-challenge", "K13", "decisions[0]: expected a mapping of decision fields",
                                 rec, "decisions")]
     entry = decision()
     del entry["bind"]
-    rec = parse("SC", decisions=[entry])
-    assert rows(rec) == [expect("SC", "K13", "decisions[0]: missing key 'bind'", rec, "decisions")]
-    rec = parse("SC", decisions=[decision(colour="blue")])
-    assert rows(rec) == [expect("SC", "K13", "decisions[0]: unknown key 'colour'", rec, "decisions")]
+    rec = parse("source-challenge", decisions=[entry])
+    assert rows(rec) == [expect("source-challenge", "K13", "decisions[0]: missing key 'bind'", rec, "decisions")]
+    rec = parse("source-challenge", decisions=[decision(colour="blue")])
+    assert rows(rec) == [expect("source-challenge", "K13", "decisions[0]: unknown key 'colour'", rec, "decisions")]
 
 
 @pytest.mark.parametrize("fields,message", [
@@ -708,39 +709,39 @@ def test_decision_entry_shape():
     ({"reason": ""}, "decisions[0].reason: required"),
     ({"bind": "xy"}, "decisions[0].bind: expected 64 lowercase hex digits")])
 def test_decision_field_values(fields, message):
-    rec = parse("SC", decisions=[decision(**fields)])
-    assert rows(rec) == [expect("SC", "K13", message, rec, "decisions")]
+    rec = parse("source-challenge", decisions=[decision(**fields)])
+    assert rows(rec) == [expect("source-challenge", "K13", message, rec, "decisions")]
 
 
 def test_decision_evidence_entries():
-    assert rows(parse("SC", decisions=[decision(evidence=[])])) == []
+    assert rows(parse("source-challenge", decisions=[decision(evidence=[])])) == []
     entry = evidence_entry()
     del entry["locator"]
-    rec = parse("SC", decisions=[decision(evidence=[entry])])
-    assert rows(rec) == [expect("SC", "K13", "decisions[0].evidence[0]: missing key 'locator'",
+    rec = parse("source-challenge", decisions=[decision(evidence=[entry])])
+    assert rows(rec) == [expect("source-challenge", "K13", "decisions[0].evidence[0]: missing key 'locator'",
                                 rec, "decisions")]
     entry = evidence_entry(colour="blue")
-    rec = parse("SC", decisions=[decision(evidence=[entry])])
-    assert rows(rec) == [expect("SC", "K13", "decisions[0].evidence[0]: unknown key 'colour'",
+    rec = parse("source-challenge", decisions=[decision(evidence=[entry])])
+    assert rows(rec) == [expect("source-challenge", "K13", "decisions[0].evidence[0]: unknown key 'colour'",
                                 rec, "decisions")]
     entry = evidence_entry(provenance="Not A Name")
-    rec = parse("SC", decisions=[decision(evidence=[entry])])
-    assert rows(rec) == [expect("SC", "K13",
+    rec = parse("source-challenge", decisions=[decision(evidence=[entry])])
+    assert rows(rec) == [expect("source-challenge", "K13",
                                 "decisions[0].evidence[0].provenance: 'Not A Name' is not a name",
                                 rec, "decisions")]
-    rec = parse("SC", decisions=[decision(evidence=["a/path.md"])])
-    assert rows(rec) == [expect("SC", "K13", "decisions[0].evidence[0]: expected an evidence entry",
+    rec = parse("source-challenge", decisions=[decision(evidence=["a/path.md"])])
+    assert rows(rec) == [expect("source-challenge", "K13", "decisions[0].evidence[0]: expected an evidence entry",
                                 rec, "decisions")]
 
 
 # --- identity, lines and the fixture ------------------------------------------------------------
 
 def test_every_issue_names_the_record_and_the_top_level_key_line():
-    text = record_text("SC", "SC-0004", proposition="", basis=[basis_entry(role="foo")])
-    rec = parse_record(record_path("SC", "SC-0004"), text.encode("utf-8"))
+    text = record_text("source-challenge", "source-challenge-0004", proposition="", basis=[basis_entry(role="foo")])
+    rec = parse_record(record_path("source-challenge", "source-challenge-0004"), text.encode("utf-8"))
     issues = schema_issues(rec, staged=False)
     assert [i.code for i in issues] == ["K13", "K13"]
-    assert all(i.owner == "SC-0004" and i.path == record_path("SC", "SC-0004") for i in issues)
+    assert all(i.owner == "source-challenge-0004" and i.path == record_path("source-challenge", "source-challenge-0004") for i in issues)
     assert [i.line for i in issues] == [line_of(rec, "proposition"), line_of(rec, "basis")]
     assert issues[0].level == "error" and issues[0].is_error
 
@@ -748,7 +749,7 @@ def test_every_issue_names_the_record_and_the_top_level_key_line():
 JUNK = [None, "", "x", 0, 1, True, 1.5, [], [1], {}, {"a": 1}, date(2026, 9, 28)]
 
 
-@pytest.mark.parametrize("kind", ["SC", "CT", "CU"])
+@pytest.mark.parametrize("kind", ["source-challenge", "claim-task", "checked-use"])
 def test_no_junk_value_makes_schema_issues_raise(kind):
     """Anything the round-trip loader can produce is reported, never a traceback: K13 runs on a
     hand-edited tree, and every later unit calls this on every record."""
@@ -757,19 +758,19 @@ def test_no_junk_value_makes_schema_issues_raise(kind):
             for staged in (False, True):
                 schema_issues(parse(kind, **{key: junk}), staged=staged)
     for junk in JUNK:
-        nested = [parse("SC", source=source_ref(assertion=junk)),
-                  parse("SC", basis=[junk]),
-                  parse("SC", decisions=[junk]),
-                  parse("SC", decisions=[decision(evidence=[junk])]),
-                  parse("SC", decisions=[decision(evidence=junk)]),
-                  parse("CT", outcomes=junk),
-                  parse("CU", citation=junk)]
+        nested = [parse("source-challenge", source=source_ref(assertion=junk)),
+                  parse("source-challenge", basis=[junk]),
+                  parse("source-challenge", decisions=[junk]),
+                  parse("source-challenge", decisions=[decision(evidence=[junk])]),
+                  parse("source-challenge", decisions=[decision(evidence=junk)]),
+                  parse("claim-task", outcomes=junk),
+                  parse("checked-use", citation=junk)]
         for rec in nested:
             for staged in (False, True):
                 schema_issues(rec, staged=staged)
 
 
-@pytest.mark.parametrize("kind", ["SC", "CT", "CU"])
+@pytest.mark.parametrize("kind", ["source-challenge", "claim-task", "checked-use"])
 def test_the_conftest_builder_carries_exactly_the_kinds_keys(kind):
     """The fixture's records are the schema: a key the builder omits is a key nobody writes."""
     assert set(record_data(kind)) == set(KEYS[kind])

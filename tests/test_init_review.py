@@ -159,7 +159,7 @@ def test_a_populated_review_index_is_never_replaced(repo, capsys, no_hook_check)
     """A review index that is there, whatever it holds, is reported and left alone -- the freshly
     generated one for the records present, and a hand-edited one (SPEC §11 step 6; §12 group 9)."""
     assert kblam_init(capsys)[0] == 0
-    add_record(repo, "SC")
+    add_record(repo, "source-challenge")
     index = repo / REVIEW_INDEX
     populated = generate_review_index(load_view(KB(repo).cfg))
     assert populated != index.read_bytes()      # the index init wrote knows nothing of the new record
@@ -182,25 +182,25 @@ def test_a_populated_review_index_is_never_replaced(repo, capsys, no_hook_check)
 def test_the_registry_is_created_from_the_records_present(repo, capsys, no_hook_check):
     """SPEC §5.2.6 "Record-ID registry": created from the records present, with no report line of its own."""
     assert kblam_init(capsys)[0] == 0
-    add_record(repo, "SC")
-    add_record(repo, "CT")
+    add_record(repo, "source-challenge")
+    add_record(repo, "claim-task")
 
     code, out, _ = kblam_init(capsys, "--update")
 
     assert code == 0
-    assert (repo / REGISTRY).read_bytes() == (json.dumps(["CT-0001", "SC-0001"]) + "\n").encode("utf-8")
+    assert (repo / REGISTRY).read_bytes() == (json.dumps(["claim-task-0001", "source-challenge-0001"]) + "\n").encode("utf-8")
     assert REGISTRY not in out                                   # the As built order has no registry line
 
 
 def test_a_registry_already_there_is_left_as_it_is(repo, capsys, no_hook_check):
     """A registry is written only when there is none: the one a clone carries survives `init --update`."""
     assert kblam_init(capsys)[0] == 0
-    (repo / REGISTRY).write_bytes(b'["SC-0001"]\n')
-    add_record(repo, "CT")
+    (repo / REGISTRY).write_bytes(b'["source-challenge-0001"]\n')
+    add_record(repo, "claim-task")
 
     assert kblam_init(capsys, "--update")[0] == 0
 
-    assert (repo / REGISTRY).read_bytes() == b'["SC-0001"]\n'
+    assert (repo / REGISTRY).read_bytes() == b'["source-challenge-0001"]\n'
 
 
 # --- tree.hash ----------------------------------------------------------------------------------
@@ -356,7 +356,7 @@ def test_a_missing_tree_hash_with_a_failing_record_is_kept(repo, capsys, no_hook
     and says what to do. The exit status is unaffected."""
     assert kblam_init(capsys)[0] == 0
     ensure_kb(repo)
-    add_record(repo, "SC")
+    add_record(repo, "source-challenge")
     (repo / TREE_HASH).unlink()
 
     code, out, err = kblam_init(capsys, "--update")
@@ -391,7 +391,7 @@ def test_a_root_change_with_records_refuses_and_writes_nothing(repo, capsys, no_
     """SPEC §5.2.6: the root is fixed at init while a record exists; the refusal changes nothing."""
     assert kblam_init(capsys)[0] == 0
     kb = ensure_kb(repo)
-    record = add_record(repo, "SC")
+    record = add_record(repo, "source-challenge")
     set_review_root(repo, "research-notes")
     before = snapshot(repo)
 
@@ -410,7 +410,7 @@ def test_a_record_added_out_of_band_makes_the_format_2_tree_hash_stale(repo, cap
     kb = ensure_kb(repo)
     before = (repo / TREE_HASH).read_bytes()
     assert before == treehash.format_line(REVIEW, treehash.tree_digest_v2(load_view(kb.cfg))).encode("utf-8")
-    add_record(repo, "SC")                          # out of band: no put recorded it
+    add_record(repo, "source-challenge")                          # out of band: no put recorded it
 
     code, out, _ = kblam_init(capsys, "--update")
 

@@ -53,17 +53,40 @@ REVIEW_USE = ("Review records are written only by kblam: stage one with kblam ch
               "or kblam use review (or kblam challenge/task edit), edit it under .kblam/review-staging/, "
               "then kblam put it.")
 REVIEW_KIND_FOLDERS = ("challenges", "tasks", "uses")   # <review root>/<kind> (records.KINDS)
-REVIEW_RECORD_GLOBS = ("SC-*.yaml", "CT-*.yaml", "CU-*.yaml")
-REVIEW_RECORD_SAMPLES = ("SC-0001.yaml", "CT-0001.yaml", "CU-0001.yaml")  # a glob matching one names a record
+REVIEW_RECORD_KINDS = ("source-challenge", "claim-task", "checked-use")   # records.KINDS' ID prefixes
+REVIEW_RECORD_GLOBS = tuple(f"{kind}-*.yaml" for kind in REVIEW_RECORD_KINDS)
+REVIEW_RECORD_SAMPLES = tuple(f"{kind}-0001.yaml" for kind in REVIEW_RECORD_KINDS)  # one names a record
 # fnmatch folds case on the platforms whose paths do (`fnmatch.fnmatch`, not `fnmatchcase`); these
 # two match that, so a glob is judged the same way on Windows and on a case-sensitive filesystem.
 _CASE = re.IGNORECASE if os.path.normcase("A") == "a" else 0
-# A record file's name is (SC|CT|CU)-<4+ digits>.yaml. A glob names a record when the literal text
-# before its first glob character could begin such a name and the literal text after its last could
-# end one: REVIEW_RECORD_HEAD_RE matches every prefix, REVIEW_RECORD_TAIL_RE every suffix.
-REVIEW_RECORD_HEAD_RE = re.compile(r"(?:S|SC|SC-|C|CT|CT-|CU|CU-|(?:SC|CT|CU)-[0-9]{4,}\.yaml"
-                                   r"|(?:SC|CT|CU)-[0-9]*\.(?:y|ya|yam)?|(?:SC|CT|CU)-[0-9]*)?", _CASE)
-REVIEW_RECORD_TAIL_RE = re.compile(r"(?:l|ml|aml|yaml|(?:-|C-|SC-|T-|CT-|U-|CU-)?[0-9]*\.yaml)?", _CASE)
+
+
+def _leading_parts(word: str) -> str:
+    """A regex matching every leading part of `word` and of `word-`: the literal text a glob may spell
+    before its first glob character in the name of a record of `word`'s kind."""
+    pattern = ""
+    for char in reversed(word + "-"):
+        pattern = re.escape(char) + (f"(?:{pattern})?" if pattern else "")
+    return pattern
+
+
+def _trailing_parts(word: str) -> str:
+    """A regex matching every trailing part of `word-`, longest first: the literal text a glob may spell
+    after its last glob character, up to a record name's digits."""
+    return "|".join(re.escape(word[index:]) + "-" for index in range(len(word))) + "|-"
+
+
+# A record file's name is <kind>-<4+ digits>.yaml, for the three kinds above. A glob names a record
+# when the literal text before its first glob character could begin such a name and the literal text
+# after its last could end one: REVIEW_RECORD_HEAD_RE matches every prefix (a partial kind word, and
+# an incomplete dot and extension included), REVIEW_RECORD_TAIL_RE every suffix.
+_KINDS_PATTERN = "|".join(REVIEW_RECORD_KINDS)
+REVIEW_RECORD_HEAD_RE = re.compile(
+    rf"(?:{'|'.join(_leading_parts(kind) for kind in REVIEW_RECORD_KINDS)}"
+    rf"|(?:{_KINDS_PATTERN})-[0-9]*\.(?:y|ya|yam)?|(?:{_KINDS_PATTERN})-[0-9]{{4,}}\.yaml)?", _CASE)
+REVIEW_RECORD_TAIL_RE = re.compile(
+    rf"(?:l|ml|aml|yaml|(?:{'|'.join(_trailing_parts(kind) for kind in REVIEW_RECORD_KINDS)})?"
+    rf"[0-9]*\.yaml)?", _CASE)
 GLOB_CHARS = "*?["
 
 FILE_TOOLS = {"Write": "file_path", "Edit": "file_path", "NotebookEdit": "notebook_path"}  # no MultiEdit tool
@@ -193,17 +216,17 @@ def _glob_tokens(name: str) -> list[tuple[int, int]]:
 
 
 def _names_a_record(name: str) -> bool:
-    """`name` is a review record file's name, or a glob that could name one (SPEC §8: SC-*.yaml,
-    CT-*.yaml, CU-*.yaml)."""
+    """`name` is a review record file's name, or a glob that could name one (SPEC §8: source-challenge-*,
+    claim-task-* and checked-use-*.yaml)."""
     if any(fnmatch.fnmatch(name, pattern) for pattern in REVIEW_RECORD_GLOBS):
         return True
     if any(fnmatch.fnmatch(sample, name) for sample in REVIEW_RECORD_SAMPLES):
         return True
-    # A glob that does not begin with a literal `SC-`/`CT-`/`CU-` (`C?-0010.yaml`, `[S]C-0010.yaml`,
-    # `*0010*`): the samples above miss it, so deny when the literal text before its first glob token
-    # could begin a record name and the literal text after its last could end one (the registry
-    # backstop is SPEC 1155-1156). Deliberately over-broad: it ignores the text between the tokens,
-    # and so denies some globs that name no record.
+    # A glob that does not begin with a literal kind (`c?-0010.yaml`, `[s]ource-0010.yaml`, `*0010*`):
+    # the samples above miss it, so deny when the literal text before its first glob token could begin a
+    # record name and the literal text after its last could end one (the registry backstop is SPEC
+    # 1155-1156). Deliberately over-broad: it ignores the text between the tokens, and so denies some
+    # globs that name no record.
     spans = _glob_tokens(name)
     if not spans:
         return False

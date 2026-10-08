@@ -139,7 +139,7 @@ def _confirmed(view, reader) -> dict[str, list[ChallengeInfo]]:
     """The confirmed challenges by their source's canonical key, in record order."""
     by_key: dict[str, list[ChallengeInfo]] = {}
     for rec in view.records:
-        if rec.kind != "SC" or not isinstance(rec.data, dict):
+        if rec.kind != "source-challenge" or not isinstance(rec.data, dict):
             continue
         info = k13.challenge_info(view, reader, rec)
         if info.confirmed and info.key is not None:
@@ -204,13 +204,14 @@ def _relation(info: ChallengeInfo, match: ExcerptMatch) -> str | None:
 
 
 class _CurrentUses:
-    """Whether a current use covers an excerpt: a CU whose challenge, finding and citation.ordinal name
-    it and that k13.use_current accepts. Each use is judged once. `covering` gives the use, `covers`
+    """Whether a current use covers an excerpt: a checked use whose challenge, finding and
+    citation.ordinal name it and that k13.use_current accepts. Each use is judged once. `covering`
+    gives the use, `covers`
     the yes or no k14 asks for."""
 
     def __init__(self, view, reader) -> None:
         self.view, self.reader = view, reader
-        self._uses = [rec for rec in view.records if rec.kind == "CU" and isinstance(rec.data, dict)]
+        self._uses = [rec for rec in view.records if rec.kind == "checked-use" and isinstance(rec.data, dict)]
         self._current: dict[str, bool] = {}
 
     def _names(self, rec: records.Record, hit: _Hit) -> bool:

@@ -25,12 +25,12 @@ frozen_today = m.frozen_today
 
 CHALLENGES = "research-review/challenges"
 REVIEW_INDEX = "research-review/INDEX.md"
-STAGE = ".kblam/review-staging/SC-0001.yaml"
-RECEIPT = ".kblam/review-receipts/SC-0001.json"
-EDIT_BASE = ".kblam/review-receipts/SC-0001.edit-base.json"
+STAGE = ".kblam/review-staging/source-challenge-0001.yaml"
+RECEIPT = ".kblam/review-receipts/source-challenge-0001.json"
+EDIT_BASE = ".kblam/review-receipts/source-challenge-0001.edit-base.json"
 REGISTRY = ".kblam/review-ids"
 TREE_HASH = ".kblam/tree.hash"
-RECORD = f"{CHALLENGES}/SC-0001.yaml"
+RECORD = f"{CHALLENGES}/source-challenge-0001.yaml"
 POINTER = "Load the kblam-write skill for how to fix this."
 ZERO64 = "0" * 64
 
@@ -128,8 +128,8 @@ def _retire(rec_id: str, path: str = m.TRACE) -> str:
 
 def _stale_warning(rec_id: str, label: str = "") -> str:
     """The pattern of a K13 stale-reference warning about `rec_id`'s record file, as validate prints it:
-    "K13 warning research-review/challenges/SC-0001.yaml:<line>: [label: ]the source changed since
-    SC-0001 was written; restore <path> to the bytes SC-0001 was written against, or retire the record
+    "K13 warning research-review/challenges/source-challenge-0001.yaml:<line>: [label: ]the source changed since
+    source-challenge-0001 was written; restore <path> to the bytes source-challenge-0001 was written against, or retire the record
     and file a new one (...)"."""
     return (rf"K13 warning research-review/challenges/{rec_id}\.yaml:\d+: {re.escape(label)}the source "
             rf"changed since {rec_id} was written" + re.escape(_retire(rec_id)))
@@ -140,7 +140,7 @@ def _stale_warning(rec_id: str, label: str = "") -> str:
 
 def test_a_challenge_captures_the_assertion_lines_exactly(kb, source_repo):
     """Start: no records; resources/mx-docs/notes/full-scan-trace.md is committed (LF) and clean.
-    `kblam challenge new <trace> --lines 2-3 --by reviewer-a` exits 0 and stages SC-0001.yaml whose
+    `kblam challenge new <trace> --lines 2-3 --by reviewer-a` exits 0 and stages source-challenge-0001.yaml whose
     assertion is exactly lines 2-3 joined, with no final newline, the sha256 of that text and
     occurrence 1; the author's `kblam put` exits 0 with no diagnostic. Staging changes only the staged
     file and its receipt; the put changes exactly the record, research-review/INDEX.md,
@@ -188,7 +188,7 @@ def test_a_source_edited_above_the_assertion_goes_stale_and_is_never_re_targeted
     file with other bytes than HEAD's blob, so `challenge new --lines 3-3 --by reviewer-a` records a
     provisional source (repo, commit and blob all null) with the working file's sha256, and the
     author's `kblam put` exits 0. A second edit above the assertion then leaves that reference stale:
-    `kblam validate` exits 0 with one K13 warning about the source, "the source changed since SC-0001
+    `kblam validate` exits 0 with one K13 warning about the source, "the source changed since source-challenge-0001
     was written", and one for the basis entry read with it, and changes no file. The record's bytes,
     its assertion and its source sha256 are exactly as written — kblam never re-targets a reference at
     the bytes it now finds — and `challenge show` reads "state: stale". Source repository: unchanged.
@@ -241,7 +241,7 @@ def test_a_source_edited_above_the_assertion_goes_stale_and_is_never_re_targeted
 def test_a_source_edited_above_the_assertion_before_the_put_is_refused(kb, source_repo):
     """Start: the trace is committed and clean; an uncommitted edit of its header makes `challenge new
     --lines 3-3 --by reviewer-a` record a provisional source with those bytes, and the author fills and
-    stages SC-0001. A second uncommitted edit above the assertion follows, so the bytes `challenge new`
+    stages source-challenge-0001. A second uncommitted edit above the assertion follows, so the bytes `challenge new`
     captured are gone: `kblam put` exits 1 with "the source changed since kblam challenge new; run it
     again"; nothing is installed, the staged file stands, no other file changes, and `kblam validate`
     exits 0 ("OK (0 findings)"). The source repository is unchanged. A2."""
@@ -271,7 +271,7 @@ def test_a_source_edited_above_the_assertion_before_the_put_is_refused(kb, sourc
 
 def test_a_pinned_confirmed_challenge_is_evaluated_at_its_blob_after_a_new_commit(kb, source_repo):
     """Start: the trace is committed and clean, so `challenge new --lines 3-3 --by reviewer-a` pins the
-    source at HEAD's commit and blob, and reviewer-b confirms SC-0001 (both commands exit 0). A later
+    source at HEAD's commit and blob, and reviewer-b confirms source-challenge-0001 (both commands exit 0). A later
     commit rewrites the trace so the assertion text is gone from the working tree; `kblam validate`
     still exits 0 with no diagnostic at all, because the assertion and the K13 pin checks are evaluated
     at the pinned blob, and `review list` still calls the record current. `challenge show` reads
@@ -316,7 +316,7 @@ def test_a_pinned_confirmed_challenge_is_evaluated_at_its_blob_after_a_new_commi
 
     with _changes(kb, set(), "review list"):
         _ok(m.kblam(kb, "review", "list"), "review list",
-            f"SC-0001 challenge confirmed {m.expect(kb, sc)[:12]} {m.TRACE}:3-3 current\n")
+            f"source-challenge-0001 challenge confirmed {m.expect(kb, sc)[:12]} {m.TRACE}:3-3 current\n")
     assert source_repo.snapshot() == read_before
 
 
@@ -327,7 +327,7 @@ def test_a_first_put_refuses_an_assertion_narrowed_to_text_that_occurs_twice(kb,
     """Start: notes/repeats.md holds the same sentence on lines 1 and 2, committed and clean, and
     `challenge new --lines 1-2 --by reviewer-a` is accepted (the captured two-line block matches once).
     The author then narrows `text` to the repeated sentence, which occurs twice within lines 1-2:
-    `kblam put` exits 1 with "SC-0001: the assertion text occurs 2 times within lines 1-2; narrow it to
+    `kblam put` exits 1 with "source-challenge-0001: the assertion text occurs 2 times within lines 1-2; narrow it to
     one; widen or narrow the assertion's lines and put it again". Nothing is installed, the staged file
     stands, no other file changes, `kblam validate` then exits 0 ("OK (0 findings)"), and the source
     repository is unchanged. A2."""
@@ -344,7 +344,7 @@ def test_a_first_put_refuses_an_assertion_narrowed_to_text_that_occurs_twice(kb,
 
     assert run.code == 1 and run.out == ""
     assert run.err == (
-        f"kblam put: SC-0001: the assertion text occurs 2 times within lines 1-2; narrow it to one; "
+        f"kblam put: source-challenge-0001: the assertion text occurs 2 times within lines 1-2; narrow it to one; "
         f"widen or narrow the assertion's lines and put it again. {POINTER}\n")
     assert staged.path.is_file() and not m.record_path(kb, staged.id).exists()
     assert m.registry(kb) is None
@@ -415,7 +415,7 @@ def test_only_the_occurrence_inside_the_lines_is_the_assertion(kb, source_repo):
 def test_narrowing_the_assertion_before_the_first_put_is_accepted(kb, source_repo):
     """Start: the trace is committed and clean; `challenge new --lines 2-4 --by reviewer-a` captures
     lines 2-4. The author narrows `lines` to 3-3 and `text` to line 3, both inside what was captured:
-    `kblam put` exits 0 with no diagnostic, and the installed SC-0001 has that assertion — lines 3-3,
+    `kblam put` exits 0 with no diagnostic, and the installed source-challenge-0001 has that assertion — lines 3-3,
     the narrowed text, its sha256 and occurrence 1 — with the source pinned at HEAD. The put changes
     exactly the record, research-review/INDEX.md, .kblam/review-ids and .kblam/tree.hash, and removes
     the staged file; `kblam validate` exits 0 afterwards, and the source repository is unchanged. A2."""
@@ -438,11 +438,11 @@ def test_narrowing_the_assertion_before_the_first_put_is_accepted(kb, source_rep
 
 
 def test_narrowing_the_assertion_after_the_first_put_is_refused(kb, source_repo):
-    """Start: SC-0001 is installed by a first put and still open, pinned at HEAD. `kblam challenge edit
-    SC-0001` exits 0 and stages a copy with its edit-base receipt; the author narrows the assertion's
-    text in that copy. `kblam put` exits 1 with "SC-0001: source is not a free field, so it must be put
+    """Start: source-challenge-0001 is installed by a first put and still open, pinned at HEAD. `kblam challenge edit
+    source-challenge-0001` exits 0 and stages a copy with its edit-base receipt; the author narrows the assertion's
+    text in that copy. `kblam put` exits 1 with "source-challenge-0001: source is not a free field, so it must be put
     as installed. Only proposition, scope, classification, basis, usable, limits, linked_findings change
-    through an edit; run kblam challenge edit SC-0001 again": the assertion never changes after the
+    through an edit; run kblam challenge edit source-challenge-0001 again": the assertion never changes after the
     first put. No file changes, the staged copy stands, the installed record is byte-identical, and
     `kblam validate` still exits 0. The source repository is unchanged. A2."""
     source_before = source_repo.snapshot()
@@ -457,7 +457,7 @@ def test_narrowing_the_assertion_after_the_first_put_is_refused(kb, source_repo)
         edit = _ok(m.kblam(kb, "challenge", "edit", staged.id), "challenge edit",
                    f"{kb.root / Path(STAGE)}\n")
     copy = Path(edit.out.strip())
-    assert copy == kb.root / ".kblam" / "review-staging" / "SC-0001.yaml"
+    assert copy == kb.root / ".kblam" / "review-staging" / "source-challenge-0001.yaml"
     _rewrite_assertion(kb, copy, text="bytes 0x3A 0x3B; the two bytes are equal.")
     read_before = source_repo.snapshot()
 
@@ -466,9 +466,9 @@ def test_narrowing_the_assertion_after_the_first_put_is_refused(kb, source_repo)
 
     assert run.code == 1 and run.out == ""
     assert run.err == (
-        "kblam put: SC-0001: source is not a free field, so it must be put as installed. Only "
+        "kblam put: source-challenge-0001: source is not a free field, so it must be put as installed. Only "
         "proposition, scope, classification, basis, usable, limits, linked_findings change through an "
-        f"edit; run kblam challenge edit SC-0001 again. {POINTER}\n")
+        f"edit; run kblam challenge edit source-challenge-0001 again. {POINTER}\n")
     assert copy.is_file()
     assert m.record_path(kb, staged.id).read_bytes() == installed_before
     assert source_repo.snapshot() == read_before
@@ -483,7 +483,7 @@ def test_narrowing_the_assertion_after_the_first_put_is_refused(kb, source_repo)
 def test_a_first_put_refuses_a_wrong_assertion_sha256(kb, source_repo):
     """Start: the trace is committed and clean; `challenge new --lines 3-3 --by reviewer-a` captured the
     assertion and its text's sha256, and the author fills the record but replaces that sha256 with a
-    non-null wrong value. `kblam put` exits 1 with "SC-0001: assertion.sha256 is 0…0, but the
+    non-null wrong value. `kblam put` exits 1 with "source-challenge-0001: assertion.sha256 is 0…0, but the
     assertion's text hashes to <its real sha256>; set it to null and put it again, and put writes it".
     Nothing is installed, the staged file stands, no other file changes, `kblam validate` then exits 0
     ("OK (0 findings)"), and the source repository is unchanged. A2."""
@@ -499,7 +499,7 @@ def test_a_first_put_refuses_a_wrong_assertion_sha256(kb, source_repo):
 
     assert run.code == 1 and run.out == ""
     assert run.err == (
-        f"kblam put: SC-0001: assertion.sha256 is {ZERO64}, but the assertion's text hashes to "
+        f"kblam put: source-challenge-0001: assertion.sha256 is {ZERO64}, but the assertion's text hashes to "
         f"{_sha256(m.LINE3)}; set it to null and put it again, and put writes it. {POINTER}\n")
     assert staged.path.is_file() and not m.record_path(kb, staged.id).exists()
     assert m.registry(kb) is None

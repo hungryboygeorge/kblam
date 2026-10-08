@@ -62,10 +62,10 @@ def test_recover_regenerates_first_registers_the_records_that_exist_and_restores
     kb.add("F-0001", "sensor", CLAIM_A)
     kb.write("research-review/INDEX.md", "# review index\n")
     kb.write("research-review/challenges/notes.md", "not a record\n")
-    kb.write("research-review/challenges/SC-0001.yaml", record_text("SC"))
+    kb.write("research-review/challenges/source-challenge-0001.yaml", record_text("source-challenge"))
     recorded = tree_hash_path(kb).read_text(encoding="utf-8")
-    paths = ["research-review/challenges/SC-0001.yaml",    # a record, on disk
-             "research-review/tasks/CT-0001.yaml",         # a record path the write never reached
+    paths = ["research-review/challenges/source-challenge-0001.yaml",    # a record, on disk
+             "research-review/tasks/claim-task-0001.yaml",         # a record path the write never reached
              "research-review/INDEX.md",                   # the review root's index
              "research-review/challenges/notes.md",        # a review file that is not a record
              "findings/calibration/F-0001-sensor.md"]      # a findings file
@@ -76,23 +76,23 @@ def test_recover_regenerates_first_registers_the_records_that_exist_and_restores
     assert recover(kb.cfg, lambda: calls.append("regenerate")) == MESSAGE
 
     assert calls == ["regenerate"]
-    assert kb.cfg.review_ids_path.read_bytes() == b'["SC-0001"]\n'
+    assert kb.cfg.review_ids_path.read_bytes() == b'["source-challenge-0001"]\n'
     assert not kb.cfg.journal_path.exists()
     assert tree_hash_path(kb).read_text(encoding="utf-8") == recorded
 
 
 def test_recover_unions_the_found_ids_with_a_registry_that_exists(kb):
-    write_ids(kb.cfg, {"CT-0002"})
-    kb.write("research-review/uses/CU-0003.yaml", record_text("CU"))
-    begin(kb.cfg, COMMAND, ["research-review/uses/CU-0003.yaml"])
+    write_ids(kb.cfg, {"claim-task-0002"})
+    kb.write("research-review/uses/checked-use-0003.yaml", record_text("checked-use"))
+    begin(kb.cfg, COMMAND, ["research-review/uses/checked-use-0003.yaml"])
     assert recover(kb.cfg, lambda: None) == MESSAGE
-    assert read_ids(kb.cfg) == {"CT-0002", "CU-0003"}
-    assert kb.cfg.review_ids_path.read_bytes() == b'["CT-0002", "CU-0003"]\n'
+    assert read_ids(kb.cfg) == {"claim-task-0002", "checked-use-0003"}
+    assert kb.cfg.review_ids_path.read_bytes() == b'["checked-use-0003", "claim-task-0002"]\n'
 
 
 def test_recover_creates_no_registry_when_no_listed_record_exists(kb):
     kb.write("research-review/INDEX.md", "# review index\n")
-    begin(kb.cfg, COMMAND, ["research-review/tasks/CT-0001.yaml", "research-review/INDEX.md"])
+    begin(kb.cfg, COMMAND, ["research-review/tasks/claim-task-0001.yaml", "research-review/INDEX.md"])
     assert recover(kb.cfg, lambda: None) == MESSAGE
     assert not kb.cfg.review_ids_path.exists()
 

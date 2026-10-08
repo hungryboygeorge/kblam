@@ -23,8 +23,8 @@ frozen_today = m.frozen_today
 
 U23K_REVIEW = "research-review"
 U23K_FINDING = "findings/calibration/F-0001-ratio.md"
-U23K_SC = "research-review/challenges/SC-0001.yaml"
-U23K_CT = "research-review/tasks/CT-0001.yaml"
+U23K_SC = "research-review/challenges/source-challenge-0001.yaml"
+U23K_CT = "research-review/tasks/claim-task-0001.yaml"
 U23K_INDEX = "research-review/INDEX.md"
 U23K_QUESTION = "Does an independent measurement establish the claim?"
 U23K_POINTER = "Load the kblam-write skill for how to fix this."
@@ -63,12 +63,12 @@ def u23k_fill(path, fields):
 
 
 def u23k_challenge(kb, source_repo, *, narrow=False):
-    staged = kb.root / ".kblam/review-staging/SC-0001.yaml"
+    staged = kb.root / ".kblam/review-staging/source-challenge-0001.yaml"
     u23k_run(kb, source_repo,
              ("challenge", "new", m.TRACE, "--lines", "3-3", "--by", "reviewer-a"),
-             paths={".kblam/review-staging/SC-0001.yaml", ".kblam/review-receipts/SC-0001.json"},
+             paths={".kblam/review-staging/source-challenge-0001.yaml", ".kblam/review-receipts/source-challenge-0001.json"},
              out=f"{staged}\n")
-    defaults = record_data("SC")
+    defaults = record_data("source-challenge")
     fields = {key: defaults[key] for key in
               ("proposition", "scope", "classification", "basis", "usable", "limits")}
     fields["basis"][0]["sha256"] = None
@@ -79,16 +79,16 @@ def u23k_challenge(kb, source_repo, *, narrow=False):
         staged.write_bytes(records.dump(data))
     u23k_run(kb, source_repo, ("put", staged),
              paths={U23K_SC, U23K_INDEX, ".kblam/review-ids", ".kblam/tree.hash",
-                    ".kblam/review-staging/SC-0001.yaml"},
-             out=f"kblam put: SC-0001 -> {U23K_SC}\n")
+                    ".kblam/review-staging/source-challenge-0001.yaml"},
+             out=f"kblam put: source-challenge-0001 -> {U23K_SC}\n")
 
 
 def u23k_confirm(kb, source_repo, *, issues="", affected=False):
-    digest = m.expect(kb, "SC-0001")
+    digest = m.expect(kb, "source-challenge-0001")
     text = ("" if affected else issues)
-    text += f"kblam review decide: SC-0001 is now confirmed (subject digest {digest[:12]})\n"
+    text += f"kblam review decide: source-challenge-0001 is now confirmed (subject digest {digest[:12]})\n"
     if affected:
-        text += ("kblam review decide: SC-0001 now affects F-0001; run kblam challenge uses SC-0001 "
+        text += ("kblam review decide: source-challenge-0001 now affects F-0001; run kblam challenge uses source-challenge-0001 "
                  "for each excerpt and the command that fixes it\n")
     if affected:
         text += issues
@@ -96,25 +96,25 @@ def u23k_confirm(kb, source_repo, *, issues="", affected=False):
         text += ("kblam review decide: done, but kblam validate still fails (1 error(s) listed above, "
                  "owned by other findings or records)\n")
     u23k_run(kb, source_repo,
-             ("review", "decide", "SC-0001", "--status", "confirmed", "--by", "reviewer-b",
+             ("review", "decide", "source-challenge-0001", "--status", "confirmed", "--by", "reviewer-b",
               "--reason", "read the printed byte values independently", "--expect", digest),
              paths={U23K_SC, U23K_INDEX, ".kblam/tree.hash"}, out=text)
 
 
 def u23k_task(kb, source_repo):
-    staged = kb.root / ".kblam/review-staging/CT-0001.yaml"
+    staged = kb.root / ".kblam/review-staging/claim-task-0001.yaml"
     u23k_run(kb, source_repo,
              ("task", "new", "F-0001", "--kind", "replication", "--by", "researcher-a",
               "--proponent", "researcher-a"),
-             paths={".kblam/review-staging/CT-0001.yaml", ".kblam/review-receipts/CT-0001.json"},
+             paths={".kblam/review-staging/claim-task-0001.yaml", ".kblam/review-receipts/claim-task-0001.json"},
              out=f"{staged}\n")
-    defaults = record_data("CT")
+    defaults = record_data("claim-task")
     u23k_fill(staged, {key: defaults[key] for key in
                       ("question", "method", "outcomes", "controls", "stop", "expected_evidence")})
     u23k_run(kb, source_repo, ("put", staged),
              paths={U23K_CT, U23K_INDEX, ".kblam/review-ids", ".kblam/tree.hash",
-                    ".kblam/review-staging/CT-0001.yaml"},
-             out=f"kblam put: CT-0001 -> {U23K_CT}\n")
+                    ".kblam/review-staging/claim-task-0001.yaml"},
+             out=f"kblam put: claim-task-0001 -> {U23K_CT}\n")
 
 
 def u23k_hook(kb, source_repo, monkeypatch, event, payload, *, out="", paths=()):
@@ -124,14 +124,14 @@ def u23k_hook(kb, source_repo, monkeypatch, event, payload, *, out="", paths=())
 
 def u23k_warning(path=U23K_FINDING):
     return (f"K14 warning {path}:15: the cited range {m.TRACE}:3-3 overlaps lines 3-3 of "
-            "SC-0001's assertion without quoting it; check that the excerpt does not rely on the "
-            "challenged text (kblam challenge uses SC-0001 lists what SC-0001 affects)\n")
+            "source-challenge-0001's assertion without quoting it; check that the excerpt does not rely on the "
+            "challenged text (kblam challenge uses source-challenge-0001 lists what source-challenge-0001 affects)\n")
 
 
 def u23k_k14(source_repo):
-    return (f"K14 {U23K_FINDING}:15: SC-0001 challenges this quoted assertion at "
+    return (f"K14 {U23K_FINDING}:15: source-challenge-0001 challenges this quoted assertion at "
             f"{m.TRACE}@{source_repo.blob(m.TRACE_PATH)[:12]}:3-3; edit the finding or have this use "
-            "reviewed (kblam use review SC-0001 F-0001 1 --by NAME --proponent NAME). "
+            "reviewed (kblam use review source-challenge-0001 F-0001 1 --by NAME --proponent NAME). "
             "K10 is checked separately.\n")
 
 
@@ -139,10 +139,10 @@ def test_warnings_only_validate_finding_put_and_stop_exit_zero(kb, source_repo, 
     """Acceptance 4, 6: F-0001 quotes raw row-102 bytes, not the challenged equality.
 
     Start: no records, committed source. challenge new --by reviewer-a (0, staged path):
-    {.kblam/review-staging/SC-0001.yaml, .kblam/review-receipts/SC-0001.json}; put SC (0,
-    installed path): {research-review/challenges/SC-0001.yaml, research-review/INDEX.md,
-    .kblam/review-ids, .kblam/tree.hash, .kblam/review-staging/SC-0001.yaml}; decide confirmed
-    --by reviewer-b (0, confirmed + K14 range warning): {research-review/challenges/SC-0001.yaml,
+    {.kblam/review-staging/source-challenge-0001.yaml, .kblam/review-receipts/source-challenge-0001.json}; put SC (0,
+    installed path): {research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md,
+    .kblam/review-ids, .kblam/tree.hash, .kblam/review-staging/source-challenge-0001.yaml}; decide confirmed
+    --by reviewer-b (0, confirmed + K14 range warning): {research-review/challenges/source-challenge-0001.yaml,
     research-review/INDEX.md, .kblam/tree.hash}. validate (0, K14 warning and OK): none.
     edit F-0001 (no --by, 0, staged path): {.kblam/staging/F-0001-ratio.md,
     .kblam/staging/F-0001.edit-base.json}; finding put (no --by, 0, installed path + K14 warning + disabled Jev):
@@ -185,13 +185,13 @@ def test_warnings_only_validate_finding_put_and_stop_exit_zero(kb, source_repo, 
 
 
 def test_pending_only_validate_record_and_finding_put_and_stop_exit_zero(kb, source_repo, monkeypatch):
-    """Acceptance 4, 6: a well-formed open CT-0001 binds F-0001, source committed.
+    """Acceptance 4, 6: a well-formed open claim-task-0001 binds F-0001, source committed.
 
     task new --by researcher-a --proponent researcher-a (0, path):
-    {.kblam/review-staging/CT-0001.yaml, .kblam/review-receipts/CT-0001.json}; put CT (0,
-    installed path): {research-review/tasks/CT-0001.yaml, research-review/INDEX.md,
-    .kblam/review-ids, .kblam/tree.hash, .kblam/review-staging/CT-0001.yaml}.
-    validate (no --by, 0, CT-0001 open replication and OK; 1 pending task): none.
+    {.kblam/review-staging/claim-task-0001.yaml, .kblam/review-receipts/claim-task-0001.json}; put CT (0,
+    installed path): {research-review/tasks/claim-task-0001.yaml, research-review/INDEX.md,
+    .kblam/review-ids, .kblam/tree.hash, .kblam/review-staging/claim-task-0001.yaml}.
+    validate (no --by, 0, claim-task-0001 open replication and OK; 1 pending task): none.
     new calibration 'Independent tray contact' (no --by, 0, staged path):
     {.kblam/staging/F-0002-independent-tray-contact.md}; put finding (no --by, 0,
     installed path + disabled Jev): {findings/calibration/F-0002-independent-tray-contact.md,
@@ -204,7 +204,7 @@ def test_pending_only_validate_record_and_finding_put_and_stop_exit_zero(kb, sou
     kb.add("F-0001", "ratio", m.CLAIM)
     m.accept_tree(kb)
     u23k_task(kb, source_repo)
-    pending = f"CT-0001 open replication of F-0001: {U23K_QUESTION}\n"
+    pending = f"claim-task-0001 open replication of F-0001: {U23K_QUESTION}\n"
     u23k_run(kb, source_repo, ("validate",),
              out=pending + "kblam validate: OK (1 findings); 1 pending task(s)\n")
     staged = kb.root / ".kblam/staging/F-0002-independent-tray-contact.md"
@@ -235,12 +235,12 @@ def test_matching_tree_hash_after_confirmation_leaves_stop_silent_while_validate
         kb, source_repo, monkeypatch):
     """Acceptance 4, 6: installed F-0001 quotes line 3 of the committed source, no use.
 
-    challenge new --by reviewer-a (0, path): {.kblam/review-staging/SC-0001.yaml,
-    .kblam/review-receipts/SC-0001.json}; put open SC (0, installed path):
-    {research-review/challenges/SC-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
-    .kblam/tree.hash, .kblam/review-staging/SC-0001.yaml}; decide confirmed --by reviewer-b
+    challenge new --by reviewer-a (0, path): {.kblam/review-staging/source-challenge-0001.yaml,
+    .kblam/review-receipts/source-challenge-0001.json}; put open SC (0, installed path):
+    {research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
+    .kblam/tree.hash, .kblam/review-staging/source-challenge-0001.yaml}; decide confirmed --by reviewer-b
     (0, confirmed, now affects F-0001, K14 quoted assertion, validate still fails):
-    {research-review/challenges/SC-0001.yaml, research-review/INDEX.md, .kblam/tree.hash}.
+    {research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md, .kblam/tree.hash}.
     hook Stop and SubagentStop (no --by, 0, silent): each none, since kblam recorded the tree.
     validate afterwards (no --by, 1, K14 challenges this quoted assertion and 1 error): none.
     Every call preserves the source's bytes, HEAD, index and refs.
@@ -265,13 +265,13 @@ def u23k_pre_commit(kb):
 
 def test_source_change_outside_both_roots_fails_validate_and_pre_commit_but_not_stop(
         kb, source_repo, monkeypatch):
-    """Acceptance 4, 6: confirmed SC-0001 at pinned line 3, F-0001 quotes unaffected line 2.
+    """Acceptance 4, 6: confirmed source-challenge-0001 at pinned line 3, F-0001 quotes unaffected line 2.
 
-    challenge new --by reviewer-a (0, path): {.kblam/review-staging/SC-0001.yaml,
-    .kblam/review-receipts/SC-0001.json}; put open SC (0, installed path):
-    {research-review/challenges/SC-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
-    .kblam/tree.hash, .kblam/review-staging/SC-0001.yaml}; decide confirmed --by reviewer-b
-    (0, confirmed): {research-review/challenges/SC-0001.yaml, research-review/INDEX.md,
+    challenge new --by reviewer-a (0, path): {.kblam/review-staging/source-challenge-0001.yaml,
+    .kblam/review-receipts/source-challenge-0001.json}; put open SC (0, installed path):
+    {research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
+    .kblam/tree.hash, .kblam/review-staging/source-challenge-0001.yaml}; decide confirmed --by reviewer-b
+    (0, confirmed): {research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md,
     .kblam/tree.hash}; validate before source change (no --by, 0, OK): none;
     real pre-commit before source change (no --by, 0, the untracked-evidence warning for
     evidence/ only, since the trace lies in the nested source repository, and OK, empty stderr): none.
@@ -317,16 +317,16 @@ def test_source_change_outside_both_roots_fails_validate_and_pre_commit_but_not_
 
 
 def test_review_index_and_validate_are_byte_identical_across_runs(kb, source_repo):
-    """Acceptance 4, 6: open SC-0001 with committed source and open CT-0001 bound to F-0001.
+    """Acceptance 4, 6: open source-challenge-0001 with committed source and open claim-task-0001 bound to F-0001.
 
-    challenge new --by reviewer-a (0, path): {.kblam/review-staging/SC-0001.yaml,
-    .kblam/review-receipts/SC-0001.json}; put SC (0, installed path):
-    {research-review/challenges/SC-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
-    .kblam/tree.hash, .kblam/review-staging/SC-0001.yaml}; task new --by researcher-a
-    --proponent researcher-a (0, path): {.kblam/review-staging/CT-0001.yaml,
-    .kblam/review-receipts/CT-0001.json}; put CT (0, installed path):
-    {research-review/tasks/CT-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
-    .kblam/tree.hash, .kblam/review-staging/CT-0001.yaml}. Three review index calls (no --by,
+    challenge new --by reviewer-a (0, path): {.kblam/review-staging/source-challenge-0001.yaml,
+    .kblam/review-receipts/source-challenge-0001.json}; put SC (0, installed path):
+    {research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
+    .kblam/tree.hash, .kblam/review-staging/source-challenge-0001.yaml}; task new --by researcher-a
+    --proponent researcher-a (0, path): {.kblam/review-staging/claim-task-0001.yaml,
+    .kblam/review-receipts/claim-task-0001.json}; put CT (0, installed path):
+    {research-review/tasks/claim-task-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
+    .kblam/tree.hash, .kblam/review-staging/claim-task-0001.yaml}. Three review index calls (no --by,
     0, generated path): each none, including tree.hash; index bytes equal a fixed literal.
     Three validate calls afterwards (no --by, 0, pending CT and OK): each none, identical UTF-8
     stdout and empty stderr. All calls preserve committed source bytes and Git state.
@@ -341,14 +341,14 @@ def test_review_index_and_validate_are_byte_identical_across_runs(kb, source_rep
         f"### {m.TRACE}\n\n"
         "| ID | Lines | Classification | Status | Findings |\n"
         "|---|---|---|---|---|\n"
-        "| SC-0001 | 3-3 | contradicted | open |  |\n\n"
+        "| source-challenge-0001 | 3-3 | contradicted | open |  |\n\n"
         "## Tasks\n\n"
         "| ID | Finding | Kind | Status | Question |\n"
         "|---|---|---|---|---|\n"
-        f"| CT-0001 | F-0001 | replication | open | {U23K_QUESTION} |\n\n"
+        f"| claim-task-0001 | F-0001 | replication | open | {U23K_QUESTION} |\n\n"
         "## Uses\n\nNone.\n"
     ).encode()
-    expected = (f"CT-0001 open replication of F-0001: {U23K_QUESTION}\n"
+    expected = (f"claim-task-0001 open replication of F-0001: {U23K_QUESTION}\n"
                 "kblam validate: OK (1 findings); 1 pending task(s)\n")
     outputs = []
     for _ in range(3):
@@ -398,8 +398,8 @@ def test_finding_jev_rejection_keeps_exit_four_and_roots_unchanged(u23k_jev_kb, 
 @pytest.mark.parametrize("tool,key", [("Write", "file_path"), ("Edit", "file_path"),
                                      ("NotebookEdit", "notebook_path")])
 @pytest.mark.parametrize("root,target,tail", [
-    (U23K_REVIEW, "research-review/challenges/SC-0001.yaml", U23K_REVIEW_TAIL),
-    (".kblam", ".kblam/review-receipts/SC-0001.json", U23K_STATE_TAIL),
+    (U23K_REVIEW, "research-review/challenges/source-challenge-0001.yaml", U23K_REVIEW_TAIL),
+    (".kblam", ".kblam/review-receipts/source-challenge-0001.json", U23K_STATE_TAIL),
 ])
 def test_file_hooks_deny_review_and_receipt_writes(kb, source_repo, monkeypatch, tool, key,
                                                 root, target, tail):
@@ -423,22 +423,22 @@ def test_file_hooks_deny_review_and_receipt_writes(kb, source_repo, monkeypatch,
      "writing research-review/INDEX.md", U23K_REVIEW_TAIL),
     ("PowerShell", "Set-Content research-review/INDEX.md x", U23K_REVIEW,
      "writing research-review/INDEX.md", U23K_REVIEW_TAIL),
-    ("Bash", "rm research-review/challenges/SC-0001.yaml", U23K_REVIEW,
-     "removing research-review/challenges/SC-0001.yaml", U23K_REVIEW_TAIL),
-    ("PowerShell", "Remove-Item research-review/tasks/CT-0001.yaml", U23K_REVIEW,
-     "removing research-review/tasks/CT-0001.yaml", U23K_REVIEW_TAIL),
+    ("Bash", "rm research-review/challenges/source-challenge-0001.yaml", U23K_REVIEW,
+     "removing research-review/challenges/source-challenge-0001.yaml", U23K_REVIEW_TAIL),
+    ("PowerShell", "Remove-Item research-review/tasks/claim-task-0001.yaml", U23K_REVIEW,
+     "removing research-review/tasks/claim-task-0001.yaml", U23K_REVIEW_TAIL),
     ("Bash", "rmdir research-review/uses", U23K_REVIEW,
      "removing research-review/uses", U23K_REVIEW_TAIL),
     ("PowerShell", "Remove-Item -Recurse research-review", U23K_REVIEW,
      "removing research-review", U23K_REVIEW_TAIL),
-    ("Bash", "echo x > .kblam/review-receipts/SC-0001.json", ".kblam",
-     "writing .kblam/review-receipts/SC-0001.json", U23K_STATE_TAIL),
-    ("PowerShell", "Set-Content .kblam/review-receipts/SC-0001.json x", ".kblam",
-     "writing .kblam/review-receipts/SC-0001.json", U23K_STATE_TAIL),
-    ("Bash", "rm .kblam/review-receipts/SC-0001.json", ".kblam",
-     "removing .kblam/review-receipts/SC-0001.json", U23K_STATE_TAIL),
-    ("PowerShell", "Remove-Item .kblam/review-receipts/SC-0001.json", ".kblam",
-     "removing .kblam/review-receipts/SC-0001.json", U23K_STATE_TAIL),
+    ("Bash", "echo x > .kblam/review-receipts/source-challenge-0001.json", ".kblam",
+     "writing .kblam/review-receipts/source-challenge-0001.json", U23K_STATE_TAIL),
+    ("PowerShell", "Set-Content .kblam/review-receipts/source-challenge-0001.json x", ".kblam",
+     "writing .kblam/review-receipts/source-challenge-0001.json", U23K_STATE_TAIL),
+    ("Bash", "rm .kblam/review-receipts/source-challenge-0001.json", ".kblam",
+     "removing .kblam/review-receipts/source-challenge-0001.json", U23K_STATE_TAIL),
+    ("PowerShell", "Remove-Item .kblam/review-receipts/source-challenge-0001.json", ".kblam",
+     "removing .kblam/review-receipts/source-challenge-0001.json", U23K_STATE_TAIL),
 ])
 def test_shell_hooks_deny_review_and_receipt_writes_and_removals(
         kb, source_repo, monkeypatch, tool, command, root, what, tail):
@@ -458,13 +458,13 @@ def test_shell_hooks_deny_review_and_receipt_writes_and_removals(
 
 
 @pytest.mark.parametrize("tool,tool_input", [
-    ("Write", {"file_path": ".kblam/review-staging/SC-0001.yaml"}),
-    ("Edit", {"file_path": ".kblam/review-staging/CT-0001.yaml"}),
+    ("Write", {"file_path": ".kblam/review-staging/source-challenge-0001.yaml"}),
+    ("Edit", {"file_path": ".kblam/review-staging/claim-task-0001.yaml"}),
     ("NotebookEdit", {"notebook_path": ".kblam/review-staging/u23k_notes.ipynb"}),
-    ("Bash", {"command": "echo x > .kblam/review-staging/SC-0001.yaml"}),
-    ("PowerShell", {"command": "Set-Content .kblam/review-staging/CT-0001.yaml x"}),
-    ("Bash", {"command": "rm .kblam/review-staging/SC-0001.yaml"}),
-    ("PowerShell", {"command": "Remove-Item .kblam/review-staging/CT-0001.yaml"}),
+    ("Bash", {"command": "echo x > .kblam/review-staging/source-challenge-0001.yaml"}),
+    ("PowerShell", {"command": "Set-Content .kblam/review-staging/claim-task-0001.yaml x"}),
+    ("Bash", {"command": "rm .kblam/review-staging/source-challenge-0001.yaml"}),
+    ("PowerShell", {"command": "Remove-Item .kblam/review-staging/claim-task-0001.yaml"}),
 ])
 def test_hooks_allow_author_writes_and_removals_under_review_staging(
         kb, source_repo, monkeypatch, tool, tool_input):

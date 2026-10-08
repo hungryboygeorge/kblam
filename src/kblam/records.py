@@ -1,4 +1,4 @@
-"""Review records: SC- challenges, CT- tasks, CU- uses (SPEC §5.2.2, §5.2.3 field tables).
+"""Review records: source challenges, claim tasks and checked uses (SPEC §5.2.2, §5.2.3 field tables).
 
 Parsing and structural checks only: no filesystem or git access here.
 """
@@ -19,9 +19,14 @@ from kblam.finding import normalise_newlines, plain_data, yaml_rt
 from kblam.rules import Issue
 from kblam.sources import FileRef
 
-KINDS = {"SC": "challenges", "CT": "tasks", "CU": "uses"}   # ID prefix -> kind folder
-ID_RE = re.compile(r"^(SC|CT|CU)-\d{4,}$")
-FILENAME_RE = re.compile(r"^((SC|CT|CU)-\d{4,})\.yaml$")
+KINDS = {                      # ID prefix -> kind folder
+    "source-challenge": "challenges",
+    "claim-task": "tasks",
+    "checked-use": "uses",
+}
+ID_PREFIXES = "|".join(KINDS)  # every ID prefix, for the two file-name regexes below
+ID_RE = re.compile(rf"^({ID_PREFIXES})-(\d{{4,}})$")
+FILENAME_RE = re.compile(rf"^(({ID_PREFIXES})-(\d{{4,}}))\.yaml$")
 NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]*")        # fullmatch; case-sensitive (SPEC §5.2.2)
 HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 FINGERPRINT_RE = re.compile(r"^[0-9a-f]{12}$")
@@ -29,12 +34,20 @@ OID_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 SCHEMA = 1
 
 STATUSES = {
-    "SC": ("open", "confirmed", "rejected", "stale"),
-    "CT": ("open", "confirmed", "not_reproduced", "inconclusive", "stale"),
-    "CU": ("open", "approved", "withdrawn", "stale"),
+    "source-challenge": ("open", "confirmed", "rejected", "stale"),
+    "claim-task": ("open", "confirmed", "not_reproduced", "inconclusive", "stale"),
+    "checked-use": ("open", "approved", "withdrawn", "stale"),
 }
-EFFECTIVE = {"SC": ("confirmed",), "CT": ("confirmed", "not_reproduced", "inconclusive"), "CU": ("approved",)}
-CLOSED = {"SC": ("rejected",), "CT": (), "CU": ("withdrawn",)}  # close without being effective
+EFFECTIVE = {                  # the statuses a record's judgement takes effect in (SPEC §5.2.2 Status)
+    "source-challenge": ("confirmed",),
+    "claim-task": ("confirmed", "not_reproduced", "inconclusive"),
+    "checked-use": ("approved",),
+}
+CLOSED = {                     # close without being effective
+    "source-challenge": ("rejected",),
+    "claim-task": (),
+    "checked-use": ("withdrawn",),
+}
 RETIRED = "stale"
 
 CLASSIFICATIONS = ("contradicted", "unsupported", "wrong_model")
@@ -48,26 +61,29 @@ REF_KEYS = ("path", "sha256", "repo", "commit", "blob", "snapshot")
 ASSERTION_KEYS = ("lines", "text", "sha256", "occurrence")
 DECISION_KEYS = ("date", "by", "status", "reason", "evidence", "bind")
 KEYS = {  # every allowed top-level key per kind, in the order records are written
-    "SC": ("schema", "id", "created", "creator", "status", "source", "proposition", "scope",
-           "classification", "basis", "usable", "limits", "linked_findings", "decisions"),
-    "CT": ("schema", "id", "created", "creator", "proponent", "status", "kind", "finding",
-           "claim_fingerprint", "base_file_sha256", "question", "method", "outcomes", "controls", "stop",
-           "expected_evidence", "decisions"),
-    "CU": ("schema", "id", "created", "creator", "proponent", "status", "challenge", "challenge_bind",
-           "finding", "finding_fingerprint", "finding_file_sha256", "citation", "disposition", "reason",
-           "decisions"),
+    "source-challenge": (
+        "schema", "id", "created", "creator", "status", "source", "proposition", "scope",
+        "classification", "basis", "usable", "limits", "linked_findings", "decisions"),
+    "claim-task": (
+        "schema", "id", "created", "creator", "proponent", "status", "kind", "finding",
+        "claim_fingerprint", "base_file_sha256", "question", "method", "outcomes", "controls", "stop",
+        "expected_evidence", "decisions"),
+    "checked-use": (
+        "schema", "id", "created", "creator", "proponent", "status", "challenge", "challenge_bind",
+        "finding", "finding_fingerprint", "finding_file_sha256", "citation", "disposition", "reason",
+        "decisions"),
 }
 
 PIN_KEYS = ("repo", "commit", "blob")                        # the Git pin: all three or none
 CITATION_KEYS = ("ordinal", "path", "range", "tag_sha256")
-SC_ID_RE = re.compile(r"^SC-\d{4,}$")
+CHALLENGE_ID_RE = re.compile(r"^source-challenge-\d{4,}$")
 
 
 @dataclass
 class Record:
     path: str                  # repo-relative POSIX path as found (or the staged file's display path)
     id: str | None             # the ID the filename gives, or None
-    kind: str | None           # "SC" | "CT" | "CU" from the filename, or None
+    kind: str | None           # the ID prefix in records.KINDS, or None
     data: dict | None          # finding.plain_data of the YAML mapping; None if it did not parse as one
     raw: bytes
     error: str | None = None   # why data is None (not UTF-8, invalid YAML, not a mapping)
@@ -117,8 +133,8 @@ def parse_record(path: str, raw: bytes) -> Record:
 
 
 def schema_code(kind: str, key: str) -> str:
-    """K13 for §5.2.2 fields (including proponent), K15 for a CT's §5.2.3 fields."""
-    return "K13" if kind != "CT" or key in COMMON_KEYS else "K15"
+    """K13 for §5.2.2 fields (including proponent), K15 for a claim task's §5.2.3 fields."""
+    return "K13" if kind != "claim-task" or key in COMMON_KEYS else "K15"
 
 
 def schema_issues(rec: Record, *, staged: bool, committed=None) -> list[Issue]:
@@ -131,7 +147,7 @@ def schema_issues(rec: Record, *, staged: bool, committed=None) -> list[Issue]:
     keys; decision entries (DECISION_KEYS; evidence entries are file references plus `locator` and
     `provenance`; the provenance vocabulary is checked by K13, which has the config). Blank values ("",
     null, [] where content is required) are errors unless `staged`, where they are allowed.
-    Every issue: code "K13" (K15 for a CT's §5.2.3 fields, excluding proponent), level "error",
+    Every issue: code "K13" (K15 for a claim task's §5.2.3 fields, excluding proponent), level "error",
     owner rec.id or "",
     path rec.path, line rec.key_line(<top-level key>) or 0.
 
@@ -209,7 +225,7 @@ def file_ref(mapping: dict) -> FileRef:
 
 def id_text(value) -> str:
     """The `id` an installed record's file holds, as a refusal names it: a non-empty string as
-    "has id 'SC-0001'", and a value that is missing or blank as "has no id" — never Python's None,
+    "has id 'source-challenge-0001'", and a value that is missing or blank as "has no id" — never Python's None,
     which is no part of a record. A value that is neither is named by its repr."""
     if value is None or (isinstance(value, str) and not value.strip()):
         return "has no id"
@@ -670,7 +686,7 @@ FIELD_CHECKS = {  # top-level key -> (checker, the checker's extra argument)
     "controls": (_check_text_list, None),
     "stop": (_check_text, None),
     "expected_evidence": (_check_text_list, None),
-    "challenge": (_check_id_ref, (SC_ID_RE, "challenge ID (SC-NNNN)")),
+    "challenge": (_check_id_ref, (CHALLENGE_ID_RE, "challenge ID (source-challenge-NNNN)")),
     "challenge_bind": (_check_hex64, None),
     "finding_fingerprint": (_check_fingerprint, None),
     "finding_file_sha256": (_check_hex64, None),

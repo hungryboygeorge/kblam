@@ -76,7 +76,7 @@ class PutResult:
     review: list[review.ReviewItem] = field(default_factory=list) # review items open for this write
     unchecked: review.ReviewItem | None = None                    # set when Jev could not answer everything
     rejected_items: list[review.ReviewItem] = field(default_factory=list)  # recorded by a refused put (§6.4)
-    stale: list[str] = field(default_factory=list)                # CT/CU IDs this put makes stale (§5.2.4)
+    stale: list[str] = field(default_factory=list)      # claim-task/checked-use IDs this put makes stale
     kept: list[Issue] = field(default_factory=list)               # K14 errors the put leaves in place
     remaining: list[Issue] = field(default_factory=list)          # candidate errors that neither refuse nor
                                                                   # are kept K14 errors
@@ -134,7 +134,7 @@ class RenumberResult:
     index_path: str = ""
     recorded: bool = False                      # tree.hash advanced (the tree.hash rule, SPEC §8)
     resolutions: int = 0                        # resolutions copied under the new ID (SPEC §6.4)
-    stale: list[tuple[str, str]] = field(default_factory=list)  # (CT/CU ID, re-keyed finding it was bound to)
+    stale: list[tuple[str, str]] = field(default_factory=list)  # (record ID, re-keyed finding it was bound to)
 
 
 def atomic_write(path: Path, data: bytes) -> None:
@@ -607,29 +607,31 @@ def _new_excerpt_issue(written: Finding, finding_id: str, line: int, challenge: 
 
 
 def _made_stale(current: KBView, after: KBView, finding_id: str) -> list[str]:
-    """The IDs of the CT and CU records a write that turns `current` into `after` makes stale by changing
-    `finding_id` (SPEC §5.2.4 "Where each rule blocks"; a put, and the dependents renumber re-keys), in ID
-    order: those bound to that finding whose binding held on the current view and no longer holds after.
-    A task or use already stale or withdrawn is not listed."""
+    """The IDs of the claim task and checked use records a write that turns `current` into `after` makes
+    stale by changing `finding_id` (SPEC §5.2.4 "Where each rule blocks"; a put, and the dependents
+    renumber re-keys), in kind order and then ID number: those bound to that finding whose binding held
+    on the current view and no longer holds after. A task or use already stale or withdrawn is not
+    listed."""
     stale = []
     for rec in current.records:
-        if rec.kind not in ("CT", "CU") or not isinstance(rec.id, str) or rec.status in RETIRED_STATUSES:
+        if (rec.kind not in ("claim-task", "checked-use") or not isinstance(rec.id, str)
+                or rec.status in RETIRED_STATUSES):
             continue
         data = rec.data if isinstance(rec.data, dict) else {}
         if data.get("finding") != finding_id:
             continue
-        if rec.kind == "CT":
+        if rec.kind == "claim-task":
             # task_binding_problems returns the reasons the binding is broken, so [] means it holds
             broke = not k15.task_binding_problems(current, rec) and k15.task_binding_problems(after, rec)
         else:
             broke = _finding_binding(current, data) and not _finding_binding(after, data)
         if broke:
             stale.append(rec.id)
-    return sorted(stale, key=_record_order)
+    return sorted(stale, key=_kind_order)
 
 
 def _finding_binding(view: KBView, data: dict) -> bool:
-    """Whether a CU's finding binding holds on this view: the finding exists once, and its K3
+    """Whether a checked use's finding binding holds on this view: the finding exists once, and its K3
     fingerprint and file sha256 are the ones the use bound (SPEC §5.2.3 "A use is current")."""
     found = [f for f in view.findings if f.file_id == data.get("finding") and isinstance(f.meta, dict)]
     if len(found) != 1:
@@ -639,8 +641,8 @@ def _finding_binding(view: KBView, data: dict) -> bool:
 
 
 def _record_order(rec_id: str) -> tuple[int, str]:
-    """Numeric ID order, as k15 and view.findings use it: CT-0009 before CT-00010."""
-    number = rec_id[3:]
+    """Numeric ID order, as k15 and view.findings use it: claim-task-0009 before claim-task-00010."""
+    number = rec_id.rsplit("-", 1)[-1]
     return (int(number) if number.isdigit() else 0, rec_id)
 
 
@@ -1058,7 +1060,7 @@ def _renumber(cfg: Config, source: Path) -> RenumberResult:
         index_path=view.index_path,
         recorded=record_after_write_v2(cfg, clean, "renumber", creates_registry=False),
         resolutions=len(plan.carried),
-        # A re-keyed dependent's bytes change, so a CT or CU bound to it goes stale (SPEC §7 renumber).
+        # A re-keyed dependent's bytes change, so a bound record goes stale (SPEC §7 renumber).
         stale=[(rec_id, d.file_id) for d, _ in plan.rewrites for rec_id in _made_stale(view, after, d.file_id)],
     )
 
@@ -1144,17 +1146,18 @@ def _renumber_problem(cfg: Config, view: KBView, finding: Finding, new_id: str) 
 
 # --- rm and renumber vs review records (SPEC §7 "`rm` and `renumber` vs review records") ----------------
 
-BINDINGS = {"CT": ("claim_fingerprint", "base_file_sha256"),     # a record's finding binding:
-            "CU": ("finding_fingerprint", "finding_file_sha256")}  # (fingerprint v2, full-file sha256)
+BINDINGS = {"claim-task": ("claim_fingerprint", "base_file_sha256"),        # a record's finding binding:
+            "checked-use": ("finding_fingerprint", "finding_file_sha256")}  # (fingerprint v2, full sha256)
 
 
 def _kind_order(rec_id: str) -> tuple[int, int, str]:
-    """Records by kind (SC, CT, CU), then in numeric ID order."""
-    return (tuple(records.KINDS).index(rec_id[:2]), *_record_order(rec_id))
+    """Records by kind (source-challenge, claim-task, checked-use), then in numeric ID order."""
+    return (tuple(records.KINDS).index(rec_id.rsplit("-", 1)[0]), *_record_order(rec_id))
 
 
 def _bound(cfg: Config, rec, finding: Finding) -> bool:
-    """Whether a CT's or CU's finding binding identifies this file: fingerprint v2 and file sha256 match."""
+    """Whether a claim task's or checked use's finding binding identifies this file: fingerprint v2 and
+    file sha256 match."""
     fingerprint_key, sha_key = BINDINGS[rec.kind]
     return (rec.data.get(fingerprint_key) == fingerprint(finding, cfg.scope_separator)
             and rec.data.get(sha_key) == sha256_hex(finding.raw))
@@ -1162,8 +1165,9 @@ def _bound(cfg: Config, rec, finding: Finding) -> bool:
 
 def _links(view: KBView, finding_id: str) -> dict[str, list]:
     """The review records that link each file with `finding_id`: {path: [records.Record]}, in `_kind_order`.
-    A CT or CU naming the ID links the file its binding identifies, or, when its binding identifies none,
-    every file with the ID. An SC's `linked_findings` entry is a bare ID and links every file with it.
+    A claim task or checked use naming the ID links the file its binding identifies, or, when its binding
+    identifies none, every file with the ID. A source challenge's `linked_findings` entry is a bare ID
+    and links every file with it.
     Every status counts except `stale`: a retired record's question is settled by the adjudicator, who
     retires it, so it no longer keeps a finding's identity and never refuses an rm or a renumber
     (SPEC §7 "`rm` and `renumber` vs review records"). Installed records only."""
@@ -1172,7 +1176,7 @@ def _links(view: KBView, finding_id: str) -> dict[str, list]:
     named = [rec for rec in view.records if isinstance(rec.id, str) and isinstance(rec.data, dict)
              and rec.status != records.RETIRED]
     for rec in sorted(named, key=lambda rec: _kind_order(rec.id)):
-        if rec.kind == "SC":
+        if rec.kind == "source-challenge":
             listed = rec.data.get("linked_findings")
             linked = files if isinstance(listed, list) and finding_id in listed else []
         elif rec.kind in BINDINGS and rec.data.get("finding") == finding_id:
@@ -1185,8 +1189,8 @@ def _links(view: KBView, finding_id: str) -> dict[str, list]:
 
 
 def _review_records(ids: list[str], verb: str = "") -> str:
-    """"review record CT-0003 links" for one and "review records CT-0003, CU-0001 link" for several; with
-    no verb, "review record CT-0003" and "review records CT-0003, CU-0001"."""
+    """"review record claim-task-0003 links" for one and "review records claim-task-0003, checked-use-0001 link" for several; with
+    no verb, "review record claim-task-0003" and "review records claim-task-0003, checked-use-0001"."""
     words = ("review record " if len(ids) == 1 else "review records ") + ", ".join(ids)
     return words + (f" {verb}s" if len(ids) == 1 else f" {verb}") if verb else words
 
@@ -1290,10 +1294,12 @@ def _refile_steps(target: str, phrase: str) -> str:
     return (f" For each retired record whose question still applies to {phrase}, file a new record against "
             f"{phrase}: kblam challenge new SOURCE-PATH --lines A-B --by NAME, whose free linked_findings "
             f"entry then names {target}; kblam task new {target} --kind KIND --by NAME --proponent NAME; and, "
-            f"for a use, kblam use review SC-NNNN {target} ORDINAL --by NAME --proponent NAME, which stages "
+            f"for a use, kblam use review source-challenge-NNNN {target} ORDINAL --by NAME --proponent "
+            f"NAME, which stages "
             f"one only for a confirmed challenge's affected excerpt of {target}. Fill the staged record and "
             f"put it (kblam put STAGED-PATH); a use covers its excerpt only once it is approved (K14), so an "
-            f"agent who is not its proponent runs kblam review decide CU-NNNN --status approved --by NAME "
+            f"agent who is not its proponent runs kblam review decide checked-use-NNNN --status approved "
+            f"--by NAME "
             f"--reason TEXT --expect D on it")
 
 
@@ -1337,9 +1343,9 @@ def _retire_then_renumber(finding: Finding, files: list[Finding], mine: list, se
         return f"{finding.path} took a new ID: {count} findings shared {finding.file_id}"
 
     bare = ""
-    sc_ids = [rec.id for rec in mine if rec.kind == "SC"]
+    sc_ids = [rec.id for rec in mine if rec.kind == "source-challenge"]
     if sc_ids:
-        # an SC's linked_findings entry is a bare ID, so it links every file with the ID
+        # a source challenge's linked_findings entry is a bare ID, so it links every file with the ID
         bare = (f" {_and(sc_ids)} {'lists' if len(sc_ids) == 1 else 'list'} {finding.file_id} in "
                 f"linked_findings as a bare ID, so it links every file with the ID: retiring it frees all of "
                 f"them, and each record is listed once.")

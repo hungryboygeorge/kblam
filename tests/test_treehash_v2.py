@@ -32,7 +32,7 @@ HEX = "a" * 64          # a digest kblam would never compute, so a match is neve
 
 FINDING = b"---\nid: F-0001\n---\n\n**Claim.** A claim.\n"
 FINDINGS_INDEX = b"# Findings\n\n| ID | Title |\n"
-RECORD = b"schema: 1\nid: SC-0001\n"
+RECORD = b"schema: 1\nid: source-challenge-0001\n"
 REVIEW_INDEX = b"# Review\n"
 
 
@@ -54,7 +54,7 @@ def both_roots_view(cfg) -> KBView:
         files={f"{cfg.findings_dir}/INDEX.md": FINDINGS_INDEX,
                f"{cfg.findings_dir}/calibration/F-0001-sensor.md": FINDING},
         review_files={f"{cfg.review_dir}/INDEX.md": REVIEW_INDEX,
-                      f"{cfg.review_dir}/challenges/SC-0001.yaml": RECORD},
+                      f"{cfg.review_dir}/challenges/source-challenge-0001.yaml": RECORD},
     )
 
 
@@ -71,7 +71,7 @@ def test_tree_digest_v2_is_the_hand_built_sha256(kb):
         (b"f/INDEX.md", FINDINGS_INDEX),
         (b"f/calibration/F-0001-sensor.md", FINDING),
         (b"r/INDEX.md", REVIEW_INDEX),
-        (b"r/challenges/SC-0001.yaml", RECORD),
+        (b"r/challenges/source-challenge-0001.yaml", RECORD),
     ])
     # An empty tree is the header alone: the roots are in the digest even with no file.
     assert tree_digest_v2(KBView(cfg=cfg, files={})) == hand_digest(cfg, [])
@@ -86,18 +86,18 @@ def test_tree_digest_v2_binds_the_review_root_name(kb):
         (b"f/INDEX.md", FINDINGS_INDEX),
         (b"f/calibration/F-0001-sensor.md", FINDING),
         (b"r/INDEX.md", REVIEW_INDEX),
-        (b"r/challenges/SC-0001.yaml", RECORD),
+        (b"r/challenges/source-challenge-0001.yaml", RECORD),
     ])
 
 
 def test_tree_digest_v2_counts_a_file_in_each_root_separately(kb):
     cfg = kb.cfg
     both = KBView(cfg=cfg,
-                  files={f"{cfg.findings_dir}/challenges/SC-0001.yaml": RECORD},
-                  review_files={f"{cfg.review_dir}/challenges/SC-0001.yaml": RECORD})
-    only_findings = KBView(cfg=cfg, files={f"{cfg.findings_dir}/challenges/SC-0001.yaml": RECORD})
-    assert tree_digest_v2(both) == hand_digest(cfg, [(b"f/challenges/SC-0001.yaml", RECORD),
-                                                     (b"r/challenges/SC-0001.yaml", RECORD)])
+                  files={f"{cfg.findings_dir}/challenges/source-challenge-0001.yaml": RECORD},
+                  review_files={f"{cfg.review_dir}/challenges/source-challenge-0001.yaml": RECORD})
+    only_findings = KBView(cfg=cfg, files={f"{cfg.findings_dir}/challenges/source-challenge-0001.yaml": RECORD})
+    assert tree_digest_v2(both) == hand_digest(cfg, [(b"f/challenges/source-challenge-0001.yaml", RECORD),
+                                                     (b"r/challenges/source-challenge-0001.yaml", RECORD)])
     assert tree_digest_v2(both) != tree_digest_v2(only_findings)
 
 
@@ -180,32 +180,32 @@ def test_root_problem_is_none_without_a_tree_hash(kb):
 
 def test_root_problem_is_none_for_a_format_1_tree_hash(kb):
     kb.write(".kblam/tree.hash", HEX + "\n")
-    assert root_problem(kb.cfg, {"SC-0001"}) is None
+    assert root_problem(kb.cfg, {"source-challenge-0001"}) is None
 
 
 def test_root_problem_is_none_for_the_configured_root(kb):
     kb.write(".kblam/tree.hash", format_line(kb.cfg.review_dir, HEX))
-    assert root_problem(kb.cfg, {"SC-0001"}) is None
+    assert root_problem(kb.cfg, {"source-challenge-0001"}) is None
 
 
 def test_root_problem_reports_a_root_change_when_a_record_moved_with_it(kb):
     cfg = kb.cfg
     kb.write(".kblam/tree.hash", format_line("research-notes", HEX))
-    kb.write(f"{cfg.review_dir}/challenges/SC-0001.yaml", RECORD)
+    kb.write(f"{cfg.review_dir}/challenges/source-challenge-0001.yaml", RECORD)
     assert root_problem(cfg, None) == root_message(cfg, "research-notes")
 
 
 def test_root_problem_reports_a_root_change_when_the_old_root_holds_a_record(kb):
     cfg = kb.cfg
     kb.write(".kblam/tree.hash", format_line("research-notes", HEX))
-    kb.write("research-notes/tasks/CT-0001.yaml", RECORD)
+    kb.write("research-notes/tasks/claim-task-0001.yaml", RECORD)
     assert root_problem(cfg, None) == root_message(cfg, "research-notes")
 
 
 def test_root_problem_reports_a_root_change_when_the_registry_is_not_empty(kb):
     cfg = kb.cfg
     kb.write(".kblam/tree.hash", format_line("research-notes", HEX))
-    assert root_problem(cfg, {"SC-0001"}) == root_message(cfg, "research-notes")
+    assert root_problem(cfg, {"source-challenge-0001"}) == root_message(cfg, "research-notes")
     assert root_problem(cfg, set()) is None
     assert root_problem(cfg, None) is None
 
@@ -213,7 +213,7 @@ def test_root_problem_reports_a_root_change_when_the_registry_is_not_empty(kb):
 def test_root_problem_is_none_when_neither_root_holds_a_record(kb):
     cfg = kb.cfg
     kb.write(".kblam/tree.hash", format_line("research-notes", HEX))
-    kb.write("research-notes/challenges/SC-0001.txt", b"not a record name\n")
+    kb.write("research-notes/challenges/source-challenge-0001.txt", b"not a record name\n")
     assert root_problem(cfg, None) is None
 
 
@@ -222,7 +222,7 @@ def test_root_problem_never_looks_outside_the_repository(kb, root):
     cfg = kb.cfg
     outside = kb.root.parent / "elsewhere"
     outside.joinpath("challenges").mkdir(parents=True, exist_ok=True)
-    outside.joinpath("challenges", "SC-0001.yaml").write_bytes(RECORD)
+    outside.joinpath("challenges", "source-challenge-0001.yaml").write_bytes(RECORD)
     kb.write(".kblam/tree.hash", format_line(root, HEX))
     assert root_problem(cfg, None) is None
 
@@ -242,7 +242,7 @@ def test_clean_before_v2_bootstraps_a_clean_tree_unless_the_write_creates_no_reg
 
 
 def test_clean_before_v2_does_not_bootstrap_a_tree_that_fails_the_rules(kb):
-    kb.write("research-review/challenges/SC-0001.yaml", RECORD)     # K13: not a valid record
+    kb.write("research-review/challenges/source-challenge-0001.yaml", RECORD)     # K13: not a valid record
     (kb.root / ".kblam" / "tree.hash").unlink()
     cfg, view = kb.cfg, load_view(kb.cfg)
     assert clean_before_v2(cfg, view, has_records=True) is False
@@ -260,7 +260,7 @@ def test_clean_before_v2_bootstraps_a_tree_whose_only_issues_are_warnings(kb):
     assert validate(view) == []
     assert clean_before_v2(cfg, view, has_records=False) is True
 
-    kb.write(f"{cfg.review_dir}/challenges/SC-0001.yaml", record_text("SC"))
+    kb.write(f"{cfg.review_dir}/challenges/source-challenge-0001.yaml", record_text("source-challenge"))
     kb.write(f"{cfg.review_dir}/INDEX.md", generate_review_index(load_view(cfg)))
     view = load_view(cfg)
     levels = [issue.level for issue in validate(view)]
@@ -346,7 +346,7 @@ MISSING_FAILED = ("there is no .kblam/tree.hash (a new clone, or .kblam/ was del
 @pytest.mark.parametrize("record", [True, False], ids=["records", "no-records"])
 def test_record_after_write_v2_warns_when_the_bootstrap_failed(kb, capsys, record):
     if record:
-        kb.write("research-review/challenges/SC-0001.yaml", RECORD)
+        kb.write("research-review/challenges/source-challenge-0001.yaml", RECORD)
     cfg = kb.cfg
     path = kb.root / ".kblam" / "tree.hash"
     path.unlink()
@@ -359,7 +359,7 @@ def test_record_after_write_v2_warns_when_the_bootstrap_failed(kb, capsys, recor
 def test_record_after_write_v2_warns_when_a_registry_free_write_meets_records(kb, capsys):
     """rm, renumber and upgrade write no registry, so with records present they never bootstrap; the
     warning says so and names the command that does."""
-    kb.write("research-review/challenges/SC-0001.yaml", RECORD)
+    kb.write("research-review/challenges/source-challenge-0001.yaml", RECORD)
     cfg = kb.cfg
     path = kb.root / ".kblam" / "tree.hash"
     path.unlink()
@@ -370,7 +370,7 @@ def test_record_after_write_v2_warns_when_a_registry_free_write_meets_records(kb
         "kblam rm: there is no .kblam/tree.hash (a new clone, or .kblam/ was deleted), and kblam rm does not "
         "record one while research-review/ holds review records; tree.hash not advanced. Run kblam validate, "
         "fix anything it lists, then run kblam validate --record.\n")
-    (kb.root / "research-review/challenges/SC-0001.yaml").unlink()    # no records: the ordinary text
+    (kb.root / "research-review/challenges/source-challenge-0001.yaml").unlink()    # no records: the ordinary text
     assert record_after_write_v2(cfg, clean_before=False, command="rm", creates_registry=False) is False
     assert capsys.readouterr().err == f"kblam rm: {MISSING_FAILED}"
 

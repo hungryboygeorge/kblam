@@ -33,7 +33,7 @@ FINDING = "findings/calibration/F-0001-ratio.md"      # F-0001 as `quoting_findi
 MOTOR = "findings/motor/F-0002-motor.md"
 CLAIM_B = "The pump motor reaches steady output after 90 seconds of warm-up at 4000 rpm."
 QUESTION = "Does an independent measurement establish the claim?"
-PENDING = f"CT-0001 open replication of F-0002: {QUESTION}"
+PENDING = f"claim-task-0001 open replication of F-0002: {QUESTION}"
 BASELINE = ("kblam validate: there was no .kblam/tree.hash (a new clone, or .kblam/ was deleted), so Jev was not "
             "asked: 2 finding(s) accepted from the repository as checked at their current fingerprints. kblam "
             "audit checks them with Jev")
@@ -60,8 +60,8 @@ def no_jev_check(monkeypatch):
 
 
 def reviewed(kb, source_repo, *, use: bool = True) -> None:
-    """F-0001 quotes the trace's line 3, which SC-0001 (confirmed) challenges, and CU-0001 (approved)
-    covers that excerpt; F-0002 is a plain finding with CT-0001, an open task, on it. Without `use`, the
+    """F-0001 quotes the trace's line 3, which source-challenge-0001 (confirmed) challenges, and checked-use-0001 (approved)
+    covers that excerpt; F-0002 is a plain finding with claim-task-0001, an open task, on it. Without `use`, the
     excerpt is left uncovered: a K14 error."""
     m.quoting_finding(kb, "F-0001", source_repo, "3-3")
     kb.add("F-0002", "motor", CLAIM_B, topic="motor")
@@ -133,7 +133,7 @@ def test_validate_record_bootstraps_a_clone_with_records(jkb, source_repo, no_je
 
     assert run == m.Run(0, f"{PENDING}\nkblam validate: OK (2 findings); 1 pending task(s); recorded "
                            f".kblam/tree.hash for this tree\n{BASELINE}\n", "")
-    bootstrapped(jkb, registry=["CT-0001", "CU-0001", "SC-0001"])
+    bootstrapped(jkb, registry=["checked-use-0001", "claim-task-0001", "source-challenge-0001"])
     assert jkb.fake.requests == []
     assert m.validate(jkb) == m.Run(0, f"{PENDING}\nkblam validate: OK (2 findings); 1 pending task(s)\n", "")
 
@@ -148,7 +148,7 @@ def test_the_put_of_a_finding_bootstraps_a_clone_with_records(jkb, source_repo, 
 
     assert run.code == 0 and run.err == "", run.out + run.err
     assert run.out.startswith("kblam put: F-0003 -> findings/tray/F-0003-tray.md\n"), run.out
-    bootstrapped(jkb, registry=["CT-0001", "CU-0001", "SC-0001"])
+    bootstrapped(jkb, registry=["checked-use-0001", "claim-task-0001", "source-challenge-0001"])
     assert accepted(jkb, "F-0003")                                   # checked by its own put
     assert jkb.fake.requests and all(b["state"]["new"]["claim"] == E2 for b in jkb.fake.requests)
 
@@ -161,8 +161,8 @@ def test_the_put_of_a_record_bootstraps_a_clone_with_records(jkb, source_repo, n
     run = m.put(jkb, staged)
 
     assert run == m.Run(0, f"kblam put: {staged.id} -> {REVIEW}/tasks/{staged.id}.yaml\n", "")
-    bootstrapped(jkb, registry=["CT-0001", "CT-0002", "CU-0001", "SC-0001"])
-    assert staged.id == "CT-0002"
+    bootstrapped(jkb, registry=["checked-use-0001", "claim-task-0001", "claim-task-0002", "source-challenge-0001"])
+    assert staged.id == "claim-task-0002"
     assert jkb.fake.requests == []
 
 
@@ -199,7 +199,7 @@ def test_init_update_bootstraps_a_clone_with_records(git_kb, source_repo, no_jev
     assert run.code == 0 and run.err == "", run.out + run.err
     assert run.out.endswith("  created   .kblam/tree.hash\nkblam init: done. Review the files above and commit "
                             "them.\n"), run.out
-    bootstrapped(git_kb, registry=["CT-0001", "CU-0001", "SC-0001"])
+    bootstrapped(git_kb, registry=["checked-use-0001", "claim-task-0001", "source-challenge-0001"])
     assert git_kb.fake.requests == []
 
 
@@ -223,20 +223,20 @@ def index_deleted(kb, source_repo) -> str:
 
 
 def use_missing(kb, source_repo) -> str:
-    """reviewed() without CU-0001, so F-0001's excerpt of the challenged line is uncovered: K14."""
+    """reviewed() without checked-use-0001, so F-0001's excerpt of the challenged line is uncovered: K14."""
     reviewed(kb, source_repo, use=False)
     return f"K14 {FINDING}:{excerpt_line(kb.root / FINDING)}: {same_bytes_message(source_repo)}"
 
 
 def task_stale(kb, source_repo) -> str:
-    """reviewed(), then F-0002's body extended outside kblam after CT-0001 bound its bytes: K15."""
+    """reviewed(), then F-0002's body extended outside kblam after claim-task-0001 bound its bytes: K15."""
     reviewed(kb, source_repo)
     bound = sha(kb, MOTOR)
     kb.add("F-0002", "motor", CLAIM_B, topic="motor", body="A first detail.")
-    record = m.record_path(kb, "CT-0001")
-    return (f"K15 {REVIEW}/tasks/CT-0001.yaml:{line_with(record, bound)}: F-0002's file now hashes to "
-            f"{sha(kb, MOTOR)}, not the {bound} CT-0001 was bound to (the binding covers the whole file, not "
-            f"only the fingerprint); reread it, then run kblam review rebind CT-0001 --by NAME --reason TEXT "
+    record = m.record_path(kb, "claim-task-0001")
+    return (f"K15 {REVIEW}/tasks/claim-task-0001.yaml:{line_with(record, bound)}: F-0002's file now hashes to "
+            f"{sha(kb, MOTOR)}, not the {bound} claim-task-0001 was bound to (the binding covers the whole file, not "
+            f"only the fingerprint); reread it, then run kblam review rebind claim-task-0001 --by NAME --reason TEXT "
             f"--expect D")
 
 
@@ -268,11 +268,11 @@ def test_the_put_of_a_record_on_a_clone_that_fails_is_not_recorded(jkb, source_r
 
     run = m.put(jkb, staged)
 
-    assert run == m.Run(0, f"kblam put: CT-0002 -> {REVIEW}/tasks/CT-0002.yaml\n{error}\nkblam put: done, but "
+    assert run == m.Run(0, f"kblam put: claim-task-0002 -> {REVIEW}/tasks/claim-task-0002.yaml\n{error}\nkblam put: done, but "
                            f"kblam validate still fails (1 error(s) listed above, owned by other findings or "
-                           f"records)\n", f"kblam put CT-0002: {MISSING}\n")
+                           f"records)\n", f"kblam put claim-task-0002: {MISSING}\n")
     assert unbootstrapped(jkb)
-    assert m.registry(jkb) == ["CT-0001", "CT-0002", "CU-0001", "SC-0001"] == present(jkb)
+    assert m.registry(jkb) == ["checked-use-0001", "claim-task-0001", "claim-task-0002", "source-challenge-0001"] == present(jkb)
     assert jkb.fake.requests == []
 
 
@@ -293,13 +293,13 @@ def test_a_put_on_a_clone_that_fails_says_what_to_do_and_doing_it_bootstraps(jkb
     assert unbootstrapped(jkb)
     assert m.validate(jkb) == m.Run(1, f"{error}\nkblam validate: 1 error(s) in {REVIEW}/\n", "")
 
-    rebound = m.rebind(jkb, "CT-0001", by="reviewer-b")
+    rebound = m.rebind(jkb, "claim-task-0001", by="reviewer-b")
 
-    assert rebound == m.Run(0, f"kblam review rebind: CT-0001 rebound, now open (subject digest "
-                               f"{m.expect(jkb, 'CT-0001')[:12]})\n", f"kblam review rebind CT-0001: {MISSING}\n")
+    assert rebound == m.Run(0, f"kblam review rebind: claim-task-0001 rebound, now open (subject digest "
+                               f"{m.expect(jkb, 'claim-task-0001')[:12]})\n", f"kblam review rebind claim-task-0001: {MISSING}\n")
     assert unbootstrapped(jkb)
     bootstraps_as_named(jkb, PENDING, 3)
-    bootstrapped(jkb, registry=["CT-0001", "CU-0001", "SC-0001"])
+    bootstrapped(jkb, registry=["checked-use-0001", "claim-task-0001", "source-challenge-0001"])
     assert accepted(jkb, "F-0003")
 
 
@@ -353,22 +353,22 @@ def test_a_git_clone_with_review_records_bootstraps(origin, monkeypatch, capsys,
     F-0002."""
     first = clone_of(origin, "clone")
     assert (first.root / LOG).is_file() and not (first.root / ".kblam").exists()
-    assert present(first) == ["CT-0001", "CU-0001", "SC-0001"]
+    assert present(first) == ["checked-use-0001", "claim-task-0001", "source-challenge-0001"]
 
     assert call("Stop", stop(first), monkeypatch, capsys) == (0, None, "")
     assert not (first.root / ".kblam").exists()
     assert m.validate(first, "--record") == m.Run(0, f"{PENDING}\nkblam validate: OK (2 findings); 1 pending "
                                                      f"task(s); recorded .kblam/tree.hash for this tree\n"
                                                      f"{BASELINE}\n", "")
-    bootstrapped(first, registry=["CT-0001", "CU-0001", "SC-0001"])
+    bootstrapped(first, registry=["checked-use-0001", "claim-task-0001", "source-challenge-0001"])
     assert m.validate(first) == m.Run(0, f"{PENDING}\nkblam validate: OK (2 findings); 1 pending task(s)\n", "")
     assert call("Stop", stop(first), monkeypatch, capsys) == (0, None, "")
 
     second = clone_of(origin, "second")
     staged = m.stage_task(second, "F-0001", by="researcher-a", proponent="researcher-a")
-    assert m.put(second, staged) == m.Run(0, f"kblam put: CT-0002 -> {REVIEW}/tasks/CT-0002.yaml\n", "")
-    bootstrapped(second, registry=["CT-0001", "CT-0002", "CU-0001", "SC-0001"])
-    pending = f"{PENDING}\nCT-0002 open replication of F-0001: {QUESTION}"
+    assert m.put(second, staged) == m.Run(0, f"kblam put: claim-task-0002 -> {REVIEW}/tasks/claim-task-0002.yaml\n", "")
+    bootstrapped(second, registry=["checked-use-0001", "claim-task-0001", "claim-task-0002", "source-challenge-0001"])
+    pending = f"{PENDING}\nclaim-task-0002 open replication of F-0001: {QUESTION}"
     assert m.validate(second) == m.Run(0, f"{pending}\nkblam validate: OK (2 findings); 2 pending task(s)\n", "")
     assert call("Stop", stop(second), monkeypatch, capsys) == (0, None, "")
     assert origin.fake.requests == []

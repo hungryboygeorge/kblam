@@ -15,29 +15,29 @@ from kblam.decisions import (SUBJECT_FIELDS, canonical_json, decision_issues, in
                              needs_independence, subject_digest, transition_problem)
 from kblam.records import STATUSES, Record
 
-KINDS = ("SC", "CT", "CU")
+KINDS = ("source-challenge", "claim-task", "checked-use")
 CREATOR, PROPONENT, THIRD = "reviewer-a", "researcher-a", "reviewer-b"
-FOLDERS = {"SC": "challenges", "CT": "tasks", "CU": "uses"}
-KIND_WORD = {"SC": "challenge", "CT": "task", "CU": "use"}   # the words a refusal names its kind by
+FOLDERS = {"source-challenge": "challenges", "claim-task": "tasks", "checked-use": "uses"}
+KIND_WORD = {"source-challenge": "challenge", "claim-task": "task", "checked-use": "use"}   # the words a refusal names its kind by
 
 # SPEC §5.2.2 Subject digest, verbatim: the fields each kind's digest covers, in table order.
 SPEC_SUBJECTS = {
-    "SC": ("id", "source", "proposition", "scope", "classification", "basis", "usable", "limits"),
-    "CT": ("id", "kind", "finding", "claim_fingerprint", "base_file_sha256", "question", "method",
+    "source-challenge": ("id", "source", "proposition", "scope", "classification", "basis", "usable", "limits"),
+    "claim-task": ("id", "kind", "finding", "claim_fingerprint", "base_file_sha256", "question", "method",
            "outcomes", "controls", "stop", "expected_evidence", "proponent"),
-    "CU": ("id", "challenge", "challenge_bind", "finding", "finding_fingerprint", "finding_file_sha256",
+    "checked-use": ("id", "challenge", "challenge_bind", "finding", "finding_fingerprint", "finding_file_sha256",
            "citation", "disposition", "reason", "proponent"),
 }
 
 # SPEC §5.2.2 "Independent means", verbatim: the fields `by` must differ from.
-SPEC_SELF = {"SC": ("creator",), "CT": ("creator", "proponent"), "CU": ("proponent",)}
+SPEC_SELF = {"source-challenge": ("creator",), "claim-task": ("creator", "proponent"), "checked-use": ("proponent",)}
 
 # SPEC §5.2.2 Status changes, the three rows that belong to one kind.
 SPEC_TABLE = {
-    "SC": {"open": ("confirmed", "rejected"), "confirmed": ("stale",), "rejected": ("stale",)},
-    "CT": {"open": ("confirmed", "not_reproduced", "inconclusive"), "confirmed": ("stale",),
+    "source-challenge": {"open": ("confirmed", "rejected"), "confirmed": ("stale",), "rejected": ("stale",)},
+    "claim-task": {"open": ("confirmed", "not_reproduced", "inconclusive"), "confirmed": ("stale",),
            "not_reproduced": ("stale",), "inconclusive": ("stale",)},
-    "CU": {"open": ("approved", "withdrawn"), "approved": ("stale",), "withdrawn": ("stale",)},
+    "checked-use": {"open": ("approved", "withdrawn"), "approved": ("stale",), "withdrawn": ("stale",)},
 }
 
 
@@ -113,27 +113,27 @@ def test_every_subject_field_changes_the_digest(kind):
     digest = subject_digest(kind, record_data(kind, f"{kind}-0001"))
     for field in SPEC_SUBJECTS[kind]:
         changed = record_data(kind, f"{kind}-0001")
-        changed[field] = "changed"                   # a CT's subject fields include `kind` itself
+        changed[field] = "changed"                   # a claim task's subject fields include `kind`
         assert subject_digest(kind, changed) != digest, field
 
 
 def test_the_digest_ignores_fields_outside_the_subject():
-    before = subject_digest("SC", record_data("SC", "SC-0001"))
-    after = subject_digest("SC", record_data("SC", "SC-0001", status="confirmed",
+    before = subject_digest("source-challenge", record_data("source-challenge", "source-challenge-0001"))
+    after = subject_digest("source-challenge", record_data("source-challenge", "source-challenge-0001", status="confirmed",
                                             creator="reviewer-c", linked_findings=["F-0001"],
                                             decisions=[{"status": "confirmed"}]))
     assert after == before
 
 
 def test_a_missing_subject_field_hashes_as_null():
-    data = record_data("SC", "SC-0001")
+    data = record_data("source-challenge", "source-challenge-0001")
     without = {key: value for key, value in data.items() if key != "limits"}
-    assert subject_digest("SC", without) == subject_digest("SC", {**without, "limits": None})
+    assert subject_digest("source-challenge", without) == subject_digest("source-challenge", {**without, "limits": None})
 
 
 def test_a_use_challenge_bind_is_part_of_its_digest():
-    base = subject_digest("CU", record_data("CU", "CU-0001"))
-    rebound = subject_digest("CU", record_data("CU", "CU-0001", challenge_bind="a" * 64))
+    base = subject_digest("checked-use", record_data("checked-use", "checked-use-0001"))
+    rebound = subject_digest("checked-use", record_data("checked-use", "checked-use-0001", challenge_bind="a" * 64))
     assert rebound != base
 
 
@@ -143,11 +143,11 @@ def test_a_use_challenge_bind_is_part_of_its_digest():
 def allowed(kind: str, old: str, new: str) -> bool:
     """The §5.2.2 table re-derived from the SPEC text, independent of the module's data."""
     if new == old:                                   # rebind keeps the status: a task's and a use's, never stale
-        return kind in ("CT", "CU") and old != "stale"
+        return kind in ("claim-task", "checked-use") and old != "stale"
     if old == "open":
         return new == "stale" or new in SPEC_TABLE[kind].get("open", ())
-    if new == "open":                                # any status except open, and an SC's confirmed, may reopen
-        return not (kind == "SC" and old == "confirmed")
+    if new == "open":                                # open, and a source challenge's confirmed, may reopen
+        return not (kind == "source-challenge" and old == "confirmed")
     return new in SPEC_TABLE[kind].get(old, ())
 
 
@@ -167,23 +167,23 @@ def test_the_transition_table_holds_for_every_cell():
 def test_the_allowed_cells_are_33():
     cells = {kind: sum(allowed(kind, old, new) for old in STATUSES[kind] for new in STATUSES[kind])
              for kind in KINDS}
-    assert cells == {"SC": 7, "CT": 15, "CU": 11}
+    assert cells == {"source-challenge": 7, "claim-task": 15, "checked-use": 11}
 
 
 def test_a_confirmed_challenge_is_never_reopened():
-    assert transition_problem("SC", "confirmed", "open") == (
+    assert transition_problem("source-challenge", "confirmed", "open") == (
         "a confirmed challenge is never reopened; retire it with --status stale and file a new challenge")
 
 
 @pytest.mark.parametrize("kind, old, new, phrase", [
-    ("SC", "rejected", "confirmed", "cannot go from rejected to confirmed"),
-    ("SC", "confirmed", "rejected", "cannot go from confirmed to rejected"),
-    ("SC", "stale", "confirmed", "cannot go from stale to confirmed"),
-    ("CT", "open", "approved", "cannot go from open to approved"),
-    ("CT", "confirmed", "not_reproduced", "cannot go from confirmed to not_reproduced"),
-    ("CT", "stale", "confirmed", "cannot go from stale to confirmed"),
-    ("CU", "open", "confirmed", "cannot go from open to confirmed"),
-    ("CU", "approved", "withdrawn", "cannot go from approved to withdrawn"),
+    ("source-challenge", "rejected", "confirmed", "cannot go from rejected to confirmed"),
+    ("source-challenge", "confirmed", "rejected", "cannot go from confirmed to rejected"),
+    ("source-challenge", "stale", "confirmed", "cannot go from stale to confirmed"),
+    ("claim-task", "open", "approved", "cannot go from open to approved"),
+    ("claim-task", "confirmed", "not_reproduced", "cannot go from confirmed to not_reproduced"),
+    ("claim-task", "stale", "confirmed", "cannot go from stale to confirmed"),
+    ("checked-use", "open", "confirmed", "cannot go from open to confirmed"),
+    ("checked-use", "approved", "withdrawn", "cannot go from approved to withdrawn"),
 ])
 def test_a_refused_cell_says_which_statuses_are_left(kind, old, new, phrase):
     problem = transition_problem(kind, old, new)
@@ -203,15 +203,15 @@ def test_a_refusal_names_the_kind_and_has_no_trailing_period():
                 assert KIND_WORD[kind] in problem, problem
 
 
-@pytest.mark.parametrize("kind", ("CT", "CU"))
+@pytest.mark.parametrize("kind", ("claim-task", "checked-use"))
 def test_rebind_keeps_a_task_or_use_status(kind):
     for status in STATUSES[kind]:
         assert (transition_problem(kind, status, status) is None) == (status != "stale")
 
 
 def test_a_challenge_has_no_rebind():
-    for status in STATUSES["SC"]:
-        assert transition_problem("SC", status, status) is not None
+    for status in STATUSES["source-challenge"]:
+        assert transition_problem("source-challenge", status, status) is not None
 
 
 def test_a_retired_record_is_not_re_decided_to_stale():
@@ -221,7 +221,7 @@ def test_a_retired_record_is_not_re_decided_to_stale():
 
 
 def test_an_unknown_status_gets_a_refusal_that_names_no_transition():
-    assert transition_problem("SC", "bogus", "confirmed") == (
+    assert transition_problem("source-challenge", "bogus", "confirmed") == (
         "a challenge cannot go from bogus to confirmed: bogus is not a status a decision sets")
 
 
@@ -229,10 +229,10 @@ def test_an_unknown_status_gets_a_refusal_that_names_no_transition():
 
 
 @pytest.mark.parametrize("kind, actor, role", [
-    ("SC", CREATOR, "creator"),
-    ("CT", CREATOR, "creator"),
-    ("CT", PROPONENT, "proponent"),
-    ("CU", PROPONENT, "proponent"),
+    ("source-challenge", CREATOR, "creator"),
+    ("claim-task", CREATOR, "creator"),
+    ("claim-task", PROPONENT, "proponent"),
+    ("checked-use", PROPONENT, "proponent"),
 ])
 def test_a_self_decision_names_the_role(kind, actor, role):
     data = record_data(kind, f"{kind}-0001")
@@ -240,21 +240,21 @@ def test_a_self_decision_names_the_role(kind, actor, role):
         f"{actor} is {kind}-0001's {role}; a closing decision needs someone else")
 
 
-@pytest.mark.parametrize("kind, actor", [("SC", PROPONENT), ("SC", THIRD), ("CT", THIRD), ("CU", CREATOR),
-                                         ("CU", THIRD)])
+@pytest.mark.parametrize("kind, actor", [("source-challenge", PROPONENT), ("source-challenge", THIRD), ("claim-task", THIRD), ("checked-use", CREATOR),
+                                         ("checked-use", THIRD)])
 def test_a_third_person_or_the_creator_of_a_use_is_independent(kind, actor):
     assert independence_problem(kind, record_data(kind, f"{kind}-0001"), actor) is None
 
 
 def test_a_ct_creator_is_named_before_its_proponent():
-    data = record_data("CT", "CT-0001", creator=PROPONENT)
-    assert "is CT-0001's creator" in independence_problem("CT", data, PROPONENT)
+    data = record_data("claim-task", "claim-task-0001", creator=PROPONENT)
+    assert "is claim-task-0001's creator" in independence_problem("claim-task", data, PROPONENT)
 
 
 def test_a_record_without_an_id_names_no_id():
-    data = record_data("SC", "SC-0001")
+    data = record_data("source-challenge", "source-challenge-0001")
     del data["id"]
-    assert " is the record's creator; " in independence_problem("SC", data, CREATOR)
+    assert " is the record's creator; " in independence_problem("source-challenge", data, CREATOR)
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -280,29 +280,29 @@ def test_an_open_record_with_no_decisions_is_clean(kind):
 
 
 @pytest.mark.parametrize("kind, statuses", [
-    ("SC", ["confirmed"]),
-    ("SC", ["rejected"]),
-    ("SC", ["confirmed", "stale"]),
-    ("CT", ["confirmed"]),
-    ("CT", ["not_reproduced"]),
-    ("CT", ["inconclusive"]),
-    ("CT", ["confirmed", "stale"]),
-    ("CT", ["confirmed", "confirmed"]),
-    ("CU", ["approved"]),
-    ("CU", ["withdrawn"]),
-    ("CU", ["approved", "stale"]),
-    ("CU", ["approved", "approved"]),
+    ("source-challenge", ["confirmed"]),
+    ("source-challenge", ["rejected"]),
+    ("source-challenge", ["confirmed", "stale"]),
+    ("claim-task", ["confirmed"]),
+    ("claim-task", ["not_reproduced"]),
+    ("claim-task", ["inconclusive"]),
+    ("claim-task", ["confirmed", "stale"]),
+    ("claim-task", ["confirmed", "confirmed"]),
+    ("checked-use", ["approved"]),
+    ("checked-use", ["withdrawn"]),
+    ("checked-use", ["approved", "stale"]),
+    ("checked-use", ["approved", "approved"]),
 ])
 def test_a_legal_decision_sequence_is_clean(kind, statuses):
     assert decision_issues(stored(kind, statuses)) == []
 
 
 def test_a_use_creator_may_approve_it():
-    assert decision_issues(stored("CU", ["approved"], by=CREATOR)) == []
+    assert decision_issues(stored("checked-use", ["approved"], by=CREATOR)) == []
 
 
 def test_the_status_must_be_the_last_decision_s():
-    rec = stored("SC", ["confirmed"])
+    rec = stored("source-challenge", ["confirmed"])
     rec.data["status"] = "rejected"                  # status is not a subject field, so the bind still holds
     issues = decision_issues(rec)
     assert messages(issues) == ["status is rejected but the last decision set confirmed; a record's "
@@ -310,13 +310,13 @@ def test_the_status_must_be_the_last_decision_s():
 
 
 def test_a_status_with_no_decision_is_an_error():
-    issues = decision_issues(record("SC", status="confirmed"))
+    issues = decision_issues(record("source-challenge", status="confirmed"))
     assert messages(issues) == ["status is confirmed with no decisions; a record with no decisions is "
                                 "open, so set status: open or append the decision that made it confirmed"]
 
 
 def test_a_hand_edit_of_a_decided_record_is_an_error():
-    rec = stored("SC", ["confirmed"])
+    rec = stored("source-challenge", ["confirmed"])
     rec.data["proposition"] = "a different proposition"
     issues = decision_issues(rec)
     assert len(issues) == 1
@@ -325,19 +325,19 @@ def test_a_hand_edit_of_a_decided_record_is_an_error():
 
 
 def test_a_retired_record_keeps_its_bind():
-    rec = stored("SC", ["confirmed", "stale"])
+    rec = stored("source-challenge", ["confirmed", "stale"])
     rec.data["proposition"] = "a different proposition"
     assert len(decision_issues(rec)) == 1
 
 
 def test_an_earlier_bind_is_audit_data_and_is_not_checked():
-    rec = stored("SC", ["confirmed", "stale"])
+    rec = stored("source-challenge", ["confirmed", "stale"])
     rec.data["decisions"][0]["bind"] = ZERO64
     assert decision_issues(rec) == []
 
 
 def test_an_illegal_stored_sequence_names_the_decision():
-    rec = stored("SC", ["confirmed", "open"])
+    rec = stored("source-challenge", ["confirmed", "open"])
     issues = decision_issues(rec)
     assert len(issues) == 1
     assert issues[0].message.startswith("decisions[1]: ")
@@ -345,28 +345,28 @@ def test_an_illegal_stored_sequence_names_the_decision():
 
 
 def test_an_illegal_stored_status_change_names_the_decision():
-    rec = stored("SC", ["rejected", "confirmed"])
+    rec = stored("source-challenge", ["rejected", "confirmed"])
     issues = decision_issues(rec)
     assert len(issues) == 1
     assert issues[0].message.startswith("decisions[1]: a challenge cannot go from rejected to confirmed")
 
 
 @pytest.mark.parametrize("kind, actor, role", [
-    ("SC", CREATOR, "creator"),
-    ("CT", CREATOR, "creator"),
-    ("CT", PROPONENT, "proponent"),
-    ("CU", PROPONENT, "proponent"),
+    ("source-challenge", CREATOR, "creator"),
+    ("claim-task", CREATOR, "creator"),
+    ("claim-task", PROPONENT, "proponent"),
+    ("checked-use", PROPONENT, "proponent"),
 ])
 def test_a_stored_self_decision_is_an_error(kind, actor, role):
-    status = "approved" if kind == "CU" else "confirmed"
+    status = "approved" if kind == "checked-use" else "confirmed"
     issues = decision_issues(stored(kind, [status], by=actor))
     assert messages(issues) == [f"decisions[0]: {actor} is {kind}-0001's {role}; a closing decision needs "
                                 f"someone else"]
 
 
-@pytest.mark.parametrize("kind, status, actor", [("CT", "confirmed", CREATOR),
-                                                 ("CT", "confirmed", PROPONENT),
-                                                 ("CU", "approved", PROPONENT)])
+@pytest.mark.parametrize("kind, status, actor", [("claim-task", "confirmed", CREATOR),
+                                                 ("claim-task", "confirmed", PROPONENT),
+                                                 ("checked-use", "approved", PROPONENT)])
 def test_a_stored_self_rebind_is_an_error(kind, status, actor):
     issues = decision_issues(stored(kind, [status, status], by=[THIRD, actor]))
     assert len(issues) == 1
@@ -374,23 +374,23 @@ def test_a_stored_self_rebind_is_an_error(kind, status, actor):
 
 
 def test_every_problem_is_reported_in_order():
-    rec = stored("SC", ["confirmed"], by=CREATOR)
+    rec = stored("source-challenge", ["confirmed"], by=CREATOR)
     rec.data["decisions"][-1]["bind"] = ZERO64
     rec.data["status"] = "rejected"
     issues = decision_issues(rec)
     assert len(issues) == 3
     assert messages(issues) == [
-        "decisions[0]: reviewer-a is SC-0001's creator; a closing decision needs someone else",
+        "decisions[0]: reviewer-a is source-challenge-0001's creator; a closing decision needs someone else",
         "status is rejected but the last decision set confirmed; a record's status is its last "
         "decision's status",
         f"the last decision's bind is {ZERO64} but the record's subject digest is "
-        f"{subject_digest('SC', rec.data)}; a decided record cannot be edited, so the record was changed "
+        f"{subject_digest('source-challenge', rec.data)}; a decided record cannot be edited, so the record was changed "
         f"by hand",
     ]
 
 
 def test_a_missing_decisions_key_behaves_as_an_empty_list():
-    rec = record("SC")
+    rec = record("source-challenge")
     del rec.data["decisions"]
     assert decision_issues(rec) == []
     rec.data["status"] = "confirmed"
@@ -399,21 +399,21 @@ def test_a_missing_decisions_key_behaves_as_an_empty_list():
 
 @pytest.mark.parametrize("decisions", ["not a list", None, 42, {"0": {}}])
 def test_a_decisions_value_that_is_not_a_list_is_schema_issues_business(decisions):
-    rec = record("SC")
+    rec = record("source-challenge")
     rec.data["decisions"] = decisions
     assert decision_issues(rec) == []
 
 
-@pytest.mark.parametrize("kind, data", [(None, record_data("SC")), ("SC", None), ("SC", []),
-                                        ("XX", {"status": "confirmed"}), ("SC", "text")])
+@pytest.mark.parametrize("kind, data", [(None, record_data("source-challenge")), ("source-challenge", None), ("source-challenge", []),
+                                        ("XX", {"status": "confirmed"}), ("source-challenge", "text")])
 def test_an_unparsed_record_has_no_decision_issues(kind, data):
-    rec = Record(path="research-review/challenges/SC-0001.yaml", id="SC-0001", kind=kind, data=data, raw=b"")
+    rec = Record(path="research-review/challenges/source-challenge-0001.yaml", id="source-challenge-0001", kind=kind, data=data, raw=b"")
     assert decision_issues(rec) == []
 
 
 def test_an_unreadable_decision_is_schema_issues_business():
-    rec = record("SC", status="confirmed")
-    bind = subject_digest("SC", rec.data)
+    rec = record("source-challenge", status="confirmed")
+    bind = subject_digest("source-challenge", rec.data)
     for entry in ({"by": THIRD, "bind": bind},                  # no status
                   {"status": 7, "by": THIRD, "bind": bind},
                   {"status": "confirmed", "bind": bind},        # no by
@@ -428,33 +428,33 @@ def test_an_unreadable_decision_is_schema_issues_business():
 
 
 def test_a_status_outside_the_vocabulary_is_schema_issues_business():
-    rec = record("SC", status="confirmedd")
+    rec = record("source-challenge", status="confirmedd")
     rec.data["decisions"] = [{"status": "confirmedd", "by": CREATOR, "bind": ZERO64}]
     assert decision_issues(rec) == []
     rec.data["status"] = "confirmed"
     rec.data["decisions"] = [{"status": "confirmedd", "by": CREATOR,
-                              "bind": subject_digest("SC", rec.data)}]
+                              "bind": subject_digest("source-challenge", rec.data)}]
     assert decision_issues(rec) == []
 
 
 def test_a_decision_issue_carries_the_k13_fields():
-    rec = stored("SC", ["confirmed"])
+    rec = stored("source-challenge", ["confirmed"])
     rec.data["status"] = "rejected"
     rec.meta = meta(status=5, decisions=10)
     issue, = decision_issues(rec)
-    assert (issue.code, issue.level, issue.owner, issue.path) == ("K13", "error", "SC-0001", rec.path)
+    assert (issue.code, issue.level, issue.owner, issue.path) == ("K13", "error", "source-challenge-0001", rec.path)
     assert issue.line == 6                           # key_line is 1-based
     assert issue.is_error
 
 
 def test_a_decision_issue_points_at_the_decisions_key():
-    rec = stored("SC", ["confirmed", "open"])
+    rec = stored("source-challenge", ["confirmed", "open"])
     rec.meta = meta(status=5, decisions=10)
     issue, = decision_issues(rec)
     assert issue.line == 11
 
 
 def test_without_line_metadata_the_line_is_zero():
-    rec = stored("SC", ["confirmed"])
+    rec = stored("source-challenge", ["confirmed"])
     rec.data["status"] = "rejected"
     assert [i.line for i in decision_issues(rec)] == [0]

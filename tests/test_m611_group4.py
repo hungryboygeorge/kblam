@@ -189,9 +189,10 @@ def edit_finding(kb, source_repo, finding_id: str, slug: str) -> Path:
     return staged
 
 
-def challenge_new(kb, source_repo, *, by: str, rec_id: str = "SC-0001",
+def challenge_new(kb, source_repo, *, by: str, rec_id: str = "source-challenge-0001",
                   lines: str = "3-3") -> Path:
-    """`kblam challenge new <trace> --lines A-B --by NAME`: stage the SC and write its receipt."""
+    """`kblam challenge new <trace> --lines A-B --by NAME`: stage the source challenge, write its
+    receipt."""
     staged = kb.root / REVIEW_STAGING / f"{rec_id}.yaml"
     call(kb, source_repo, {rel(kb, staged), f"{RECEIPTS}/{rec_id}.json"},
          "challenge", "new", m.TRACE, "--lines", lines, "--by", by, out=f"{staged}\n")
@@ -199,8 +200,8 @@ def challenge_new(kb, source_repo, *, by: str, rec_id: str = "SC-0001",
 
 
 def task_new(kb, source_repo, finding_id: str, *, by: str, proponent: str,
-             rec_id: str = "CT-0001") -> Path:
-    """`kblam task new <finding> --kind replication --by NAME --proponent NAME`: stage the CT."""
+             rec_id: str = "claim-task-0001") -> Path:
+    """`kblam task new <finding> --kind replication --by NAME --proponent NAME`: stage the claim task."""
     staged = kb.root / REVIEW_STAGING / f"{rec_id}.yaml"
     call(kb, source_repo, {rel(kb, staged), f"{RECEIPTS}/{rec_id}.json"},
          "task", "new", finding_id, "--kind", "replication", "--by", by, "--proponent", proponent,
@@ -209,8 +210,9 @@ def task_new(kb, source_repo, finding_id: str, *, by: str, proponent: str,
 
 
 def use_review(kb, source_repo, sc_id: str, finding_id: str, *, by: str, proponent: str,
-               rec_id: str = "CU-0001", ordinal: int = 1) -> Path:
-    """`kblam use review <SC> <finding> <ordinal> --by NAME --proponent NAME`: stage the CU."""
+               rec_id: str = "checked-use-0001", ordinal: int = 1) -> Path:
+    """`kblam use review <challenge> <finding> <ordinal> --by NAME --proponent NAME`: stage the checked
+    use."""
     staged = kb.root / REVIEW_STAGING / f"{rec_id}.yaml"
     call(kb, source_repo, {rel(kb, staged), f"{RECEIPTS}/{rec_id}.json"},
          "use", "review", sc_id, finding_id, str(ordinal), "--by", by, "--proponent", proponent,
@@ -221,7 +223,7 @@ def use_review(kb, source_repo, sc_id: str, finding_id: str, *, by: str, propone
 def put_record(kb, source_repo, staged: Path, rec_id: str, *, out: str, err: str = "") -> None:
     """The first put of a staged record: the record is installed, the review index regenerated, the
     ID registered, `tree.hash` recorded and the staged file consumed (§5.2.6)."""
-    folder = {"SC": "challenges", "CT": "tasks", "CU": "uses"}[rec_id[:2]]
+    folder = records.KINDS[rec_id.rsplit("-", 1)[0]]
     call(kb, source_repo,
          {f"{REVIEW}/{folder}/{rec_id}.yaml", f"{REVIEW}/INDEX.md", REGISTRY, TREE_HASH,
           rel(kb, staged)},
@@ -247,19 +249,19 @@ def validate(kb, source_repo, *, code: int, out: str, err: str = "") -> m.Run:
 
 def same_bytes_message(source_repo, ordinal: int = 1) -> str:
     """The K14 "same bytes" diagnostic (SPEC §5.2.4) for F-0001's excerpt `ordinal` of the trace's
-    lines 3-3, which SC-0001 challenges at its pinned blob."""
+    lines 3-3, which source-challenge-0001 challenges at its pinned blob."""
     version = source_repo.blob(m.TRACE_PATH)[:12]
-    return (f"SC-0001 challenges this quoted assertion at {m.TRACE}@{version}:3-3; edit the finding or "
-            f"have this use reviewed (kblam use review SC-0001 F-0001 {ordinal} --by NAME --proponent "
+    return (f"source-challenge-0001 challenges this quoted assertion at {m.TRACE}@{version}:3-3; edit the finding or "
+            f"have this use reviewed (kblam use review source-challenge-0001 F-0001 {ordinal} --by NAME --proponent "
             f"NAME). K10 is checked separately.")
 
 
-def same_bytes_open_use(source_repo, ordinal: int = 1, rec_id: str = "CU-0001") -> str:
+def same_bytes_open_use(source_repo, ordinal: int = 1, rec_id: str = "checked-use-0001") -> str:
     """The same-bytes diagnostic where `rec_id` is already installed open for researcher-a: the step it
     names is the decision that approves that use, not a second `kblam use review`, which would settle
     nothing the open one does not (k14.USE_DECIDE)."""
     version = source_repo.blob(m.TRACE_PATH)[:12]
-    return (f"SC-0001 challenges this quoted assertion at {m.TRACE}@{version}:3-3; edit the finding or "
+    return (f"source-challenge-0001 challenges this quoted assertion at {m.TRACE}@{version}:3-3; edit the finding or "
             f"have this use reviewed (kblam review decide {rec_id} --status approved --by NAME --reason "
             f"TEXT --expect D; its --by must not be its proponent ({rec_id}'s proponent is "
             f"researcher-a)). K10 is checked separately.")
@@ -275,18 +277,18 @@ def stale_line(rec_id: str) -> str:
 def stale_use_warning(now: str, bound: str) -> str:
     """The K13 warning for a use whose finding's bytes changed under it (SPEC §5.2.3 "A use is
     current"), as a put and validate print it."""
-    return (f"K13 warning {REVIEW}/uses/CU-0001.yaml: F-0001's file bytes changed since this use was "
-            f"bound ({now} is not {bound}) (run kblam review rebind CU-0001 --by NAME --reason TEXT "
+    return (f"K13 warning {REVIEW}/uses/checked-use-0001.yaml: F-0001's file bytes changed since this use was "
+            f"bound ({now} is not {bound}) (run kblam review rebind checked-use-0001 --by NAME --reason TEXT "
             f"--expect D)")
 
 
 def k15_binding_line(kb, path: str, bound: str) -> str:
     """The K15 error a task bound to the finding's bytes `bound` raises once those bytes change
     (SPEC §5.2.3, §5.2.4): reported on the record's `base_file_sha256` line."""
-    record = m.record_path(kb, "CT-0001")
+    record = m.record_path(kb, "claim-task-0001")
     return (f"K15 {rel(kb, record)}:{line_with(record, bound)}: F-0001's file now hashes to "
-            f"{sha_of(kb, path)}, not the {bound} CT-0001 was bound to (the binding covers the whole "
-            f"file, not only the fingerprint); reread it, then run kblam review rebind CT-0001 --by NAME "
+            f"{sha_of(kb, path)}, not the {bound} claim-task-0001 was bound to (the binding covers the whole "
+            f"file, not only the fingerprint); reread it, then run kblam review rebind claim-task-0001 --by NAME "
             f"--reason TEXT --expect D")
 
 
@@ -302,53 +304,53 @@ def k4_line(kb, path: Path) -> str:
 
 
 def confirmed_challenge(kb, source_repo, *, affects: str | None = None) -> str:
-    """SC-0001 on the trace's lines 3-3, put and confirmed by reviewer-b (its creator is reviewer-a).
+    """source-challenge-0001 on the trace's lines 3-3, put and confirmed by reviewer-b (its creator is reviewer-a).
     `affects` is the installed finding whose excerpt the confirmation newly makes fail K14, or None.
     Returns the challenge's ID."""
     staged = challenge_new(kb, source_repo, by="reviewer-a")
     fill(staged, **sc_fields())
-    put_record(kb, source_repo, staged, "SC-0001",
-               out=text(f"kblam put: SC-0001 -> {REVIEW}/challenges/SC-0001.yaml"))
-    lines = [f"kblam review decide: SC-0001 is now confirmed (subject digest "
-             f"{m.expect(kb, 'SC-0001')[:12]})"]
+    put_record(kb, source_repo, staged, "source-challenge-0001",
+               out=text(f"kblam put: source-challenge-0001 -> {REVIEW}/challenges/source-challenge-0001.yaml"))
+    lines = [f"kblam review decide: source-challenge-0001 is now confirmed (subject digest "
+             f"{m.expect(kb, 'source-challenge-0001')[:12]})"]
     if affects is not None:
         lines += [
-            f"kblam review decide: SC-0001 now affects {affects}; run kblam challenge uses SC-0001 "
+            f"kblam review decide: source-challenge-0001 now affects {affects}; run kblam challenge uses source-challenge-0001 "
             f"for each excerpt and the command that fixes it",
             f"K14 {FINDING_PATH}:{excerpt_line(kb.root / FINDING_PATH)}: "
             f"{same_bytes_message(source_repo)}",
             "kblam review decide: done, but kblam validate still fails (1 error(s) listed above, "
             "owned by other findings or records)",
         ]
-    decide(kb, source_repo, "SC-0001", "confirmed", by="reviewer-b", out=text(*lines),
-           changed={f"{REVIEW}/challenges/SC-0001.yaml", f"{REVIEW}/INDEX.md", TREE_HASH})
-    return "SC-0001"
+    decide(kb, source_repo, "source-challenge-0001", "confirmed", by="reviewer-b", out=text(*lines),
+           changed={f"{REVIEW}/challenges/source-challenge-0001.yaml", f"{REVIEW}/INDEX.md", TREE_HASH})
+    return "source-challenge-0001"
 
 
-def approved_use(kb, source_repo, sc_id: str = "SC-0001", finding_id: str = "F-0001") -> str:
-    """CU-0001, proposed by researcher-a and approved by reviewer-b, which covers F-0001's excerpt of
+def approved_use(kb, source_repo, sc_id: str = "source-challenge-0001", finding_id: str = "F-0001") -> str:
+    """checked-use-0001, proposed by researcher-a and approved by reviewer-b, which covers F-0001's excerpt of
     the challenged lines: the put leaves the K14 error standing (the use is still open) and the
     approval resolves it. Returns the use's ID."""
     staged = use_review(kb, source_repo, sc_id, finding_id, by="reviewer-b",
                         proponent="researcher-a")
     fill(staged, **cu_fields())
-    put_record(kb, source_repo, staged, "CU-0001", out=text(
-        f"kblam put: CU-0001 -> {REVIEW}/uses/CU-0001.yaml",
+    put_record(kb, source_repo, staged, "checked-use-0001", out=text(
+        f"kblam put: checked-use-0001 -> {REVIEW}/uses/checked-use-0001.yaml",
         f"K14 {FINDING_PATH}:{excerpt_line(kb.root / FINDING_PATH)}: "
         f"{same_bytes_open_use(source_repo)}",
         "kblam put: done, but kblam validate still fails (1 error(s) listed above, owned by other "
         "findings or records)"))
-    decide(kb, source_repo, "CU-0001", "approved", by="reviewer-b",
-           changed={f"{REVIEW}/uses/CU-0001.yaml", f"{REVIEW}/INDEX.md", TREE_HASH},
-           out=text(f"kblam review decide: CU-0001 is now approved (subject digest "
-                    f"{m.expect(kb, 'CU-0001')[:12]})"))
-    return "CU-0001"
+    decide(kb, source_repo, "checked-use-0001", "approved", by="reviewer-b",
+           changed={f"{REVIEW}/uses/checked-use-0001.yaml", f"{REVIEW}/INDEX.md", TREE_HASH},
+           out=text(f"kblam review decide: checked-use-0001 is now approved (subject digest "
+                    f"{m.expect(kb, 'checked-use-0001')[:12]})"))
+    return "checked-use-0001"
 
 
 def finding_with_an_approved_use(kb, source_repo) -> str:
     """The second scenario's start state: F-0001 quotes the trace's lines 3-3 (installed through
-    `kb.add`, before a challenge on them exists), SC-0001 is confirmed on those lines by reviewer-b
-    and CU-0001 covers the excerpt, so validate exits 0. Returns the challenge's ID."""
+    `kb.add`, before a challenge on them exists), source-challenge-0001 is confirmed on those lines by reviewer-b
+    and checked-use-0001 covers the excerpt, so validate exits 0. Returns the challenge's ID."""
     m.quoting_finding(kb, "F-0001", source_repo, "3-3")
     sc = confirmed_challenge(kb, source_repo, affects="F-0001")
     approved_use(kb, source_repo, sc, "F-0001")
@@ -358,20 +360,20 @@ def finding_with_an_approved_use(kb, source_repo) -> str:
 
 def finding_with_a_task(kb, source_repo) -> str:
     """The third scenario's start state: F-0001 (a plain finding, no excerpt) and the open, current
-    task CT-0001 bound to it, creator and proponent researcher-a. validate exits 0."""
+    task claim-task-0001 bound to it, creator and proponent researcher-a. validate exits 0."""
     kb.add("F-0001", "sensor", m.CLAIM)
     staged = task_new(kb, source_repo, "F-0001", by="researcher-a", proponent="researcher-a")
     fill(staged, **ct_fields())
-    put_record(kb, source_repo, staged, "CT-0001",
-               out=text(f"kblam put: CT-0001 -> {REVIEW}/tasks/CT-0001.yaml"))
-    return "CT-0001"
+    put_record(kb, source_repo, staged, "claim-task-0001",
+               out=text(f"kblam put: claim-task-0001 -> {REVIEW}/tasks/claim-task-0001.yaml"))
+    return "claim-task-0001"
 
 
 # --- a new finding that quotes a confirmed assertion (refused, exit 1, findings/ unchanged) -------
 
 
 def test_a_new_finding_quoting_a_confirmed_assertion_is_refused(kb, source_repo):
-    """(a) Start: no findings; SC-0001 confirmed on the trace's lines 3-3, pinned at the HEAD blob,
+    """(a) Start: no findings; source-challenge-0001 confirmed on the trace's lines 3-3, pinned at the HEAD blob,
     validate clean. Command: `kblam put <staged new F-0001>` quoting those lines verbatim (`put` takes
     no --by). Exit 1: a new excerpt cannot quote a confirmed challenge's assertion in schema 1, even
     for its raw bytes, because the use that would cover it binds an installed finding. Diagnostics: the
@@ -398,12 +400,12 @@ def test_a_new_finding_quoting_a_confirmed_assertion_is_refused(kb, source_repo)
 
 
 def test_a_body_only_edit_is_accepted_and_lists_the_use_it_makes_stale(kb, source_repo):
-    """(b) Start: F-0001 quotes the trace's lines 3-3, SC-0001 confirmed on them and CU-0001 approved,
+    """(b) Start: F-0001 quotes the trace's lines 3-3, source-challenge-0001 confirmed on them and checked-use-0001 approved,
     so the excerpt is covered and validate is clean. Command: `kblam put <staged edit of F-0001>`, one
     paragraph appended after the excerpt (frontmatter, claim and excerpt unchanged). Exit 0: the kept
     excerpt is one the installed finding already had affected, so K14 does not refuse the edit, and K15
     never refuses a finding put. Diagnostics: the K13 warning that the use's bound finding bytes
-    changed, the put line, "CU-0001 is now stale…", the K14 error the put keeps — the use no longer
+    changed, the put line, "checked-use-0001 is now stale…", the K14 error the put keeps — the use no longer
     covers the excerpt — and "done, but kblam validate still fails (1 error(s)…)". Files changed: the
     finding, tree.hash, the staged file and the edit-base receipt removed, and kblam's own caches.
     validate afterwards: exit 1, the K14 error, that K13 warning and 1 error in findings/. Acceptance
@@ -423,7 +425,7 @@ def test_a_body_only_edit_is_accepted_and_lists_the_use_it_makes_stale(kb, sourc
         assert run.out == text(
             stale_use_warning(now, bound),
             f"kblam put: F-0001 -> {FINDING_PATH}",
-            stale_line("CU-0001"),
+            stale_line("checked-use-0001"),
             f"K14 {rel(kb, staged)}:{staged_line}: {same_bytes_message(source_repo)}",
             "kblam put: done, but kblam validate still fails (1 error(s) listed above that this put "
             "did not refuse)")
@@ -437,11 +439,11 @@ def test_a_body_only_edit_is_accepted_and_lists_the_use_it_makes_stale(kb, sourc
 
 
 def test_a_reviewer_rebinds_the_use_the_edit_made_stale_and_validate_is_clean(kb, source_repo):
-    """(b) Start: as the body-only edit left it — CU-0001 (proponent researcher-a) bound to F-0001's
-    earlier bytes, so K14 fails and validate exits 1. Command: `kblam review rebind CU-0001 --by
+    """(b) Start: as the body-only edit left it — checked-use-0001 (proponent researcher-a) bound to F-0001's
+    earlier bytes, so K14 fails and validate exits 1. Command: `kblam review rebind checked-use-0001 --by
     reviewer-b --reason … --expect D`, a reviewer other than the proponent, who recomputes the use's
     binding from the installed finding and from the confirmed challenge's current subject digest. Exit
-    0. Diagnostics: "kblam review rebind: CU-0001 rebound, now approved (subject digest …)". Files
+    0. Diagnostics: "kblam review rebind: checked-use-0001 rebound, now approved (subject digest …)". Files
     changed: the use and tree.hash (the review index is unchanged: the use's row keeps the same ID,
     challenge, finding, excerpt, disposition and status). validate afterwards: exit 0. Acceptance 2,
     Acceptance 5."""
@@ -460,7 +462,7 @@ def test_a_reviewer_rebinds_the_use_the_edit_made_stale_and_validate_is_clean(kb
         assert run.out == text(
             stale_use_warning(now, bound),
             f"kblam put: F-0001 -> {FINDING_PATH}",
-            stale_line("CU-0001"),
+            stale_line("checked-use-0001"),
             f"K14 {rel(kb, staged)}:{staged_line}: {same_bytes_message(source_repo)}",
             "kblam put: done, but kblam validate still fails (1 error(s) listed above that this put "
             "did not refuse)")
@@ -470,13 +472,13 @@ def test_a_reviewer_rebinds_the_use_the_edit_made_stale_and_validate_is_clean(kb
         stale_use_warning(now, bound),
         "kblam validate: 1 error(s) in findings/"))
 
-    with cli(kb, source_repo, {f"{REVIEW}/uses/CU-0001.yaml", TREE_HASH},
-             "review", "rebind", "CU-0001", "--by", "reviewer-b",
+    with cli(kb, source_repo, {f"{REVIEW}/uses/checked-use-0001.yaml", TREE_HASH},
+             "review", "rebind", "checked-use-0001", "--by", "reviewer-b",
              "--reason", "rechecked the excerpt in the new revision",
-             "--expect", m.expect(kb, "CU-0001")) as run:
+             "--expect", m.expect(kb, "checked-use-0001")) as run:
         assert run.code == 0
-        assert run.out == text(f"kblam review rebind: CU-0001 rebound, now approved (subject digest "
-                               f"{m.expect(kb, 'CU-0001')[:12]})")
+        assert run.out == text(f"kblam review rebind: checked-use-0001 rebound, now approved (subject digest "
+                               f"{m.expect(kb, 'checked-use-0001')[:12]})")
         assert run.err == ""
 
     validate(kb, source_repo, code=0, out="kblam validate: OK (1 findings)\n")
@@ -486,17 +488,17 @@ def test_a_reviewer_rebinds_the_use_the_edit_made_stale_and_validate_is_clean(kb
 
 
 def test_a_finding_put_with_an_open_task_lists_the_task_it_makes_stale(kb, source_repo):
-    """(c) Start: F-0001 and the open, current task CT-0001 bound to its bytes, so validate prints the
+    """(c) Start: F-0001 and the open, current task claim-task-0001 bound to its bytes, so validate prints the
     pending line and exits 0. Command: `kblam put <staged edit of F-0001>`, one paragraph appended.
     Exit 0: a finding put blocks on K1-K11 and K14, never on K15, so the task's broken binding does not
-    refuse it. Diagnostics: the put line, "CT-0001 is now stale…" with the rebind command for an open
+    refuse it. Diagnostics: the put line, "claim-task-0001 is now stale…" with the rebind command for an open
     task (no --evidence), the K15 binding error it did not refuse, and "done, but kblam validate still
     fails (1 error(s)…)". Files changed: the finding, tree.hash, the staged file and the edit-base
     receipt removed, and kblam's own caches. validate afterwards: exit 1, no pending line, 1 error in
     findings/. Acceptance 4."""
     finding_with_a_task(kb, source_repo)
     validate(kb, source_repo, code=0, out=text(
-        "CT-0001 open replication of F-0001: Does an independent measurement establish the claim?",
+        "claim-task-0001 open replication of F-0001: Does an independent measurement establish the claim?",
         "kblam validate: OK (1 findings); 1 pending task(s)"))
     bound = sha_of(kb, SENSOR_PATH)
     staged = edit_finding(kb, source_repo, "F-0001", "sensor")
@@ -509,7 +511,7 @@ def test_a_finding_put_with_an_open_task_lists_the_task_it_makes_stale(kb, sourc
         assert run.code == 0
         assert run.out == text(
             f"kblam put: F-0001 -> {SENSOR_PATH}",
-            stale_line("CT-0001"),
+            stale_line("claim-task-0001"),
             k15_binding_line(kb, SENSOR_PATH, bound),
             "kblam put: done, but kblam validate still fails (1 error(s) listed above that this put "
             "did not refuse)")
@@ -521,7 +523,7 @@ def test_a_finding_put_with_an_open_task_lists_the_task_it_makes_stale(kb, sourc
 
 
 def test_a_finding_put_with_an_already_stale_task_is_accepted(kb, source_repo):
-    """(c) Start: F-0001 and CT-0001 bound to it, then F-0001 rewritten out of band, so CT-0001 is
+    """(c) Start: F-0001 and claim-task-0001 bound to it, then F-0001 rewritten out of band, so claim-task-0001 is
     already stale and validate exits 1 with the K15 error. Command: `kblam put <staged edit of
     F-0001>`, a second paragraph appended. Exit 0: K15 never refuses a finding put, and a binding that
     was already broken is not listed again as newly stale. Diagnostics: the put line, the K15 error it
@@ -555,18 +557,18 @@ def test_a_finding_put_with_an_already_stale_task_is_accepted(kb, source_repo):
 
 
 def test_a_finding_put_with_a_retired_task_is_accepted_and_raises_nothing(kb, source_repo):
-    """(c) Start: F-0001 and CT-0001 bound to it, then CT-0001 retired by reviewer-b (`kblam review
-    decide CT-0001 --status stale`: `stale` is every kind's retired status, and a retired task gets no
+    """(c) Start: F-0001 and claim-task-0001 bound to it, then claim-task-0001 retired by reviewer-b (`kblam review
+    decide claim-task-0001 --status stale`: `stale` is every kind's retired status, and a retired task gets no
     binding check), so validate exits 0. Command: `kblam put <staged edit of F-0001>`, one paragraph
     appended. Exit 0: K15 never refuses a finding put, and a retired task leaves no obligation at all.
     Diagnostics: the put line alone — no stale line, no "validate still fails" line. Files changed: the
     finding, tree.hash, the staged file and the edit-base receipt removed, and kblam's own caches.
     validate afterwards: exit 0. Acceptance 4."""
     finding_with_a_task(kb, source_repo)
-    decide(kb, source_repo, "CT-0001", "stale", by="reviewer-b", reason="the question is settled",
-           changed={f"{REVIEW}/tasks/CT-0001.yaml", f"{REVIEW}/INDEX.md", TREE_HASH},
-           out=text(f"kblam review decide: CT-0001 is now stale (subject digest "
-                    f"{m.expect(kb, 'CT-0001')[:12]})"))
+    decide(kb, source_repo, "claim-task-0001", "stale", by="reviewer-b", reason="the question is settled",
+           changed={f"{REVIEW}/tasks/claim-task-0001.yaml", f"{REVIEW}/INDEX.md", TREE_HASH},
+           out=text(f"kblam review decide: claim-task-0001 is now stale (subject digest "
+                    f"{m.expect(kb, 'claim-task-0001')[:12]})"))
     validate(kb, source_repo, code=0, out="kblam validate: OK (1 findings)\n")
     staged = edit_finding(kb, source_repo, "F-0001", "sensor")
     staged.write_bytes(edited(reading(kb, SENSOR_PATH)).encode("utf-8"))
@@ -586,7 +588,7 @@ def test_a_finding_put_with_a_retired_task_is_accepted_and_raises_nothing(kb, so
 def test_a_record_put_is_accepted_while_an_unrelated_finding_fails(kb, source_repo):
     """(d) Start: F-0002 states a fact in revision-history language, so K4 fails it and validate exits
     1; the registry does not exist and the review root is empty. Command: `kblam put <staged new
-    SC-0001>`, filled and ready. Exit 0: a record put blocks on the errors owned by that record, and
+    source-challenge-0001>`, filled and ready. Exit 0: a record put blocks on the errors owned by that record, and
     another file's error never refuses it. Diagnostics: the put line, F-0002's K4 error and "done, but
     kblam validate still fails (1 error(s) listed above, owned by other findings or records)". Files
     changed: the record, <review root>/INDEX.md, .kblam/review-ids, tree.hash and the staged file's
@@ -597,23 +599,23 @@ def test_a_record_put_is_accepted_while_an_unrelated_finding_fails(kb, source_re
     staged = challenge_new(kb, source_repo, by="reviewer-a")
     fill(staged, **sc_fields())
 
-    put_record(kb, source_repo, staged, "SC-0001", out=text(
-        f"kblam put: SC-0001 -> {REVIEW}/challenges/SC-0001.yaml",
+    put_record(kb, source_repo, staged, "source-challenge-0001", out=text(
+        f"kblam put: source-challenge-0001 -> {REVIEW}/challenges/source-challenge-0001.yaml",
         k4_line(kb, other),
         "kblam put: done, but kblam validate still fails (1 error(s) listed above, owned by other "
         "findings or records)"))
 
-    assert m.registry(kb) == ["SC-0001"]
+    assert m.registry(kb) == ["source-challenge-0001"]
     assert not staged.exists()
     validate(kb, source_repo, code=1, out=text(
         k4_line(kb, other), "kblam validate: 1 error(s) in findings/"))
 
 
 def test_a_record_put_whose_own_record_fails_is_refused(kb, source_repo):
-    """(d) Start: no records; a staged SC-0001 whose `proposition` is blank, which §5.2.2 requires (a
-    blank value is allowed only in a staged record). Command: `kblam put <staged SC-0001>`. Exit 1: the
-    error is owned by SC-0001, which the put acts on. Diagnostics: the K13 error at the record's
-    proposition line, at the staged file's own display path, and "kblam put: rejected SC-0001 (1
+    """(d) Start: no records; a staged source-challenge-0001 whose `proposition` is blank, which §5.2.2 requires (a
+    blank value is allowed only in a staged record). Command: `kblam put <staged source-challenge-0001>`. Exit 1: the
+    error is owned by source-challenge-0001, which the put acts on. Diagnostics: the K13 error at the record's
+    proposition line, at the staged file's own display path, and "kblam put: rejected source-challenge-0001 (1
     error(s)); research-review/ is unchanged…". Files changed: none at all — no record, no index, no
     registry, no tree.hash, not even the Jev pair cache a finding put writes — and the staged file
     stays. validate afterwards: exit 0. Acceptance 2."""
@@ -623,7 +625,7 @@ def test_a_record_put_whose_own_record_fails_is_refused(kb, source_repo):
     call(kb, source_repo, set(), "put", str(staged), code=1, out=text(
         f"K13 {rel(kb, staged)}:{staged_key_line(staged, 'proposition')}: proposition: "
         f"required",
-        f"kblam put: rejected SC-0001 (1 error(s)); {REVIEW}/ is unchanged. Fix the staged file and "
+        f"kblam put: rejected source-challenge-0001 (1 error(s)); {REVIEW}/ is unchanged. Fix the staged file and "
         f"put it again. {SKILL_POINTER}"))
 
     assert staged.is_file() and not (kb.root / REVIEW / "challenges").exists()

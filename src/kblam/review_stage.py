@@ -40,20 +40,22 @@ def _today() -> date:
 
 
 def allocate_record_id(cfg: Config, prefix: str) -> str:
-    """The next ID of kind `prefix` ("SC", "CT" or "CU"), four digits or more: one above the highest
-    number of that prefix among the record files in the review root (any file whose name matches
+    """The next ID of kind `prefix` ("source-challenge", "claim-task" or "checked-use"), four digits or
+    more: one above the highest number of that prefix among the record files in the review root (any
+    file whose name matches
     records.FILENAME_RE, in any folder under the root), the staged files in `.kblam/review-staging/`,
     the registry (registry.read_ids; a ValueError becomes StoreError), the allocation receipts in
     `.kblam/review-receipts/` (an abandoned draft keeps its receipt, and receipts are never rewritten),
     and the record files in the git history of the review root on any ref (store.history_names; without
-    git it adds nothing). Numbering is per prefix: SC-0001 and CT-0001 coexist. Call it under the lock."""
+    git it adds nothing). Numbering is per prefix: source-challenge-0001 and claim-task-0001 coexist.
+    Call it under the lock."""
     if prefix not in records.KINDS:
-        raise StoreError(f"{prefix!r} is not a record kind (SC, CT or CU)")
+        raise StoreError(f"{prefix!r} is not a record kind (source-challenge, claim-task or checked-use)")
     numbers = []
     for text in _allocated_ids(cfg):
         match = records.ID_RE.fullmatch(text)
         if match is not None and match.group(1) == prefix:
-            numbers.append(int(text[3:]))
+            numbers.append(int(match.group(2)))
     return f"{prefix}-{max(numbers, default=0) + 1:04d}"
 
 
@@ -88,7 +90,8 @@ def _files(directory: Path) -> list[Path]:
 
 
 def challenge_new(cfg: Config, source_path: str, lines: tuple[int, int], by: str) -> Path:
-    """`kblam challenge new <source-path> --lines A-B --by NAME`: stage SC-NNNN.yaml and return its path.
+    """`kblam challenge new <source-path> --lines A-B --by NAME`: stage source-challenge-NNNN.yaml and
+    return its path.
 
     Refuses: a path paths.syntax_problem refuses; a path that does not resolve inside the repository;
     a resolved target under a protected root (paths.protected: findings/, the review root, .kblam/,
@@ -115,7 +118,7 @@ def challenge_new(cfg: Config, source_path: str, lines: tuple[int, int], by: str
         captured, occurrence = _capture(text, (first, last))
         digest = sha256_hex(raw)
         pin = gitpin.auto_pin(cfg, source_path, digest)
-        rec_id = allocate_record_id(cfg, "SC")
+        rec_id = allocate_record_id(cfg, "source-challenge")
         today = _today()
         source = {
             "path": _as_written(source_path),
@@ -131,7 +134,7 @@ def challenge_new(cfg: Config, source_path: str, lines: tuple[int, int], by: str
                 "status": "open", "source": source, "proposition": "", "scope": [],
                 "classification": "", "basis": [], "usable": "", "limits": "",
                 "linked_findings": [], "decisions": []}
-        staged = _stage(cfg, "SC", rec_id, data)
+        staged = _stage(cfg, "source-challenge", rec_id, data)
         receipts.write_allocation(cfg, rec_id, {
             "id": rec_id, "created": today.isoformat(), "creator": by,
             "source": {key: source[key] for key in records.REF_KEYS},
@@ -140,19 +143,22 @@ def challenge_new(cfg: Config, source_path: str, lines: tuple[int, int], by: str
 
 
 def challenge_edit(cfg: Config, rec_id: str) -> Path:
-    """`kblam challenge edit SC-…`: stage a byte-for-byte copy of the installed SC and write its edit-base
-    receipt (receipts.write_edit_base with the sha256 of the installed bytes). Refuses: not an SC ID; no
+    """`kblam challenge edit source-challenge-…`: stage a byte-for-byte copy of the installed source
+    challenge and write its edit-base receipt (receipts.write_edit_base with the sha256 of the installed
+    bytes). Refuses: not a source challenge ID; no
     installed record (`<review root>/challenges/<ID>.yaml`); a record that does not parse; an `id` that
     differs from the file name's ID (nothing is staged: kblam validate names the step that fixes the
-    installed file); a status other than open ("SC-0001 is <status>; only an open challenge can be
-    edited"); a staged copy already present (name it, and say to edit that copy and put it, or delete it
+    installed file); a status other than open ("source-challenge-0001 is <status>; only an open challenge
+    can be edited"); a staged copy already present (name it, and say to edit that copy and put it, or
+    delete it
     to start again)."""
     with writes.locked(cfg, f"challenge edit {rec_id}", mutating=False):
-        return _edit(cfg, "SC", rec_id)
+        return _edit(cfg, "source-challenge", rec_id)
 
 
 def challenge_show(cfg: Config, rec_id: str) -> str:
-    """`kblam challenge show SC-…`: the text to print (final newline included), read from the installed
+    """`kblam challenge show source-challenge-…`: the text to print (final newline included), read from
+    the installed
     record with one sources.SourceReader over load_view(cfg). Lines, in this order: the ID and status;
     "subject digest: <64 hex>" (decisions.subject_digest); the source path, its version (the pin's blob,
     or the snapshot path, or "provisional") and its state (sources.State value, plus the resolver's
@@ -160,8 +166,8 @@ def challenge_show(cfg: Config, rec_id: str) -> str:
     classification; each basis entry (path, state, locator, role, provenance); usable; limits; linked
     findings; each decision (date, by, status, reason, evidence paths, bind prefix of 12 hex). A
     malformed record is refused (StoreError naming the file and saying to run kblam validate)."""
-    _check_id(rec_id, "SC")
-    rec = _installed(cfg, "SC", rec_id)
+    _check_id(rec_id, "source-challenge")
+    rec = _installed(cfg, "source-challenge", rec_id)
     view = load_view(cfg)
     reader = SourceReader(cfg, view)
     info = k13.challenge_info(view, reader, rec)
@@ -192,13 +198,14 @@ def challenge_show(cfg: Config, rec_id: str) -> str:
 
 
 def challenge_uses(cfg: Config, rec_id: str) -> str:
-    """`kblam challenge uses SC-…`: one line per k14.challenge_relations entry (the text to print, final
+    """`kblam challenge uses source-challenge-…`: one line per k14.challenge_relations entry (the text to
+    print, final
     newline included): the finding ID and path:line, the excerpt ordinal (for an excerpt), the relation
-    and level in words (error, warning, or "covered by CU-0003"), and the command. When the challenge
-    is not confirmed, one line saying so ("SC-0001 is open; only a confirmed challenge affects
-    findings"). Refuses an unknown or malformed record."""
-    _check_id(rec_id, "SC")
-    rec = _installed(cfg, "SC", rec_id)
+    and level in words (error, warning, or "covered by checked-use-0003"), and the command. When the
+    challenge is not confirmed, one line saying so ("source-challenge-0001 is open; only a confirmed
+    challenge affects findings"). Refuses an unknown or malformed record."""
+    _check_id(rec_id, "source-challenge")
+    rec = _installed(cfg, "source-challenge", rec_id)
     if rec.status != "confirmed":
         return f"{rec_id} is {rec.status}; only a confirmed challenge affects findings\n"
     view = load_view(cfg)
@@ -214,8 +221,8 @@ def challenge_uses(cfg: Config, rec_id: str) -> str:
 
 
 def task_new(cfg: Config, finding_id: str, kind: str, by: str, proponent: str) -> Path:
-    """`kblam task new F-… --kind replication|confirmation --by NAME --proponent NAME`: stage CT-NNNN.yaml
-    bound to the finding and return its path.
+    """`kblam task new F-… --kind replication|confirmation --by NAME --proponent NAME`: stage
+    claim-task-NNNN.yaml bound to the finding and return its path.
 
     Refuses: a malformed finding ID; kind not in records.TASK_KINDS; a finding absent from findings/,
     present more than once, or not parsing (finding.ok false: "run kblam validate"). Writes `kind`,
@@ -233,7 +240,7 @@ def task_new(cfg: Config, finding_id: str, kind: str, by: str, proponent: str) -
     with writes.locked(cfg, "task new", mutating=False):
         view = load_view(cfg)
         finding = _finding_once(cfg, view, finding_id)
-        rec_id = allocate_record_id(cfg, "CT")
+        rec_id = allocate_record_id(cfg, "claim-task")
         today = _today()
         printed = fingerprint(finding, cfg.scope_separator)
         digest = sha256_hex(finding.raw)
@@ -242,7 +249,7 @@ def task_new(cfg: Config, finding_id: str, kind: str, by: str, proponent: str) -
                 "claim_fingerprint": printed, "base_file_sha256": digest, "question": "", "method": "",
                 "outcomes": {key: "" for key in records.OUTCOME_KEYS}, "controls": [], "stop": "",
                 "expected_evidence": [], "decisions": []}
-        staged = _stage(cfg, "CT", rec_id, data)
+        staged = _stage(cfg, "claim-task", rec_id, data)
         receipts.write_allocation(cfg, rec_id, {
             "id": rec_id, "created": today.isoformat(), "creator": by, "proponent": proponent,
             "kind": kind, "finding": finding_id, "claim_fingerprint": printed,
@@ -251,17 +258,18 @@ def task_new(cfg: Config, finding_id: str, kind: str, by: str, proponent: str) -
 
 
 def task_edit(cfg: Config, rec_id: str) -> Path:
-    """`kblam task edit CT-…`: as challenge_edit, for an open task under `<review root>/tasks/`."""
+    """`kblam task edit claim-task-…`: as challenge_edit, for an open task under `<review root>/tasks/`."""
     with writes.locked(cfg, f"task edit {rec_id}", mutating=False):
-        return _edit(cfg, "CT", rec_id)
+        return _edit(cfg, "claim-task", rec_id)
 
 
 def task_show(cfg: Config, rec_id: str) -> str:
-    """`kblam task show CT-…`: ID, status, "subject digest: <64 hex>", kind, finding, proponent, the
+    """`kblam task show claim-task-…`: ID, status, "subject digest: <64 hex>", kind, finding, proponent,
+    the
     binding and whether it still holds (k15.task_binding_problems: each problem printed), question,
     method, outcomes, controls, stop, expected evidence, and the decisions as for challenge_show."""
-    _check_id(rec_id, "CT")
-    rec = _installed(cfg, "CT", rec_id)
+    _check_id(rec_id, "claim-task")
+    rec = _installed(cfg, "claim-task", rec_id)
     view = load_view(cfg)
     data = rec.data
 
@@ -295,8 +303,8 @@ def task_show(cfg: Config, rec_id: str) -> str:
 
 def use_review(cfg: Config, challenge_id: str, finding_id: str, ordinal: int, by: str,
                proponent: str) -> Path:
-    """`kblam use review SC-… F-… <excerpt-ordinal> --by NAME --proponent NAME`: stage CU-NNNN.yaml and
-    return its path.
+    """`kblam use review source-challenge-… F-… <excerpt-ordinal> --by NAME --proponent NAME`: stage
+    checked-use-NNNN.yaml and return its path.
 
     Preconditions, each refused with its own message: the challenge is installed, parses and is
     confirmed; its source is available (k13.challenge_info(...).available); the finding is installed
@@ -311,7 +319,7 @@ def use_review(cfg: Config, challenge_id: str, finding_id: str, ordinal: int, by
     Allocation receipt: {"id", "created", "creator", "proponent", "challenge", "challenge_bind",
     "finding", "finding_fingerprint", "finding_file_sha256", "citation"}.
     """
-    _check_id(challenge_id, "SC")
+    _check_id(challenge_id, "source-challenge")
     _check_finding_id(finding_id)
     if not (isinstance(ordinal, int) and not isinstance(ordinal, bool) and ordinal >= 1):
         raise StoreError(f"excerpt ordinal {ordinal!r} must be an integer >= 1")
@@ -320,7 +328,7 @@ def use_review(cfg: Config, challenge_id: str, finding_id: str, ordinal: int, by
     with writes.locked(cfg, "use review", mutating=False):
         view = load_view(cfg)
         reader = SourceReader(cfg, view)
-        rec = _installed(cfg, "SC", challenge_id,
+        rec = _installed(cfg, "source-challenge", challenge_id,
                          retry=f"kblam use review {challenge_id} {finding_id} {ordinal} --by {by} "
                                f"--proponent {proponent}")
         info = k13.challenge_info(view, reader, rec)
@@ -357,7 +365,7 @@ def use_review(cfg: Config, challenge_id: str, finding_id: str, ordinal: int, by
             raise StoreError(f"{challenge_id} does not affect excerpt {ordinal} of {finding_id} "
                              f"({match.path}:{_range_text(match.range)}); kblam challenge uses "
                              f"{challenge_id} lists what it affects")
-        rec_id = allocate_record_id(cfg, "CU")
+        rec_id = allocate_record_id(cfg, "checked-use")
         today = _today()
         citation = {"ordinal": match.ordinal, "path": match.path, "range": list(match.range),
                     "tag_sha256": match.tag_sha256}
@@ -367,7 +375,7 @@ def use_review(cfg: Config, challenge_id: str, finding_id: str, ordinal: int, by
                 "finding_fingerprint": fingerprint(finding, cfg.scope_separator),
                 "finding_file_sha256": sha256_hex(finding.raw), "citation": citation,
                 "disposition": "", "reason": "", "decisions": []}
-        staged = _stage(cfg, "CU", rec_id, data)
+        staged = _stage(cfg, "checked-use", rec_id, data)
         receipts.write_allocation(cfg, rec_id, {
             "id": rec_id, "created": today.isoformat(), "creator": by, "proponent": proponent,
             "challenge": challenge_id, "challenge_bind": info.digest, "finding": finding_id,
@@ -382,18 +390,19 @@ def use_review(cfg: Config, challenge_id: str, finding_id: str, ordinal: int, by
 @dataclass(frozen=True)
 class ListedRecord:
     id: str
-    kind: str          # "SC" | "CT" | "CU"
+    kind: str          # "source-challenge" | "claim-task" | "checked-use"
     status: str
     digest: str        # the subject digest, 64 hex
-    subject: str       # SC: "<source path>:<A>-<B>"; CT: "<kind> of <finding>"; CU: "<challenge> in
-                       # <finding> excerpt <ordinal>"
-    current: bool      # SC: source available; CT: task_binding_problems is []; CU: use_binding_problems
-                       # is [] (the status is shown separately)
+    subject: str       # source challenge: "<source path>:<A>-<B>"; claim task: "<kind> of <finding>";
+                       # checked use: "<challenge> in <finding> excerpt <ordinal>"
+    current: bool      # source challenge: source available; claim task: task_binding_problems is [];
+                       # checked use: use_binding_problems is [] (the status is shown separately)
 
 
 def review_list(cfg: Config, *, only_open: bool = False) -> list[ListedRecord]:
-    """`kblam review list [--open]`: every installed, parsed record with a valid ID, in (kind order SC,
-    CT, CU; then ID number) order; with only_open, those whose status is open. A record that does not
+    """`kblam review list [--open]`: every installed, parsed record with a valid ID, in (kind order
+    source-challenge, claim-task, checked-use; then ID number) order; with only_open, those whose status
+    is open. A record that does not
     parse is skipped (K13 reports it)."""
     view = load_view(cfg)
     reader = SourceReader(cfg, view)
@@ -421,11 +430,11 @@ def format_listed(item: ListedRecord) -> str:
             f"{item.subject} {state}")
 
 
-_KIND_ORDER = {"SC": 0, "CT": 1, "CU": 2}
+_KIND_ORDER = {"source-challenge": 0, "claim-task": 1, "checked-use": 2}
 
 
 def _id_number(rec_id: str) -> int:
-    number = rec_id[3:]
+    number = rec_id.rsplit("-", 1)[-1]
     return int(number) if number.isdigit() else 0
 
 
@@ -433,11 +442,11 @@ def _subject(rec) -> str:
     """The subject a `review list` line shows (SPEC §5.2.5): what the record is about, from its own
     fields, as best they can be read."""
     data = rec.data
-    if rec.kind == "SC":
+    if rec.kind == "source-challenge":
         source = _mapping(data.get("source"))
         assertion = _mapping(source.get("assertion"))
         return f"{_text(source.get('path'))}:{_range_text(assertion.get('lines'))}"
-    if rec.kind == "CT":
+    if rec.kind == "claim-task":
         return f"{_text(data.get('kind'))} of {_text(data.get('finding'))}"
     citation = _mapping(data.get("citation"))
     return (f"{_text(data.get('challenge'))} in {_text(data.get('finding'))} excerpt "
@@ -445,11 +454,11 @@ def _subject(rec) -> str:
 
 
 def _current(view, reader, rec) -> bool:
-    """Whether the record's subject still holds as it was bound: an SC's source is available, a CT's and
-    a CU's bindings all hold (the status is shown separately)."""
-    if rec.kind == "SC":
+    """Whether the record's subject still holds as it was bound: a source challenge's source is
+    available, a claim task's and a checked use's bindings all hold (the status is shown separately)."""
+    if rec.kind == "source-challenge":
         return k13.challenge_info(view, reader, rec).available
-    if rec.kind == "CT":
+    if rec.kind == "claim-task":
         return not k15.task_binding_problems(view, rec)
     return not k13.use_binding_problems(view, reader, rec)
 
@@ -524,9 +533,9 @@ def _installed(cfg: Config, kind: str, rec_id: str, retry: str = ""):
 def _new_command(kind: str) -> str:
     """The §5.2.5 command that allocates a record of `kind`."""
     return {
-        "SC": "kblam challenge new <source-path> --lines A-B --by NAME",
-        "CT": "kblam task new <finding> --kind replication|confirmation --by NAME --proponent NAME",
-        "CU": "kblam use review <challenge> <finding> <ordinal> --by NAME --proponent NAME",
+        "source-challenge": "kblam challenge new <source-path> --lines A-B --by NAME",
+        "claim-task": "kblam task new <finding> --kind replication|confirmation --by NAME --proponent NAME",
+        "checked-use": "kblam use review <challenge> <finding> <ordinal> --by NAME --proponent NAME",
     }[kind]
 
 

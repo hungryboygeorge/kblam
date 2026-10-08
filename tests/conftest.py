@@ -259,12 +259,12 @@ def _ref(path: str, **fields) -> dict:
 
 
 def record_data(kind: str, rec_id: str | None = None, **fields) -> dict:
-    """A structurally valid record of `kind` ("SC", "CT" or "CU") as plain data; `fields` replace top-level
+    """A structurally valid record of `kind` ("source-challenge", "claim-task" or "checked-use") as plain data; `fields` replace top-level
     keys (DROP removes one). Hashes and bindings are placeholders: set them for semantic checks."""
     rec_id = rec_id or f"{kind}-0001"
     common = {"schema": 1, "id": rec_id, "created": datetime.date(2026, 9, 28), "creator": "reviewer-a"}
     source = f"{SOURCE_REPO}/{TRACE_PATH}"
-    if kind == "SC":
+    if kind == "source-challenge":
         data = {**common, "status": "open",
                 "source": {**_ref(source), "assertion": {"lines": [3, 3], "text": "the two bytes are equal",
                                                          "sha256": ZERO64, "occurrence": 1}},
@@ -277,7 +277,7 @@ def record_data(kind: str, rec_id: str | None = None, **fields) -> dict:
                 "limits": "Do not infer the capture bytes from this row.",
                 "linked_findings": [],
                 "decisions": []}
-    elif kind == "CT":
+    elif kind == "claim-task":
         data = {**common, "proponent": "researcher-a", "status": "open", "kind": "replication",
                 "finding": "F-0001", "claim_fingerprint": "0badf00d0000", "base_file_sha256": ZERO64,
                 "question": "Does an independent measurement establish the claim?",
@@ -288,8 +288,8 @@ def record_data(kind: str, rec_id: str | None = None, **fields) -> dict:
                 "stop": "Stop after three captures.",
                 "expected_evidence": ["an evidence/ capture package"],
                 "decisions": []}
-    elif kind == "CU":
-        data = {**common, "proponent": "researcher-a", "status": "open", "challenge": "SC-0001",
+    elif kind == "checked-use":
+        data = {**common, "proponent": "researcher-a", "status": "open", "challenge": "source-challenge-0001",
                 "challenge_bind": ZERO64, "finding": "F-0001", "finding_fingerprint": "0badf00d0000",
                 "finding_file_sha256": ZERO64,
                 "citation": {"ordinal": 1, "path": source, "range": [2, 3], "tag_sha256": ZERO64},

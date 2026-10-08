@@ -21,9 +21,10 @@ REBIND = "kblam review rebind {rid} --by NAME --reason TEXT --expect D"
 
 
 def task_binding_problems(view, rec: Record) -> list[str]:
-    """Why a CT's binding no longer holds, [] when it does: the finding exists, and its K3 fingerprint and
-    file sha256 equal claim_fingerprint and base_file_sha256. Each message names the finding and ends
-    with the command that fixes it (kblam review rebind <CT> ...)."""
+    """Why a claim task's binding no longer holds, [] when it does: the finding exists, and its K3
+    fingerprint and file sha256 equal claim_fingerprint and base_file_sha256. Each message names the
+    finding and ends
+    with the command that fixes it (kblam review rebind <claim-task-ID> ...)."""
     return [message for _key, message in _binding_problems(view, rec)]
 
 
@@ -31,25 +32,25 @@ def k15(view, reader) -> list[Issue]:
     """Every K15 issue, owner = the task's ID, level by the SPEC §5.2.4 Severity table."""
     issues: list[Issue] = []
     for rec in view.records:
-        if rec.kind != "CT" or not isinstance(rec.data, dict):
+        if rec.kind != "claim-task" or not isinstance(rec.data, dict):
             continue                    # not a task, or a file K13 reports as not parsing
         status = rec.status
-        if status not in STATUSES["CT"] or status == RETIRED:
+        if status not in STATUSES["claim-task"] or status == RETIRED:
             continue                    # K13 reports the vocabulary; a retired task gets no binding check
         issues += [Issue(rec.path, rec.key_line(key), "K15", message, "error", rec.id or "")
                    for key, message in _binding_problems(view, rec, trust_state=reader.trust_state)
                    if key is not None]
-        if status in EFFECTIVE["CT"]:
+        if status in EFFECTIVE["claim-task"]:
             issues += _evidence_issues(view, reader, rec)
     return issues
 
 
 def k15_pending(view, reader) -> list[str]:
     """One line per open, well-formed task whose binding matches, in ID order:
-    "CT-0001 open replication of F-0014: <question>" (SPEC §5.2.4 K15). Pending lines fail nothing."""
+    "claim-task-0001 open replication of F-0014: <question>" (SPEC §5.2.4 K15). Pending lines fail nothing."""
     lines = []
     tasks = [rec for rec in view.records
-             if rec.kind == "CT" and isinstance(rec.id, str) and rec.status == "open"]
+             if rec.kind == "claim-task" and isinstance(rec.id, str) and rec.status == "open"]
     for rec in sorted(tasks, key=_order):
         if schema_issues(rec, staged=False) or decision_issues(rec):
             continue                    # K13 reports a record that is not well formed
@@ -69,7 +70,7 @@ def _binding_problems(view, rec: Record, *, trust_state: bool = True) -> list[tu
     A key of None is the missing finding: K13 reports it as a dangling link, so `k15` does not emit a
     second issue for it, and the commands that list a task's problems still get the message.
     """
-    if rec.kind != "CT" or rec.id is None or not isinstance(rec.data, dict):
+    if rec.kind != "claim-task" or rec.id is None or not isinstance(rec.data, dict):
         return []
     data = rec.data
     finding_id = data.get("finding")
@@ -175,6 +176,6 @@ def _primary(view, entry: dict, path) -> bool:
 
 
 def _order(rec: Record) -> tuple[int, str]:
-    """Numeric ID order, as view.findings uses for findings: CT-0009 before CT-00010."""
-    number = rec.id[3:] if isinstance(rec.id, str) else ""
+    """Numeric ID order, as view.findings uses for findings: claim-task-0009 before claim-task-00010."""
+    number = rec.id.rsplit("-", 1)[-1] if isinstance(rec.id, str) else ""
     return (int(number) if number.isdigit() else 0, rec.id or "")

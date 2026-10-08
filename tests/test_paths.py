@@ -118,7 +118,7 @@ def test_escaping_directory_symlink_refused(kb, tmp_path):
     ("findings", "findings"),
     ("findings/F-0001-x.md", "findings"),
     ("research-review", "review"),
-    ("research-review/challenges/SC-0001.yaml", "review"),
+    ("research-review/challenges/source-challenge-0001.yaml", "review"),
     (".kblam", "state"),
     (".kblam/review-ids", "state"),
     ("history/2025-01-old.md", "history"),

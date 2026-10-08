@@ -40,7 +40,7 @@ def _challenges(view: KBView) -> list[str]:
     """The `## Challenges` section: one table per canonical source key, each under its `### <path>`."""
     rows = []
     for rec in view.records:
-        if rec.kind != "SC" or not isinstance(rec.data, dict):
+        if rec.kind != "source-challenge" or not isinstance(rec.data, dict):
             continue
         source = _mapping(rec.data.get("source"))
         assertion = _mapping(source.get("assertion"))
@@ -72,7 +72,7 @@ def _tasks(view: KBView) -> list[str]:
     """The `## Tasks` section, in order of finding, then ID."""
     rows = []
     for rec in view.records:
-        if rec.kind != "CT" or not isinstance(rec.data, dict):
+        if rec.kind != "claim-task" or not isinstance(rec.data, dict):
             continue
         row = "| {id} | {finding} | {kind} | {status} | {question} |".format(
             id=_cell(_id(rec)),
@@ -93,7 +93,7 @@ def _uses(view: KBView) -> list[str]:
     """The `## Uses` section, in order of challenge, then ID."""
     rows = []
     for rec in view.records:
-        if rec.kind != "CU" or not isinstance(rec.data, dict):
+        if rec.kind != "checked-use" or not isinstance(rec.data, dict):
             continue
         citation = _mapping(rec.data.get("citation"))
         row = "| {id} | {challenge} | {finding} | {excerpt} | {disposition} | {status} |".format(

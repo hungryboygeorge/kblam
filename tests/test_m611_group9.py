@@ -29,14 +29,14 @@ frozen_today = m.frozen_today
 REVIEW_INDEX = "research-review/INDEX.md"
 TREE_HASH = ".kblam/tree.hash"
 REGISTRY = ".kblam/review-ids"
-SC_PATH = "research-review/challenges/SC-0001.yaml"
-SC_STAGE = ".kblam/review-staging/SC-0001.yaml"
-SC_RECEIPT = ".kblam/review-receipts/SC-0001.json"
+SC_PATH = "research-review/challenges/source-challenge-0001.yaml"
+SC_STAGE = ".kblam/review-staging/source-challenge-0001.yaml"
+SC_RECEIPT = ".kblam/review-receipts/source-challenge-0001.json"
 ROOT_MESSAGE = ("the review root changed from research-review to research-notes in kblam.toml; "
                 "schema 1 fixes it at init")
-MISSING_MESSAGE = ("K13 research-notes/challenges/SC-0001.yaml: SC-0001 is missing from "
+MISSING_MESSAGE = ("K13 research-notes/challenges/source-challenge-0001.yaml: source-challenge-0001 is missing from "
                    "research-notes/; records are never deleted or renamed; git's last commit does not hold "
-                   "a file at research-notes/challenges/SC-0001.yaml, so leave it as it is and tell the "
+                   "a file at research-notes/challenges/source-challenge-0001.yaml, so leave it as it is and tell the "
                    "user\n")
 INIT_PATHS = {"kblam.toml", "findings/INDEX.md", REVIEW_INDEX, ".gitattributes", ".gitignore",
               ".claude/rules/kblam-findings.md", ".claude/skills/kblam-write/SKILL.md",
@@ -83,14 +83,14 @@ def validate(kb, source_repo, *, code=0, diagnostics="", findings=0, root="findi
     call(kb, source_repo, ["validate"], code=int(code != 0), out=diagnostics + summary)
 
 
-def new_challenge(kb, source_repo, rec_id="SC-0001"):
+def new_challenge(kb, source_repo, rec_id="source-challenge-0001"):
     staged = f".kblam/review-staging/{rec_id}.yaml"
     receipt = f".kblam/review-receipts/{rec_id}.json"
     path = kb.root / staged
     call(kb, source_repo, ["challenge", "new", m.TRACE, "--lines", "3-3", "--by", "reviewer-a"],
          changed={staged, receipt}, out=f"{path}\n")
     data = yaml_rt().load(path.read_text(encoding="utf-8"))
-    fields = record_data("SC")
+    fields = record_data("source-challenge")
     for key in ("proposition", "scope", "classification", "basis", "usable", "limits"):
         data[key] = fields[key]
     data["basis"][0]["sha256"] = None
@@ -98,7 +98,7 @@ def new_challenge(kb, source_repo, rec_id="SC-0001"):
     return path
 
 
-def put_challenge(kb, source_repo, path, rec_id="SC-0001"):
+def put_challenge(kb, source_repo, path, rec_id="source-challenge-0001"):
     target = f"research-review/challenges/{rec_id}.yaml"
     call(kb, source_repo, ["put", path], changed={target, REVIEW_INDEX, REGISTRY, TREE_HASH,
                                                   path.relative_to(kb.root).as_posix()},
@@ -177,11 +177,11 @@ ROOT_MUTATIONS = [
     ("ack", ["ack", "F-0001", "F-0001"]),
     ("index", ["index"]),
     ("review-index", ["review", "index"]),
-    ("decide", ["review", "decide", "SC-0001", "--status", "confirmed", "--by", "reviewer-b",
+    ("decide", ["review", "decide", "source-challenge-0001", "--status", "confirmed", "--by", "reviewer-b",
                 "--reason", "reviewed the record", "--expect", ZERO64]),
-    ("rebind", ["review", "rebind", "CT-0001", "--by", "reviewer-b", "--reason", "rechecked",
+    ("rebind", ["review", "rebind", "claim-task-0001", "--by", "reviewer-b", "--reason", "rechecked",
                 "--expect", ZERO64]),
-    ("pin", ["challenge", "pin", "SC-0001", "--expect", ZERO64]),
+    ("pin", ["challenge", "pin", "source-challenge-0001", "--expect", ZERO64]),
     ("record", ["validate", "--record"]),
     ("forget-missing", ["validate", "--record", "--forget-missing"]),
     ("init", ["init"]),
@@ -191,10 +191,10 @@ ROOT_MUTATIONS = [
 
 @pytest.mark.parametrize("name, argv", ROOT_MUTATIONS, ids=[p[0] for p in ROOT_MUTATIONS])
 def test_format_2_root_change_refuses_every_mutation(kb, source_repo, monkeypatch, name, argv):
-    """Acceptance 7: start with open SC-0001, a clean pinned nested source, a registered ID and
+    """Acceptance 7: start with open source-challenge-0001, a clean pinned nested source, a registered ID and
     format-2 tree.hash. challenge new --by reviewer-a exits 0 and prints its staged path; changes
-    .kblam/review-staging/SC-0001.yaml and .kblam/review-receipts/SC-0001.json. Its put exits 0,
-    prints SC-0001's canonical destination and changes research-review/challenges/SC-0001.yaml,
+    .kblam/review-staging/source-challenge-0001.yaml and .kblam/review-receipts/source-challenge-0001.json. Its put exits 0,
+    prints source-challenge-0001's canonical destination and changes research-review/challenges/source-challenge-0001.yaml,
     research-review/INDEX.md, .kblam/review-ids, .kblam/tree.hash and removes the staged copy.
     After a hand edit of the configured root, each parameterized mutation (decision/rebind actor
     reviewer-b; other commands have no --by) exits 1 with the exact root-change refusal.
@@ -202,7 +202,7 @@ def test_format_2_root_change_refuses_every_mutation(kb, source_repo, monkeypatc
     .kblam/pairs.sqlite and .kblam/review.jsonl; every other mutation changes none (D47/D50:
     Jev check work precedes the lock). Neither root, the registry nor tree.hash changes.
     init prints only its header and kept config before refusing. validate afterwards exits 1
-    with K13 root-change and missing SC-0001 diagnostics; changes none. Source unchanged per call.
+    with K13 root-change and missing source-challenge-0001 diagnostics; changes none. Source unchanged per call.
     """
     path = new_challenge(kb, source_repo)
     put_challenge(kb, source_repo, path)
@@ -233,13 +233,13 @@ def test_format_2_root_change_refuses_every_mutation(kb, source_repo, monkeypatc
 
 @pytest.mark.parametrize("hash_format", ["format-1", "missing"])
 def test_legacy_or_missing_hash_reports_ids_missing_from_changed_root(kb, source_repo, hash_format):
-    """Acceptance 7: open registered SC-0001 on a clean pinned source is installed through
-    challenge new --by reviewer-a (exit 0/path; .kblam/review-staging/SC-0001.yaml and
-    .kblam/review-receipts/SC-0001.json) and put (exit 0/destination;
-    research-review/challenges/SC-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
+    """Acceptance 7: open registered source-challenge-0001 on a clean pinned source is installed through
+    challenge new --by reviewer-a (exit 0/path; .kblam/review-staging/source-challenge-0001.yaml and
+    .kblam/review-receipts/source-challenge-0001.json) and put (exit 0/destination;
+    research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
     .kblam/tree.hash and staged removal). Then format-1 or absent tree.hash stores no root and
     kblam.toml is hand-edited to research-notes. validate (no actor) exits 1, reports only K13
-    SC-0001 missing from research-notes, and changes none; repeating it has the same outcome.
+    source-challenge-0001 missing from research-notes, and changes none; repeating it has the same outcome.
     Source unchanged per call; the old record and registry remain, no recategorisation occurs.
     """
     path = new_challenge(kb, source_repo)
@@ -252,7 +252,7 @@ def test_legacy_or_missing_hash_reports_ids_missing_from_changed_root(kb, source
     validate(kb, source_repo, code=1, diagnostics=MISSING_MESSAGE, root="research-notes")
     validate(kb, source_repo, code=1, diagnostics=MISSING_MESSAGE, root="research-notes")
     assert (kb.root / SC_PATH).is_file()
-    assert m.registry(kb) == ["SC-0001"]
+    assert m.registry(kb) == ["source-challenge-0001"]
 
 
 @pytest.mark.parametrize("hash_format", ["format-2", "format-1", "missing"])
@@ -351,8 +351,8 @@ def test_update_preserves_a_populated_review_index(fresh_repo, hand_edited):
     kblam.toml, findings/INDEX.md, research-review/INDEX.md, .gitattributes, .gitignore,
     .claude/rules/kblam-findings.md, .claude/skills/kblam-write/SKILL.md, .claude/settings.json,
     CLAUDE.md, .git/hooks/pre-commit, .kblam/tree.hash. challenge new --by reviewer-a exits
-    0/path and changes .kblam/review-staging/SC-0001.yaml, .kblam/review-receipts/SC-0001.json;
-    put exits 0/destination and changes research-review/challenges/SC-0001.yaml,
+    0/path and changes .kblam/review-staging/source-challenge-0001.yaml, .kblam/review-receipts/source-challenge-0001.json;
+    put exits 0/destination and changes research-review/challenges/source-challenge-0001.yaml,
     research-review/INDEX.md, .kblam/review-ids, .kblam/tree.hash and removes the staged copy.
     With the populated index generated or hand-edited, two init --update calls (no actor) exit
     0, say INDEX.md exists; not regenerated, change none. A hand edit also keeps tree.hash
@@ -473,10 +473,10 @@ def test_format_1_is_kept_until_tree_matches_and_full_validation_is_clean(fresh_
 
 
 def test_validate_record_explicitly_migrates_a_clean_legacy_hash(kb, source_repo):
-    """Acceptance 7: start with no findings, clean source and open registered SC-0001 installed
-    through challenge new --by reviewer-a (exit 0/path; .kblam/review-staging/SC-0001.yaml,
-    .kblam/review-receipts/SC-0001.json) and put (exit 0/destination;
-    research-review/challenges/SC-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
+    """Acceptance 7: start with no findings, clean source and open registered source-challenge-0001 installed
+    through challenge new --by reviewer-a (exit 0/path; .kblam/review-staging/source-challenge-0001.yaml,
+    .kblam/review-receipts/source-challenge-0001.json) and put (exit 0/destination;
+    research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
     .kblam/tree.hash and staged removal). Then set a format-1 digest not matching the tree.
     validate --record (no actor) exits 0/OK, recorded .kblam/tree.hash; changes
     .kblam/tree.hash to format 2 plus .kblam/pairs.sqlite and .kblam/review.jsonl (empty Jev
@@ -497,15 +497,15 @@ def test_missing_hash_with_records_is_bootstrapped_by_every_write(fresh_repo):
     findings/INDEX.md, research-review/INDEX.md, .gitattributes, .gitignore,
     .claude/rules/kblam-findings.md, .claude/skills/kblam-write/SKILL.md, .claude/settings.json,
     CLAUDE.md, .git/hooks/pre-commit, .kblam/tree.hash. challenge new --by reviewer-a exits
-    0/path, changes .kblam/review-staging/SC-0001.yaml, .kblam/review-receipts/SC-0001.json;
-    put exits 0/destination, changes research-review/challenges/SC-0001.yaml,
+    0/path, changes .kblam/review-staging/source-challenge-0001.yaml, .kblam/review-receipts/source-challenge-0001.json;
+    put exits 0/destination, changes research-review/challenges/source-challenge-0001.yaml,
     research-review/INDEX.md, .kblam/review-ids, .kblam/tree.hash and staged removal. With
-    open SC-0001/current source the full deterministic validation is clean, so each time
+    open source-challenge-0001/current source the full deterministic validation is clean, so each time
     tree.hash is removed the next write records it again, asking Jev nothing: init --update
     exits 0/created tree.hash and changes it and .kblam/pairs.sqlite (the accepted-from-the-
     repository marks, none here); index and review index exit 0/wrote the index and
-    .kblam/tree.hash, with no warning, and change only tree.hash; challenge new --by reviewer-a exits 0/path for SC-0002 and its
-    put exits 0/destination, changing research-review/challenges/SC-0002.yaml,
+    .kblam/tree.hash, with no warning, and change only tree.hash; challenge new --by reviewer-a exits 0/path for source-challenge-0002 and its
+    put exits 0/destination, changing research-review/challenges/source-challenge-0002.yaml,
     research-review/INDEX.md, .kblam/review-ids, .kblam/tree.hash and staged removal;
     validate --record exits 0/OK recorded and says Jev was not asked, changing only tree.hash.
     Each recorded tree.hash is format 2 for the tree as it is, the registry holds exactly the
@@ -531,11 +531,11 @@ def test_missing_hash_with_records_is_bootstrapped_by_every_write(fresh_repo):
         (kb.root / TREE_HASH).unlink()
         call(kb, source_repo, argv, changed={TREE_HASH}, out=out)
         recorded()
-    path = new_challenge(kb, source_repo, "SC-0002")
+    path = new_challenge(kb, source_repo, "source-challenge-0002")
     (kb.root / TREE_HASH).unlink()
-    put_challenge(kb, source_repo, path, "SC-0002")
+    put_challenge(kb, source_repo, path, "source-challenge-0002")
     recorded()
-    assert m.registry(kb) == ["SC-0001", "SC-0002"]
+    assert m.registry(kb) == ["source-challenge-0001", "source-challenge-0002"]
     (kb.root / TREE_HASH).unlink()
     call(kb, source_repo, ["validate", "--record"], changed={TREE_HASH},
          out="kblam validate: OK (0 findings); recorded .kblam/tree.hash for this tree\n"

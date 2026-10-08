@@ -19,7 +19,7 @@ from kblam.review_index import generate_review_index
 from kblam.rules import Issue
 from kblam.sources import FileRef, Resolved, State
 
-FOLDERS = {folder: prefix for prefix, folder in records.KINDS.items()}   # "challenges" -> "SC"
+FOLDERS = {folder: prefix for prefix, folder in records.KINDS.items()}   # "challenges" -> "source-challenge"
 REBIND = "kblam review rebind {rid} --by NAME --reason TEXT --expect D"
 CONFIRM = "kblam review decide {rid} --status confirmed --by NAME --reason TEXT --expect D"
 RETIRE = "kblam review decide {rid} --status stale --by NAME --reason TEXT --expect D"
@@ -48,7 +48,8 @@ class ChallengeInfo:
 
 
 def challenge_info(view, reader, rec: Record) -> ChallengeInfo:
-    """Resolve an SC's source and locate its assertion (matching.assertion_match on the resolved bytes)."""
+    """Resolve a challenge's source and locate its assertion (matching.assertion_match on the resolved
+    bytes)."""
     data = rec.data if isinstance(rec.data, dict) else None
     if data is None:
         return ChallengeInfo(rec=rec, key=None, resolved=None, span=None, digest=None)
@@ -66,7 +67,8 @@ def challenge_info(view, reader, rec: Record) -> ChallengeInfo:
 
 
 def use_binding_problems(view, reader, rec: Record) -> list[str]:
-    """Why a CU's bindings no longer hold, [] when they all do (SPEC §5.2.3 "A use is current", less the
+    """Why a checked use's bindings no longer hold, [] when they all do (SPEC §5.2.3 "A use is current",
+    less the
     status): its challenge exists, is confirmed with an available source and its subject digest equals
     challenge_bind; the finding exists and its fingerprint and file sha256 equal the binding; the excerpt
     at citation.ordinal exists, matches citation (path, range, tag_sha256) and is a verified text match
@@ -75,7 +77,7 @@ def use_binding_problems(view, reader, rec: Record) -> list[str]:
     prerequisites hold, otherwise fix the first prerequisite and validate again (§5.2.5)."""
     data = rec.data if isinstance(rec.data, dict) else None
     rid = rec.id or "this use"
-    if rec.kind != "CU" or data is None:
+    if rec.kind != "checked-use" or data is None:
         # The record's own file is what a repair means, so the step is the one an installed record's damage
         # names (records.restore_step): the hooks deny an agent any write to it, and git's last commit holds
         # the bytes only where it holds a copy kblam reads as the record the file name gives.
@@ -191,8 +193,8 @@ def _stray_message(view, reader, path: str, registered: set[str] | None,
     name = PurePosixPath(path).name
     match = records.FILENAME_RE.match(name)
     if match is None:
-        diagnosis = (f"{cfg.review_dir}/ holds only SC-, CT- and CU- records in their kind's folder and the "
-                     f"generated INDEX.md.")
+        diagnosis = (f"{cfg.review_dir}/ holds only source-challenge, claim-task and checked-use "
+                     f"records in their kind's folder and the generated INDEX.md.")
         if registry_unreadable:
             return f"{diagnosis} {WRITE_GATE_FIX}; delete this file"
         return (f"{diagnosis} Record each challenge, task or use with kblam challenge new, kblam task new "
@@ -301,7 +303,7 @@ def _registry_issues(view, present: set[str], registered: set[str] | None) -> li
     from, and the path is the canonical path the record should have."""
     issues = []
     for rec_id in sorted((registered or set()) - present):
-        folder = records.KINDS.get(rec_id.split("-")[0], "")
+        folder = records.KINDS.get(rec_id.rsplit("-", 1)[0], "")
         path = f"{view.cfg.review_dir}/{(folder + '/') if folder else ''}{rec_id}.yaml"
         issues.append(Issue(
             path, 0, "K13",
@@ -327,9 +329,9 @@ def _record_issues(view, reader, rec: Record) -> list[Issue]:
     status = rec.status
     if status not in records.STATUSES[rec.kind]:
         return issues
-    if rec.kind == "SC":
+    if rec.kind == "source-challenge":
         issues += _challenge_issues(view, reader, rec, status)
-    elif rec.kind == "CT":
+    elif rec.kind == "claim-task":
         issues += _task_issues(view, reader, rec, status)
     else:
         issues += _use_issues(view, reader, rec, status)
@@ -343,7 +345,7 @@ def _identity_issues(view, rec: Record, schema: list[Issue], *, trust_state: boo
     receipt = receipts.read_allocation(view.cfg, rec.id)
     if receipt is None:
         return []
-    fields = ("created", "creator", "proponent") if rec.kind in ("CT", "CU") else ("created", "creator")
+    fields = ("created", "creator", "proponent") if rec.kind in ("claim-task", "checked-use") else ("created", "creator")
     issues = []
     for field in fields:
         original = receipt.get(field)
@@ -389,8 +391,8 @@ def _availability_level(kind: str, status: str) -> str | None:
 
 
 def _binding_level(kind: str, status: str) -> str | None:
-    """The "CU binding broken" row: a warning while open and while effective, nothing else. K14 reports
-    the excerpt the use no longer covers as an error, which is what blocks."""
+    """The "checked use binding broken" row: a warning while open and while effective, nothing else.
+    K14 reports the excerpt the use no longer covers as an error, which is what blocks."""
     if status == "open" or status in records.EFFECTIVE[kind]:
         return "warning"
     return None
@@ -449,7 +451,7 @@ def _state_message(rec: Record, ref: FileRef, resolved: Resolved, *, untrusted: 
 def _retire_step(rec: Record) -> str:
     """The way out of a reference that can no longer be restored: retire the record, which is the only
     thing that clears the reference (a stale record is never reopened), and file a new one."""
-    return f"retire the record and file a new one ({RETIRE.format(rid=rec.id or 'SC-NNNN')})"
+    return f"retire the record and file a new one ({RETIRE.format(rid=rec.id or 'source-challenge-NNNN')})"
 
 
 def _probe(resolved: Resolved, assertion) -> tuple[int, tuple[int, int]] | str | None:
@@ -478,7 +480,7 @@ def _probe(resolved: Resolved, assertion) -> tuple[int, tuple[int, int]] | str |
     return matching.assertion_match(normalise_newlines(decoded), text, (lines[0], lines[1]))
 
 
-# --- SC -----------------------------------------------------------------------------------------
+# --- source challenges ---------------------------------------------------------------------------
 
 
 def _challenge_issues(view, reader, rec: Record, status: str) -> list[Issue]:
@@ -561,7 +563,7 @@ def _confirmation_issues(view, reader, rec: Record, info: ChallengeInfo,
                     f"challenge (kblam challenge new {where} --lines A-B --by NAME, fill the staged "
                     f"record and kblam put it, which pins the source when its worktree's HEAD holds "
                     f"those bytes; where it does not, pin the installed challenge with kblam challenge "
-                    f"pin SC-NNNN --expect D --snapshot PATH)")
+                    f"pin source-challenge-NNNN --expect D --snapshot PATH)")
         identity = identity_recovery(view, rec, trust_state=reader.trust_state)
         if identity is not None:
             recovery = "R" + identity[1:]
@@ -605,7 +607,7 @@ def _is_primary(view, entry: dict) -> bool:
     return paths.protected(view.cfg, target) is None
 
 
-# --- CT and CU ----------------------------------------------------------------------------------
+# --- claim tasks and checked uses ----------------------------------------------------------------
 
 
 def _task_issues(view, reader, rec: Record, status: str) -> list[Issue]:
@@ -617,11 +619,12 @@ def _task_issues(view, reader, rec: Record, status: str) -> list[Issue]:
 
 
 def _use_issues(view, reader, rec: Record, status: str) -> list[Issue]:
-    """A use's dangling links, its citation, and its bindings (SPEC §5.2.4 K13, CU). A broken binding is
+    """A use's dangling links, its citation, and its bindings (SPEC §5.2.4 K13, checked use). A broken
+    binding is
     a warning while the use is open or approved: K14 reports the excerpt it no longer covers."""
     issues = _finding_links(view, rec, "finding", rec.data.get("finding"), plural=False)
     challenge_id = rec.data.get("challenge")
-    if isinstance(challenge_id, str) and _record(view, challenge_id, "SC") is None:
+    if isinstance(challenge_id, str) and _record(view, challenge_id, "source-challenge") is None:
         issues.append(Issue(rec.path, rec.key_line("challenge"), "K13",
                             f"the challenge {challenge_id} names no record in {view.cfg.review_dir}/",
                             _dangling_level(rec.kind, status), rec.id or ""))
@@ -706,7 +709,8 @@ def _schema_unsupported(rec: Record) -> bool:
 
 
 def _citation_malformed(rec: Record, issues: list[Issue]) -> bool:
-    """Whether this use's citation is no excerpt reference (SPEC §5.2.3 CU citation, §5.2.2 Values): not
+    """Whether this use's citation is no excerpt reference (SPEC §5.2.3 checked use citation, §5.2.2
+    Values): not
     a mapping, missing a required key, or flagged by records' own checks (a wrong type or range, an
     unknown key), every one of them reported at the `citation` key's line. The mapping guard stands
     before any read of the citation: it holds whatever the schema is, and a supported schema is what
@@ -720,7 +724,7 @@ def _citation_malformed(rec: Record, issues: list[Issue]) -> bool:
 
 
 def _use_blocking_issues(view, reader, rec: Record, *, status: str | None = None) -> list[Issue]:
-    """The CU errors a recovery's write cannot cure (SPEC §5.2.4, Where each rule blocks).
+    """The checked use errors a recovery's write cannot cure (SPEC §5.2.4, Where each rule blocks).
 
     Schema errors block before fields are trusted. Otherwise project the valid decision the command
     appends: rebind keeps the status; retirement sets stale. The new last decision cures endpoint status
@@ -743,8 +747,8 @@ def _use_blocking_issues(view, reader, rec: Record, *, status: str | None = None
     data["decisions"] = [*data["decisions"],
                          {"date": "2000-01-01", "by": by, "status": data["status"],
                           "reason": "check recovery", "evidence": [],
-                          "bind": decisions.subject_digest("CU", data)}]
-    path = f"{view.cfg.review_dir}/{records.KINDS['CU']}/{rec.id}.yaml"
+                          "bind": decisions.subject_digest("checked-use", data)}]
+    path = f"{view.cfg.review_dir}/{records.KINDS['checked-use']}/{rec.id}.yaml"
     raw = records.dump(data)
     projected = _candidate(view.cfg, view, path, raw)
     candidate = records.parse_record(path, raw)
@@ -791,14 +795,15 @@ def _use_recovery(view, reader, rec: Record) -> str:
 
 
 def _use_binding_recovery(view, reader, rec: Record) -> tuple[str, str | None]:
-    """The prerequisite row and its CU decision's target status; non-CU writes leave its status alone."""
+    """The prerequisite row and its checked use decision's target status; other writes leave its status
+    alone."""
     from kblam.review_write import _one_finding       # the writer's exact-one/readable prerequisite
     from kblam.store import StoreError
 
     data = rec.data
     rid = rec.id or "this use"
     challenge_id = data.get("challenge")
-    challenge = _record(view, challenge_id, "SC")
+    challenge = _record(view, challenge_id, "source-challenge")
     if challenge is None or records.schema_issues(challenge, staged=False):
         return f"restore {challenge_id} from git, then run kblam validate again", rec.status
     if challenge.status in ("rejected", "stale"):
@@ -853,7 +858,7 @@ def _challenge_binding(view, reader, data: dict) -> list[str]:
     """Whether the use's challenge still holds: it exists, is confirmed, its source is available, and its
     subject digest equals challenge_bind (SPEC §5.2.3 "A use is current")."""
     challenge_id = data.get("challenge")
-    rec = _record(view, challenge_id, "SC")
+    rec = _record(view, challenge_id, "source-challenge")
     if rec is None:
         return [f"the challenge {challenge_id} is not a record in {view.cfg.review_dir}; a use binds one "
                 f"confirmed challenge"]
@@ -906,7 +911,7 @@ def _rebind_excerpt(matches, ordinal, tag):
 
 def _citation_problems(view, reader, finding, data: dict) -> list[str]:
     """The excerpt at citation.ordinal as the use binds it: it exists, its path, range and tag_sha256 are
-    the cited ones, and it is a verified text match (SPEC §5.2.3 CU citation)."""
+    the cited ones, and it is a verified text match (SPEC §5.2.3 checked use citation)."""
     citation = data.get("citation")
     if not isinstance(citation, dict):
         return ["the citation does not describe an excerpt"]

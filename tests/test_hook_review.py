@@ -2,8 +2,9 @@
 
 The review root (`research-review/` by default) is guarded like `findings/`: every write under it is
 denied, and a removal only for the root itself, a kind folder (`challenges`, `tasks`, `uses`), a
-record file (`SC-*.yaml`, `CT-*.yaml`, `CU-*.yaml`) or a glob that could name one of those, so a
-stray file there can still be deleted (that is how a K13 stray-file error is fixed). Under `.kblam/`,
+record file (`source-challenge-*.yaml`, `claim-task-*.yaml`, `checked-use-*.yaml`) or a glob that
+could name one of those, so a stray file there can still be deleted (that is how a K13 stray-file
+error is fixed); a name in the old `SC-`/`CT-`/`CU-` style is no record, so removing one is allowed. Under `.kblam/`,
 `.kblam/review-staging/` is exempt as `.kblam/staging/` is, and `.kblam/review-receipts/` is not. The
 Stop hook's format-2 digest covers findings/ and the review root. Offline and deterministic: the
 hook is driven exactly as tests/test_hook.py drives it.
@@ -58,10 +59,10 @@ def review_kb(request):
 
 
 @pytest.mark.parametrize("name, key, rel", [
-    ("Write", "file_path", "research-review/challenges/SC-0001.yaml"),
+    ("Write", "file_path", "research-review/challenges/source-challenge-0001.yaml"),
     ("Edit", "file_path", "research-review/INDEX.md"),
-    ("Write", "file_path", "research-review/tasks/CT-0001.yaml"),
-    ("NotebookEdit", "notebook_path", "research-review/uses/CU-0001.yaml"),
+    ("Write", "file_path", "research-review/tasks/claim-task-0001.yaml"),
+    ("NotebookEdit", "notebook_path", "research-review/uses/checked-use-0001.yaml"),
     ("Write", "file_path", "research-review/"),
     ("Write", "file_path", "evidence/../research-review/new.md"),
 ])
@@ -74,10 +75,10 @@ def test_a_write_under_the_review_root_is_denied(kb, monkeypatch, capsys, name, 
 
 @pytest.mark.parametrize("rel", [
     "research-review-notes.md",                # the root's name as a prefix, not as a folder
-    "research-review-backup/SC-0001.yaml",
+    "research-review-backup/source-challenge-0001.yaml",
     "evidence/research-review.md",
     "src/tool.py",
-    ".kblam/review-staging/SC-0001.yaml",      # the author's staged copy: not kblam's state
+    ".kblam/review-staging/source-challenge-0001.yaml",      # the author's staged copy: not kblam's state
     ".kblam/staging/F-0001-motor.md",
 ])
 def test_writes_outside_the_review_root_are_unaffected(kb, monkeypatch, capsys, rel):
@@ -95,12 +96,12 @@ def test_a_review_write_is_denied_whatever_the_case(kb, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("command", [
-    "echo x > research-review/challenges/SC-0001.yaml",
+    "echo x > research-review/challenges/source-challenge-0001.yaml",
     "printf '%s' x 2>/dev/null >>research-review/INDEX.md",
     "cat <<'EOF' > research-review/notes.md\nit's here\nEOF",
-    "sed -i 's/1.0017/1.0018/' research-review/challenges/SC-0001.yaml",
-    "cp /tmp/SC-0003.yaml research-review/challenges/",
-    "mv .kblam/review-staging/SC-0001.yaml research-review/challenges/SC-0001.yaml",
+    "sed -i 's/1.0017/1.0018/' research-review/challenges/source-challenge-0001.yaml",
+    "cp /tmp/source-challenge-0003.yaml research-review/challenges/",
+    "mv .kblam/review-staging/source-challenge-0001.yaml research-review/challenges/source-challenge-0001.yaml",
     "git status && ls | tee -a notes.txt research-review/notes.md",
     "FOO=1 cp -t research-review/challenges a.yaml b.yaml",
 ])
@@ -117,30 +118,31 @@ def test_the_bash_review_deny_names_the_written_targets(kb, monkeypatch, capsys)
 
 
 def test_the_bash_review_deny_names_writes_and_removals(kb, monkeypatch, capsys):
-    command = "echo x > research-review/INDEX.md && rm research-review/challenges/SC-0001.yaml"
+    command = "echo x > research-review/INDEX.md && rm research-review/challenges/source-challenge-0001.yaml"
     reason = denied(call("PreToolUse", tool(kb, "Bash", command=command), monkeypatch, capsys)[1])
     assert reason == (f"kblam: writing research-review/INDEX.md and removing "
-                      f"research-review/challenges/SC-0001.yaml under {REVIEW}/ denied. {REVIEW_TAIL}")
+                      f"research-review/challenges/source-challenge-0001.yaml under {REVIEW}/ denied. {REVIEW_TAIL}")
 
 
 # --- Bash: removals -------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("command", [
-    "rm research-review/challenges/SC-0001.yaml",           # a record file
-    "rm -f research-review/tasks/CT-0002.yaml",
+    "rm research-review/challenges/source-challenge-0001.yaml",           # a record file
+    "rm -f research-review/tasks/claim-task-0002.yaml",
     "rmdir research-review/uses",                           # a kind folder
     "rm -rf research-review",                               # the root itself
     "rm research-review/",
-    "sudo rm -- research-review/challenges/SC-0001.yaml",
-    "rm research-review/challenges/SC-*.yaml",              # a glob that could name a record
+    "sudo rm -- research-review/challenges/source-challenge-0001.yaml",
+    "rm research-review/challenges/source-*.yaml",          # a glob that could name a record
+    "rm research-review/challenges/claim-task-00*.yaml",
     "rm research-review/challenges/*.yaml",
     "rm -rf research-review/*",
     "rm research-review/*.yaml",
     "rm -r research-review/t?sks",                          # a glob over a kind folder
     "rm -r research-review/ch*",
-    "mv research-review/challenges/SC-0001.yaml /tmp/",     # the source of an mv
-    "mv -t /tmp research-review/uses/CU-0001.yaml",
+    "mv research-review/challenges/source-challenge-0001.yaml /tmp/",     # the source of an mv
+    "mv -t /tmp research-review/uses/checked-use-0001.yaml",
 ])
 def test_a_removal_of_a_record_kind_folder_or_the_root_is_denied(kb, monkeypatch, capsys, command):
     reason = denied(call("PreToolUse", tool(kb, "Bash", command=command), monkeypatch, capsys)[1])
@@ -148,10 +150,13 @@ def test_a_removal_of_a_record_kind_folder_or_the_root_is_denied(kb, monkeypatch
 
 
 @pytest.mark.parametrize("command", [
-    "rm research-review/challenges/C?-0010.yaml",           # globs that name no literal SC-/CT-/CU-
+    "rm research-review/challenges/c?-0010.yaml",           # globs that name no literal record kind
     "rm research-review/challenges/*0010*",
     "rm research-review/challenges/*-0010.yaml",
-    "rm research-review/challenges/S*",
+    "rm research-review/challenges/s*",                     # a record name does begin with `s` or `c`
+    "rm research-review/challenges/c*",
+    "rm research-review/challenges/check*",
+    "rm research-review/challenges/*-0001.yaml",
     "rm research-review/challenges/*",
 ])
 def test_a_removal_glob_that_could_name_a_record_is_denied(kb, monkeypatch, capsys, command):
@@ -165,19 +170,22 @@ def test_a_removal_glob_that_could_name_a_record_is_denied(kb, monkeypatch, caps
     "rm research-review/challenges/notes-*",
     "rm research-review/challenges/*.bak",
     "rm research-review/challenges/INDEX.*",
-    "rm research-review/challenges/U*",                     # no record name begins with `U` or `T`
-    "rm research-review/challenges/T*",                     # (only `CU-` and `CT-` do)
+    "rm research-review/challenges/t*",                     # no record name begins with `t` or `u`
+    "rm research-review/challenges/u*",                     # (only `s`, `c` and `claim-task-` do)
+    "rm research-review/challenges/SC-*.yaml",              # an old-style name is no record (D: the ID
+    "rm research-review/challenges/SC-0001.yaml",           # rename), so a stray one can be deleted
+    "rm research-review/challenges/T*-0010.yaml",
 ])
 def test_a_removal_glob_that_cannot_name_a_record_passes(kb, monkeypatch, capsys, command):
     assert call("PreToolUse", tool(kb, "Bash", command=command), monkeypatch, capsys) == (0, None, "")
 
 
 @pytest.mark.parametrize("tool_name, command", [
-    ("Bash", "rm research-review/challenges/[S]C-0010.yaml"),          # a bracket is one glob token:
-    ("Bash", "rm research-review/challenges/[SC]C-0010.yaml"),         # its text is not a literal tail
+    ("Bash", "rm research-review/challenges/[c]hecked-use-0010.yaml"),   # a bracket is one glob token:
+    ("Bash", "rm research-review/challenges/[ch]ecked-use-0010.yaml"),   # its text is not a literal tail
     ("Bash", "rm research-review/challenges/*00[1-9]0.yaml"),
-    ("PowerShell", "Remove-Item research-review/challenges/[S]C-0010.yaml"),
-    ("PowerShell", "Remove-Item research-review/challenges/[SC]C-0010.yaml"),
+    ("PowerShell", "Remove-Item research-review/challenges/[c]hecked-use-0010.yaml"),
+    ("PowerShell", "Remove-Item research-review/challenges/[ch]ecked-use-0010.yaml"),
     ("PowerShell", "Remove-Item research-review/challenges/*00[1-9]0.yaml"),
 ])
 def test_a_bracket_expression_that_could_name_a_record_is_denied(kb, monkeypatch, capsys, tool_name, command):
@@ -203,19 +211,19 @@ def test_the_bash_removal_deny_reads_as_under_kblam_it_does(kb, monkeypatch, cap
     "rm research-review/challenges/notes.md",               # a K13 stray: how it is fixed
     "rm research-review/challenges/*.txt",
     "rm -rf research-review/scratch/",
-    "rm research-review/challenges/SC-0001.txt",
+    "rm research-review/challenges/source-challenge-0001.txt",
     "rm -rf .",                                             # an ancestor, as the .kblam/ rule allows
     "mv research-review/INDEX.md /tmp/",                    # the source of an mv, when it is no record
     "rm findings/calibration/notes.md",
     "cat research-review/INDEX.md",
-    "grep -rn SC-0001 research-review/",
+    "grep -rn source-challenge-0001 research-review/",
 ])
 def test_removing_a_stray_file_under_the_review_root_passes(kb, monkeypatch, capsys, command):
     assert call("PreToolUse", tool(kb, "Bash", command=command), monkeypatch, capsys) == (0, None, "")
 
 
 def test_an_absolute_target_is_compared_as_a_path(kb, monkeypatch, capsys):
-    target = str(kb.root).replace("\\", "/") + f"/{REVIEW}/challenges/SC-0001.yaml"
+    target = str(kb.root).replace("\\", "/") + f"/{REVIEW}/challenges/source-challenge-0001.yaml"
     reason = denied(call("PreToolUse", tool(kb, "Bash", command=f"rm {target}"), monkeypatch, capsys)[1])
     assert reason == f"kblam: removing {target} under {REVIEW}/ denied. {REVIEW_TAIL}"
 
@@ -224,13 +232,13 @@ def test_an_absolute_target_is_compared_as_a_path(kb, monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("command", [
-    "'x' | Set-Content research-review/challenges/SC-0001.yaml",
+    "'x' | Set-Content research-review/challenges/source-challenge-0001.yaml",
     "Set-Content -Value x -Path research-review\\INDEX.md",
     "Add-Content -LiteralPath:research-review/INDEX.md -Value y",
     "Get-Date | Out-File -Append research-review/notes.txt",
     "New-Item -ItemType File -Path research-review -Name notes.md",
-    "Copy-Item .kblam/review-staging/SC-0001.yaml research-review/challenges/",
-    "Move-Item -Dest research-review/challenges/SC-0001.yaml -Path .kblam/review-staging/SC-0001.yaml",
+    "Copy-Item .kblam/review-staging/source-challenge-0001.yaml research-review/challenges/",
+    "Move-Item -Dest research-review/challenges/source-challenge-0001.yaml -Path .kblam/review-staging/source-challenge-0001.yaml",
     "Write-Output x *> research-review/log.txt",
 ])
 def test_a_powershell_write_under_the_review_root_is_denied(kb, monkeypatch, capsys, command):
@@ -239,13 +247,13 @@ def test_a_powershell_write_under_the_review_root_is_denied(kb, monkeypatch, cap
 
 
 @pytest.mark.parametrize("command", [
-    "Remove-Item research-review/challenges/SC-0001.yaml",
-    "del research-review\\tasks\\CT-0001.yaml",
+    "Remove-Item research-review/challenges/source-challenge-0001.yaml",
+    "del research-review\\tasks\\claim-task-0001.yaml",
     "ri -LiteralPath research-review/uses",
     "rm -Recurse -Force research-review",
-    "Remove-Item notes.txt, research-review/challenges/SC-0001.yaml",
-    "Move-Item research-review/challenges/CT-0001.yaml backup/",
-    "mi -Path research-review/challenges/SC-0001.yaml -Destination backup/",
+    "Remove-Item notes.txt, research-review/challenges/source-challenge-0001.yaml",
+    "Move-Item research-review/challenges/claim-task-0001.yaml backup/",
+    "mi -Path research-review/challenges/source-challenge-0001.yaml -Destination backup/",
 ])
 def test_a_powershell_removal_of_a_record_kind_folder_or_the_root_is_denied(kb, monkeypatch, capsys, command):
     reason = denied(call("PreToolUse", tool(kb, "PowerShell", command=command), monkeypatch, capsys)[1])
@@ -253,10 +261,10 @@ def test_a_powershell_removal_of_a_record_kind_folder_or_the_root_is_denied(kb, 
 
 
 def test_the_powershell_mv_deny_names_the_removed_source(kb, monkeypatch, capsys):
-    command = "mv research-review/challenges/SC-0001.yaml backup/"
+    command = "mv research-review/challenges/source-challenge-0001.yaml backup/"
     reason = denied(call("PreToolUse", tool(kb, "PowerShell", command=command), monkeypatch, capsys)[1])
 
-    assert reason == (f"kblam: removing research-review/challenges/SC-0001.yaml under {REVIEW}/ denied. "
+    assert reason == (f"kblam: removing research-review/challenges/source-challenge-0001.yaml under {REVIEW}/ denied. "
                       f"{REVIEW_TAIL}")
 
 
@@ -276,21 +284,21 @@ def test_powershell_removals_of_stray_files_pass(kb, monkeypatch, capsys, comman
 
 
 @pytest.mark.parametrize("tool_name, command", [
-    ("Bash", "echo x > .kblam/review-staging/SC-0001.yaml"),
-    ("Bash", "rm .kblam/review-staging/SC-0001.yaml"),
-    ("Bash", "mv .kblam/review-staging/SC-0001.yaml .kblam/review-staging/SC-0002.yaml"),
-    ("Bash", "cat .kblam/review-receipts/SC-0001.json"),
-    ("PowerShell", "Set-Content -Path .kblam/review-staging/SC-0001.yaml -Value x"),
-    ("PowerShell", "Remove-Item .kblam/review-staging/SC-0001.yaml"),
-    ("PowerShell", "Get-Content .kblam/review-receipts/SC-0001.json"),
+    ("Bash", "echo x > .kblam/review-staging/source-challenge-0001.yaml"),
+    ("Bash", "rm .kblam/review-staging/source-challenge-0001.yaml"),
+    ("Bash", "mv .kblam/review-staging/source-challenge-0001.yaml .kblam/review-staging/source-challenge-0002.yaml"),
+    ("Bash", "cat .kblam/review-receipts/source-challenge-0001.json"),
+    ("PowerShell", "Set-Content -Path .kblam/review-staging/source-challenge-0001.yaml -Value x"),
+    ("PowerShell", "Remove-Item .kblam/review-staging/source-challenge-0001.yaml"),
+    ("PowerShell", "Get-Content .kblam/review-receipts/source-challenge-0001.json"),
 ])
 def test_the_review_staging_folder_is_exempt_from_the_state_rule(kb, monkeypatch, capsys, tool_name, command):
     assert call("PreToolUse", tool(kb, tool_name, command=command), monkeypatch, capsys) == (0, None, "")
 
 
 @pytest.mark.parametrize("name, key, rel", [
-    ("Write", "file_path", ".kblam/review-staging/SC-0001.yaml"),
-    ("Edit", "file_path", ".kblam/review-staging/SC-0001.yaml"),
+    ("Write", "file_path", ".kblam/review-staging/source-challenge-0001.yaml"),
+    ("Edit", "file_path", ".kblam/review-staging/source-challenge-0001.yaml"),
     ("NotebookEdit", "notebook_path", ".kblam/review-staging/x.ipynb"),
 ])
 def test_a_file_tool_may_edit_the_review_staging_folder(kb, monkeypatch, capsys, name, key, rel):
@@ -298,8 +306,8 @@ def test_a_file_tool_may_edit_the_review_staging_folder(kb, monkeypatch, capsys,
 
 
 @pytest.mark.parametrize("name, key, rel", [
-    ("Write", "file_path", ".kblam/review-receipts/SC-0001.json"),
-    ("Edit", "file_path", ".kblam/review-receipts/SC-0001.json"),
+    ("Write", "file_path", ".kblam/review-receipts/source-challenge-0001.json"),
+    ("Edit", "file_path", ".kblam/review-receipts/source-challenge-0001.json"),
 ])
 def test_a_write_into_the_review_receipts_is_denied(kb, monkeypatch, capsys, name, key, rel):
     for path in (str(kb.root / rel), rel):
@@ -308,11 +316,11 @@ def test_a_write_into_the_review_receipts_is_denied(kb, monkeypatch, capsys, nam
 
 
 @pytest.mark.parametrize("tool_name, command", [
-    ("Bash", "echo x > .kblam/review-receipts/SC-0001.json"),
-    ("Bash", "rm .kblam/review-receipts/SC-0001.json"),
-    ("Bash", "mv .kblam/review-receipts/SC-0001.json /tmp/"),
-    ("PowerShell", "Set-Content -Path .kblam/review-receipts/SC-0001.json -Value x"),
-    ("PowerShell", "Remove-Item .kblam/review-receipts/SC-0001.json"),
+    ("Bash", "echo x > .kblam/review-receipts/source-challenge-0001.json"),
+    ("Bash", "rm .kblam/review-receipts/source-challenge-0001.json"),
+    ("Bash", "mv .kblam/review-receipts/source-challenge-0001.json /tmp/"),
+    ("PowerShell", "Set-Content -Path .kblam/review-receipts/source-challenge-0001.json -Value x"),
+    ("PowerShell", "Remove-Item .kblam/review-receipts/source-challenge-0001.json"),
 ])
 def test_a_write_or_removal_in_the_review_receipts_is_denied(kb, monkeypatch, capsys, tool_name, command):
     reason = denied(call("PreToolUse", tool(kb, tool_name, command=command), monkeypatch, capsys)[1])
@@ -331,7 +339,7 @@ def test_a_command_hitting_several_roots_names_them_in_order(kb, monkeypatch, ca
 
 
 def test_the_configured_root_is_guarded_under_its_own_name(custom, monkeypatch, capsys):
-    path = f"{CUSTOM}/challenges/SC-0001.yaml"
+    path = f"{CUSTOM}/challenges/source-challenge-0001.yaml"
     reason = denied(call("PreToolUse", tool(custom, "Write", file_path=path), monkeypatch, capsys)[1])
     assert reason == f"kblam: Write of {path} under {CUSTOM}/ denied. {REVIEW_TAIL}"
 
@@ -347,7 +355,7 @@ def test_removals_follow_the_configured_root(custom, monkeypatch, capsys):
     assert denied_reason == (f"kblam: removing {CUSTOM}/tasks under {CUSTOM}/ denied. {REVIEW_TAIL}")
     assert call("PreToolUse", tool(custom, "Bash", command=f"rm {CUSTOM}/notes.md"),
                 monkeypatch, capsys) == (0, None, "")
-    assert call("PreToolUse", tool(custom, "Bash", command="rm research-review/challenges/SC-0001.yaml"),
+    assert call("PreToolUse", tool(custom, "Bash", command="rm research-review/challenges/source-challenge-0001.yaml"),
                 monkeypatch, capsys) == (0, None, "")
 
 
@@ -362,7 +370,7 @@ def test_pre_tool_use_on_a_review_path_imports_only_the_hook_code(kb):
               "kblam.treehash", "kblam.view")
     probe = ("import json, sys; from kblam.entry import main; code = main(['hook', 'PreToolUse']); "
              f"print(json.dumps([code, sorted(m for m in {banned!r} if m in sys.modules)]))")
-    payload = json.dumps(tool(kb, "Write", file_path=str(kb.root / REVIEW / "challenges" / "SC-0001.yaml")))
+    payload = json.dumps(tool(kb, "Write", file_path=str(kb.root / REVIEW / "challenges" / "source-challenge-0001.yaml")))
     done = subprocess.run([sys.executable, "-c", probe], input=payload, capture_output=True, text=True,
                           check=True, env={k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"})
     lines = done.stdout.strip().splitlines()
@@ -387,7 +395,7 @@ def test_stop_blocks_on_a_record_changed_out_of_band(review_kb, monkeypatch, cap
     and its fix sentence covers records too (SPEC §8 item 3)."""
     review_kb.add("F-0001", "motor", E1)
     assert call("Stop", stop(review_kb), monkeypatch, capsys) == (0, None, "")  # the tree as kblam left it
-    review_kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0009"))  # a hand edit
+    review_kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", record_text("source-challenge", "source-challenge-0009"))  # a hand edit
 
     code, answer, _ = call("Stop", stop(review_kb), monkeypatch, capsys)
     first, *failures, fix, pointer = blocked(answer).split("\n")
@@ -396,9 +404,9 @@ def test_stop_blocks_on_a_record_changed_out_of_band(review_kb, monkeypatch, cap
     assert first == (f"kblam: findings/ or {REVIEW}/ was changed outside kblam, and the knowledge base fails "
                      f"kblam validate:")
     assert failures == [f"K13 {REVIEW}/INDEX.md: INDEX.md is missing; run kblam review index",
-                        f"K13 {REVIEW}/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file name's "
-                        f"ID (SC-0001); git's last commit does not hold a file at {REVIEW}/challenges/"
-                        f"SC-0001.yaml, and records are never renamed, so leave it as it is and tell the user"]
+                        f"K13 {REVIEW}/challenges/source-challenge-0001.yaml:2: id: 'source-challenge-0009' does not match the file name's "
+                        f"ID (source-challenge-0001); git's last commit does not hold a file at {REVIEW}/challenges/"
+                        f"source-challenge-0001.yaml, and records are never renamed, so leave it as it is and tell the user"]
     assert (fix, pointer) == (STOP_FIX, POINTER)
 
 
@@ -407,14 +415,14 @@ def test_the_free_field_route_the_fix_sentence_names_clears_the_block(review_kb,
     K13, Stop blocks, and kblam challenge edit, the fix in the staged copy, kblam put and kblam validate
     --record clear it: the next Stop is silent."""
     review_kb.add("F-0001", "motor", E1)
-    review_kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", proposition=""))
+    review_kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", record_text("source-challenge", proposition=""))
 
     code, answer, _ = call("Stop", stop(review_kb), monkeypatch, capsys)
     assert code == 0
     assert any("proposition: required" in line for line in blocked(answer).split("\n"))
     assert blocked(answer).split("\n")[-2:] == [STOP_FIX, POINTER]
 
-    edit = m.kblam(review_kb, "challenge", "edit", "SC-0001")
+    edit = m.kblam(review_kb, "challenge", "edit", "source-challenge-0001")
     assert edit.code == 0 and edit.err == ""
     staged = Path(edit.out.strip())
     data = yaml_rt().load(staged.read_bytes().decode("utf-8"))
@@ -430,7 +438,7 @@ def test_stop_loop_guard_names_both_roots(review_kb, monkeypatch, capsys):
     """Continuing because of a block, with neither root changed since: the stop is let through with a note
     that names both roots and says what to do when the failures cannot be fixed through kblam."""
     review_kb.add("F-0001", "motor", E1)
-    review_kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0009"))
+    review_kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", record_text("source-challenge", "source-challenge-0009"))
     _first, *failures, _fix, _pointer = blocked(call("Stop", stop(review_kb), monkeypatch, capsys)[1]).split("\n")
 
     code, answer, _ = call("Stop", stop(review_kb, active=True), monkeypatch, capsys)
@@ -467,7 +475,7 @@ def test_stop_is_silent_while_a_format_2_tree_hash_matches_the_review_root(revie
     """A matching tree.hash stays on the fast path: the hash is kblam's record of the tree, and a
     later out-of-band change is what Stop validates (SPEC §5.2.4 decides this deliberately)."""
     review_kb.add("F-0001", "motor", E1)
-    review_kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0009"))
+    review_kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", record_text("source-challenge", "source-challenge-0009"))
     review_kb.reindex()                              # the tree as kblam would have left it
 
     assert call("Stop", stop(review_kb), monkeypatch, capsys) == (0, None, "")
@@ -530,7 +538,7 @@ def test_the_fix_sentence_names_kblam_review_index_for_a_deleted_review_index(re
     that, then kblam validate --record, leaves the hook silent."""
     kb = review_kb
     kb.add("F-0001", "motor", E1)
-    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", record_text("source-challenge", "source-challenge-0001"))
     m.accept_tree(kb)                                    # fixture setup: the tree kblam left, plus INDEX.md
     assert call("Stop", stop(kb), monkeypatch, capsys) == (0, None, "")
     (kb.root / REVIEW / "INDEX.md").unlink()             # the hand edit the hook catches
@@ -550,7 +558,7 @@ def test_the_fix_sentence_names_kblam_edit_and_put_for_a_hand_edited_finding(rev
     fixes it; kblam validate --record then leaves the hook silent."""
     kb = review_kb
     kb.add("F-0001", "motor", E1)
-    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", record_text("source-challenge", "source-challenge-0001"))
     m.accept_tree(kb)                                    # the tree kblam left, review root included
     kb.write("findings/calibration/F-0001-motor.md",
              finding_text("F-0001", E1).replace("label: observed", "label: bogus"))
@@ -580,18 +588,18 @@ def test_the_fix_sentence_names_a_restore_from_git_for_a_record_line_that_names_
     and put work, and kblam validate --record leaves the hook silent."""
     kb = git_review_kb
     kb.add("F-0001", "motor", E1)
-    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", record_text("source-challenge", "source-challenge-0001"))
     m.accept_tree(kb)
     git(kb.root, "add", "-A")
     git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
-    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0009"))   # the hand edit
+    kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", record_text("source-challenge", "source-challenge-0009"))   # the hand edit
     git(kb.root, "add", "-A")                            # an agent stages the hand edit before restoring
 
     failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
 
-    restore = f"git restore --source=HEAD --staged --worktree {REVIEW}/challenges/SC-0001.yaml"
-    assert failures == [f"K13 {REVIEW}/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file "
-                        f"name's ID (SC-0001); {restore_step(f'{REVIEW}/challenges/SC-0001.yaml')}"]
+    restore = f"git restore --source=HEAD --staged --worktree {REVIEW}/challenges/source-challenge-0001.yaml"
+    assert failures == [f"K13 {REVIEW}/challenges/source-challenge-0001.yaml:2: id: 'source-challenge-0009' does not match the file "
+                        f"name's ID (source-challenge-0001); {restore_step(f'{REVIEW}/challenges/source-challenge-0001.yaml')}"]
     assert (fix, pointer) == (STOP_FIX, POINTER)
 
     # the command the line names, run by an agent: the hook allows it, and it is what puts the ID back
@@ -599,20 +607,20 @@ def test_the_fix_sentence_names_a_restore_from_git_for_a_record_line_that_names_
 
     # the free-field route the fix sentence names cannot fix this line: the edit command refuses the bad
     # installed `id` outright, staging nothing, rather than hand over a copy put could only refuse
-    refused = m.kblam(kb, "challenge", "edit", "SC-0001")
+    refused = m.kblam(kb, "challenge", "edit", "source-challenge-0001")
     assert (refused.code, refused.out) == (1, "")
-    assert refused.err == (f"kblam challenge edit: the installed record {REVIEW}/challenges/SC-0001.yaml "
-                           f"has id 'SC-0009', but its file name's ID is SC-0001, so kblam will not stage a "
+    assert refused.err == (f"kblam challenge edit: the installed record {REVIEW}/challenges/source-challenge-0001.yaml "
+                           f"has id 'source-challenge-0009', but its file name's ID is source-challenge-0001, so kblam will not stage a "
                            f"copy of it. Run kblam validate and do what its line for {REVIEW}/challenges/"
-                           f"SC-0001.yaml says; once it is fixed, run kblam challenge edit SC-0001 again\n")
-    assert not (kb.root / ".kblam/review-staging/SC-0001.yaml").exists()
+                           f"source-challenge-0001.yaml says; once it is fixed, run kblam challenge edit source-challenge-0001 again\n")
+    assert not (kb.root / ".kblam/review-staging/source-challenge-0001.yaml").exists()
 
     git(kb.root, *restore.split()[1:])                   # the restore the line names, as it prints
-    assert "id: SC-0001" in (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").read_text(encoding="utf-8")
+    assert "id: source-challenge-0001" in (kb.root / f"{REVIEW}/challenges/source-challenge-0001.yaml").read_text(encoding="utf-8")
     assert subprocess.run(["git", "-C", str(kb.root), "diff", "--cached", "--quiet"],
                           capture_output=True).returncode == 0   # the staged hand edit is gone too
 
-    staged = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())   # the edit command again
+    staged = Path(m.kblam(kb, "challenge", "edit", "source-challenge-0001").out.strip())   # the edit command again
     record_edit(staged, proposition="The printed byte equality follows from the printed byte values, "
                                     "restated")                              # a free-field change
     assert m.put_ok(kb, staged).code == 0
@@ -629,29 +637,29 @@ def test_the_id_mismatch_of_a_renamed_record_names_no_step_an_agent_may_run(
     stays as it is."""
     kb = git_review_kb
     kb.add("F-0001", "motor", E1)
-    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", record_text("source-challenge", "source-challenge-0001"))
     m.accept_tree(kb)
     git(kb.root, "add", "-A")
     git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
-    renamed = f"{REVIEW}/challenges/SC-0002.yaml"                  # fixture edit: a rename, in place
-    (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").rename(kb.root / renamed)
+    renamed = f"{REVIEW}/challenges/source-challenge-0002.yaml"                  # fixture edit: a rename, in place
+    (kb.root / f"{REVIEW}/challenges/source-challenge-0001.yaml").rename(kb.root / renamed)
 
     failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
 
-    assert (f"K13 {renamed}:2: id: 'SC-0001' does not match the file name's ID (SC-0002); git's last "
+    assert (f"K13 {renamed}:2: id: 'source-challenge-0001' does not match the file name's ID (source-challenge-0002); git's last "
             f"commit does not hold a file at {renamed}, and records are never renamed, so leave it as it "
             f"is and tell the user") in failures
     assert (fix, pointer) == (STOP_FIX, POINTER)
 
     # the rename an agent would run: the hook denies it (a record file's removal, a review-root write)
-    rename = f"mv {renamed} {REVIEW}/challenges/SC-0001.yaml"
+    rename = f"mv {renamed} {REVIEW}/challenges/source-challenge-0001.yaml"
     assert denied(call("PreToolUse", tool(kb, "Bash", command=rename), monkeypatch, capsys)[1])
 
     # and git cannot move a file it never held: the path stays untracked and the file stays where it is
-    assert subprocess.run(["git", "-C", str(kb.root), "mv", renamed, f"{REVIEW}/challenges/SC-0001.yaml"],
+    assert subprocess.run(["git", "-C", str(kb.root), "mv", renamed, f"{REVIEW}/challenges/source-challenge-0001.yaml"],
                           capture_output=True).returncode != 0
     assert (kb.root / renamed).is_file()
-    assert not (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").exists()
+    assert not (kb.root / f"{REVIEW}/challenges/source-challenge-0001.yaml").exists()
 
 
 def test_the_id_mismatch_of_a_record_git_added_but_never_committed_names_no_restore(
@@ -663,19 +671,19 @@ def test_the_id_mismatch_of_a_record_git_added_but_never_committed_names_no_rest
     The record file is still there afterwards, and the line names no git restore."""
     kb = git_review_kb
     kb.add("F-0001", "motor", E1)
-    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", record_text("source-challenge", "source-challenge-0001"))
     m.accept_tree(kb)
     git(kb.root, "add", "-A")                       # the record is in the index; no commit holds it
-    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0009"))   # the hand edit
+    kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", record_text("source-challenge", "source-challenge-0009"))   # the hand edit
 
     failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
 
-    assert (f"K13 {REVIEW}/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file name's ID "
-            f"(SC-0001); git's last commit does not hold a file at {REVIEW}/challenges/SC-0001.yaml, and "
+    assert (f"K13 {REVIEW}/challenges/source-challenge-0001.yaml:2: id: 'source-challenge-0009' does not match the file name's ID "
+            f"(source-challenge-0001); git's last commit does not hold a file at {REVIEW}/challenges/source-challenge-0001.yaml, and "
             f"records are never renamed, so leave it as it is and tell the user") in failures
     assert (fix, pointer) == (STOP_FIX, POINTER)
     assert not any("git restore" in line for line in failures)    # the command that would delete it
-    assert (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").is_file()   # so the record is still there
+    assert (kb.root / f"{REVIEW}/challenges/source-challenge-0001.yaml").is_file()   # so the record is still there
 
 
 def test_the_id_mismatch_under_an_unborn_head_names_no_restore(review_kb, monkeypatch, capsys):
@@ -689,19 +697,19 @@ def test_the_id_mismatch_under_an_unborn_head_names_no_restore(review_kb, monkey
     kb.write(".gitignore", ".kblam/\n")
     git(kb.root, "init", "-q")                      # no commit: HEAD is unborn
     kb.add("F-0001", "motor", E1)
-    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", record_text("source-challenge", "source-challenge-0001"))
     m.accept_tree(kb)
     git(kb.root, "add", "-A")                       # the record is in the index; HEAD holds nothing
-    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0009"))   # the hand edit
+    kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", record_text("source-challenge", "source-challenge-0009"))   # the hand edit
 
     failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
 
-    assert (f"K13 {REVIEW}/challenges/SC-0001.yaml:2: id: 'SC-0009' does not match the file name's ID "
-            f"(SC-0001); git's last commit does not hold a file at {REVIEW}/challenges/SC-0001.yaml, and "
+    assert (f"K13 {REVIEW}/challenges/source-challenge-0001.yaml:2: id: 'source-challenge-0009' does not match the file name's ID "
+            f"(source-challenge-0001); git's last commit does not hold a file at {REVIEW}/challenges/source-challenge-0001.yaml, and "
             f"records are never renamed, so leave it as it is and tell the user") in failures
     assert (fix, pointer) == (STOP_FIX, POINTER)
     assert not any("git restore" in line for line in failures)
-    assert (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").is_file()
+    assert (kb.root / f"{REVIEW}/challenges/source-challenge-0001.yaml").is_file()
 
 
 @pytest.mark.parametrize("commit", [False, True], ids=["in the index only", "committed"])
@@ -714,26 +722,26 @@ def test_a_staged_id_changed_by_hand_names_setting_it_back(git_review_kb, commit
     then exits 0."""
     kb = git_review_kb
     kb.add("F-0001", "motor", E1)
-    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", record_text("source-challenge", "source-challenge-0001"))
     m.accept_tree(kb)
     git(kb.root, "add", "-A")
     if commit:
         git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
-    before = (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").read_bytes()
+    before = (kb.root / f"{REVIEW}/challenges/source-challenge-0001.yaml").read_bytes()
 
-    staged = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())
-    record_edit(staged, id="SC-0009")                    # the hand edit: the staged ID alone
+    staged = Path(m.kblam(kb, "challenge", "edit", "source-challenge-0001").out.strip())
+    record_edit(staged, id="source-challenge-0009")                    # the hand edit: the staged ID alone
 
     refused = m.kblam(kb, "put", str(staged))
 
     assert (refused.code, refused.out) == (1, "")
-    assert refused.err == (f"kblam put: .kblam/review-staging/SC-0001.yaml: id is 'SC-0009', but the file "
-                           f"name's ID is SC-0001; the ID never changes. Set id back to SC-0001 in "
-                           f".kblam/review-staging/SC-0001.yaml and put it again. {POINTER}\n")
+    assert refused.err == (f"kblam put: .kblam/review-staging/source-challenge-0001.yaml: id is 'source-challenge-0009', but the file "
+                           f"name's ID is source-challenge-0001; the ID never changes. Set id back to source-challenge-0001 in "
+                           f".kblam/review-staging/source-challenge-0001.yaml and put it again. {POINTER}\n")
     assert "git restore" not in refused.err
-    assert (kb.root / f"{REVIEW}/challenges/SC-0001.yaml").read_bytes() == before
+    assert (kb.root / f"{REVIEW}/challenges/source-challenge-0001.yaml").read_bytes() == before
 
-    record_edit(staged, id="SC-0001")                    # the step the refusal names, run
+    record_edit(staged, id="source-challenge-0001")                    # the step the refusal names, run
     assert m.put_ok(kb, staged).code == 0
 
 
@@ -745,26 +753,26 @@ def test_a_staged_id_that_is_missing_or_blank_names_setting_it_back(git_review_k
     file-name ID back in the staged copy. Running that step (adding the line back) puts the copy."""
     kb = git_review_kb
     kb.add("F-0001", "motor", E1)
-    path = f"{REVIEW}/challenges/SC-0001.yaml"
-    kb.write(path, record_text("SC", "SC-0001"))
+    path = f"{REVIEW}/challenges/source-challenge-0001.yaml"
+    kb.write(path, record_text("source-challenge", "source-challenge-0001"))
     m.accept_tree(kb)
     git(kb.root, "add", "-A")
     git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
     before = (kb.root / path).read_bytes()
 
-    staged = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())
-    staged.write_bytes(_unreadable("SC", "SC-0001", damage).encode("utf-8"))   # the staged hand edit
+    staged = Path(m.kblam(kb, "challenge", "edit", "source-challenge-0001").out.strip())
+    staged.write_bytes(_unreadable("source-challenge", "source-challenge-0001", damage).encode("utf-8"))   # the staged hand edit
 
     refused = m.kblam(kb, "put", str(staged))
 
     assert (refused.code, refused.out) == (1, "")
-    assert refused.err == (f"kblam put: .kblam/review-staging/SC-0001.yaml: the staged file has no id, "
-                           f"but the file name's ID is SC-0001; the ID never changes. Set id back to "
-                           f"SC-0001 in .kblam/review-staging/SC-0001.yaml and put it again. {POINTER}\n")
+    assert refused.err == (f"kblam put: .kblam/review-staging/source-challenge-0001.yaml: the staged file has no id, "
+                           f"but the file name's ID is source-challenge-0001; the ID never changes. Set id back to "
+                           f"source-challenge-0001 in .kblam/review-staging/source-challenge-0001.yaml and put it again. {POINTER}\n")
     assert "None" not in refused.err
     assert (kb.root / path).read_bytes() == before
 
-    record_edit(staged, id="SC-0001")                    # the step the refusal names, run
+    record_edit(staged, id="source-challenge-0001")                    # the step the refusal names, run
     assert m.put_ok(kb, staged).code == 0
 
 
@@ -777,29 +785,29 @@ def test_a_staged_id_and_an_installed_id_both_changed_by_hand_name_deleting_the_
     Following it, a fresh edit and put work and kblam validate --record is clean."""
     kb = git_review_kb
     kb.add("F-0001", "motor", E1)
-    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", record_text("source-challenge", "source-challenge-0001"))
     m.accept_tree(kb)
     git(kb.root, "add", "-A")
     git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
 
-    staged = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())  # staged while it was sound
-    record_edit(staged, id="SC-0009")                                      # the staged hand edit
-    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0008"))   # the installed one
+    staged = Path(m.kblam(kb, "challenge", "edit", "source-challenge-0001").out.strip())  # staged while it was sound
+    record_edit(staged, id="source-challenge-0009")                                      # the staged hand edit
+    kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", record_text("source-challenge", "source-challenge-0008"))   # the installed one
 
     refused = m.kblam(kb, "put", str(staged))
 
     assert (refused.code, refused.out) == (1, "")
-    assert refused.err == (f"kblam put: .kblam/review-staging/SC-0001.yaml: id is 'SC-0009', but the file "
-                           f"name's ID is SC-0001; the ID never changes, and the installed record "
-                           f"{REVIEW}/challenges/SC-0001.yaml does not read as SC-0001 either: it has id "
-                           f"'SC-0008'. Delete .kblam/review-staging/SC-0001.yaml, run kblam validate and "
-                           f"do what its line for {REVIEW}/challenges/SC-0001.yaml says. {POINTER}\n")
+    assert refused.err == (f"kblam put: .kblam/review-staging/source-challenge-0001.yaml: id is 'source-challenge-0009', but the file "
+                           f"name's ID is source-challenge-0001; the ID never changes, and the installed record "
+                           f"{REVIEW}/challenges/source-challenge-0001.yaml does not read as source-challenge-0001 either: it has id "
+                           f"'source-challenge-0008'. Delete .kblam/review-staging/source-challenge-0001.yaml, run kblam validate and "
+                           f"do what its line for {REVIEW}/challenges/source-challenge-0001.yaml says. {POINTER}\n")
 
     staged.unlink()                                      # the step it names: delete the staged copy
     restore = named_restore(m.validate(kb).out)          # and run the restore its line prints
     git(kb.root, *restore.split()[1:])
 
-    fresh = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())   # a fresh edit
+    fresh = Path(m.kblam(kb, "challenge", "edit", "source-challenge-0001").out.strip())   # a fresh edit
     record_edit(fresh, proposition="The printed byte equality follows from the printed byte values, "
                                    "restated")                              # a free-field change
     assert m.put_ok(kb, fresh).code == 0
@@ -814,29 +822,29 @@ def test_a_broken_installed_file_still_names_deleting_the_staged_copy(git_review
     put with a free-field change succeed."""
     kb = git_review_kb
     kb.add("F-0001", "motor", E1)
-    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", record_text("SC", "SC-0001"))
+    kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", record_text("source-challenge", "source-challenge-0001"))
     m.accept_tree(kb)
     git(kb.root, "add", "-A")
     git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
 
-    staged = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())
-    record_edit(staged, id="SC-0009")                    # the hand edit: the staged ID
-    kb.write(f"{REVIEW}/challenges/SC-0001.yaml", "id: [unterminated\n")   # the broken installed file
+    staged = Path(m.kblam(kb, "challenge", "edit", "source-challenge-0001").out.strip())
+    record_edit(staged, id="source-challenge-0009")                    # the hand edit: the staged ID
+    kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", "id: [unterminated\n")   # the broken installed file
 
     refused = m.kblam(kb, "put", str(staged))
 
     assert (refused.code, refused.out) == (1, "")
-    assert refused.err == (f"kblam put: .kblam/review-staging/SC-0001.yaml: id is 'SC-0009', but the file "
-                           f"name's ID is SC-0001; the ID never changes, and the installed record "
-                           f"{REVIEW}/challenges/SC-0001.yaml does not read as SC-0001 either. Delete "
-                           f".kblam/review-staging/SC-0001.yaml, run kblam validate and do what its line "
-                           f"for {REVIEW}/challenges/SC-0001.yaml says. {POINTER}\n")
+    assert refused.err == (f"kblam put: .kblam/review-staging/source-challenge-0001.yaml: id is 'source-challenge-0009', but the file "
+                           f"name's ID is source-challenge-0001; the ID never changes, and the installed record "
+                           f"{REVIEW}/challenges/source-challenge-0001.yaml does not read as source-challenge-0001 either. Delete "
+                           f".kblam/review-staging/source-challenge-0001.yaml, run kblam validate and do what its line "
+                           f"for {REVIEW}/challenges/source-challenge-0001.yaml says. {POINTER}\n")
 
     staged.unlink()                                      # the step it names: delete the staged copy
     restore = named_restore(m.validate(kb).out)          # and run the restore its line prints
     git(kb.root, *restore.split()[1:])
 
-    fresh = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())
+    fresh = Path(m.kblam(kb, "challenge", "edit", "source-challenge-0001").out.strip())
     record_edit(fresh, proposition="The printed byte equality follows from the printed byte values, "
                                    "restated")          # a free-field change
     assert m.put_ok(kb, fresh).code == 0
@@ -844,15 +852,16 @@ def test_a_broken_installed_file_still_names_deleting_the_staged_copy(git_review
 
 
 @pytest.mark.parametrize("kind, rec_id, word, folder", [
-    ("SC", "SC-0001", "challenge", "challenges"),
-    ("CT", "CT-0001", "task", "tasks"),
+    ("source-challenge", "source-challenge-0001", "challenge", "challenges"),
+    ("claim-task", "claim-task-0001", "task", "tasks"),
 ])
 def test_either_edit_command_refuses_an_index_only_record_and_leaves_it_alone(
         git_review_kb, kind, rec_id, word, folder):
     """D49 for the same refusal where git's last commit holds no file at the record's path: the record was
     `git add`ed and never committed, so kblam validate's line says to leave it as it is and tell the user
     (the restore would delete it). Both edit commands — kblam challenge edit and kblam task edit, so this
-    is not SC-only — refuse the same way, staging nothing, and the record file is byte-identical
+    is not source-challenge-only — refuse the same way, staging nothing, and the record file is
+    byte-identical
     afterwards."""
     kb = git_review_kb
     kb.add("F-0001", "motor", E1)
@@ -902,9 +911,9 @@ def _unreadable(kind: str, rec_id: str, damage: str) -> str:
 
 DAMAGED = [
     # the damage, and the diagnostic the K13 line for the file opens with (the rule's own words)
-    ("the id line removed", f"{REVIEW}/challenges/SC-0001.yaml: missing key 'id'"),
-    ("the id blanked", f"{REVIEW}/challenges/SC-0001.yaml:2: id: required"),
-    ("broken YAML", f"{REVIEW}/challenges/SC-0001.yaml: not valid YAML:"),
+    ("the id line removed", f"{REVIEW}/challenges/source-challenge-0001.yaml: missing key 'id'"),
+    ("the id blanked", f"{REVIEW}/challenges/source-challenge-0001.yaml:2: id: required"),
+    ("broken YAML", f"{REVIEW}/challenges/source-challenge-0001.yaml: not valid YAML:"),
 ]
 
 
@@ -917,14 +926,14 @@ def test_damage_to_a_committed_record_names_a_restore_an_agent_can_run(
     exit 0, kblam validate --record is clean, and the next Stop is silent."""
     kb = git_review_kb
     kb.add("F-0001", "motor", E1)
-    path = f"{REVIEW}/challenges/SC-0001.yaml"
-    sound = record_text("SC", "SC-0001")
+    path = f"{REVIEW}/challenges/source-challenge-0001.yaml"
+    sound = record_text("source-challenge", "source-challenge-0001")
     kb.write(path, sound)
     m.accept_tree(kb)
     git(kb.root, "add", "-A")
     git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
 
-    kb.write(path, _unreadable("SC", "SC-0001", damage))          # the hand damage
+    kb.write(path, _unreadable("source-challenge", "source-challenge-0001", damage))          # the hand damage
 
     failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
     line = next(line for line in failures if line.startswith(f"K13 {path}:"))
@@ -939,7 +948,7 @@ def test_damage_to_a_committed_record_names_a_restore_an_agent_can_run(
     git(kb.root, *restore.split()[1:])                            # the command the line prints, run
     assert (kb.root / path).read_text(encoding="utf-8") == sound
 
-    staged = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())
+    staged = Path(m.kblam(kb, "challenge", "edit", "source-challenge-0001").out.strip())
     record_edit(staged, proposition="The printed byte equality follows from the printed byte values, "
                                     "restated")                    # a free-field change
     assert m.put_ok(kb, staged).code == 0
@@ -959,10 +968,10 @@ def test_damage_to_an_index_only_record_names_no_restore(
     m.accept_tree(kb)
     git(kb.root, "add", "-A")
     git(kb.root, "commit", "-q", "--no-verify", "-m", "the knowledge base")
-    path = f"{REVIEW}/challenges/SC-0001.yaml"
-    kb.write(path, record_text("SC", "SC-0001"))
+    path = f"{REVIEW}/challenges/source-challenge-0001.yaml"
+    kb.write(path, record_text("source-challenge", "source-challenge-0001"))
     git(kb.root, "add", "-A")                                     # the record is in the index; no commit holds it
-    kb.write(path, _unreadable("SC", "SC-0001", damage))
+    kb.write(path, _unreadable("source-challenge", "source-challenge-0001", damage))
     before = (kb.root / path).read_bytes()
 
     failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
@@ -985,30 +994,30 @@ def test_a_staged_id_and_an_installed_id_with_no_id_name_deleting_the_staged_cop
     line prints — a fresh edit and put with a free-field change succeed."""
     kb = git_review_kb
     kb.add("F-0001", "motor", E1)
-    path = f"{REVIEW}/challenges/SC-0001.yaml"
-    kb.write(path, record_text("SC", "SC-0001"))
+    path = f"{REVIEW}/challenges/source-challenge-0001.yaml"
+    kb.write(path, record_text("source-challenge", "source-challenge-0001"))
     m.accept_tree(kb)
     git(kb.root, "add", "-A")
     git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
 
-    staged = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())  # staged while it was sound
-    record_edit(staged, id="SC-0009")                                      # the staged hand edit
-    kb.write(path, _unreadable("SC", "SC-0001", damage))                   # the installed one, damaged
+    staged = Path(m.kblam(kb, "challenge", "edit", "source-challenge-0001").out.strip())  # staged while it was sound
+    record_edit(staged, id="source-challenge-0009")                                      # the staged hand edit
+    kb.write(path, _unreadable("source-challenge", "source-challenge-0001", damage))                   # the installed one, damaged
 
     refused = m.kblam(kb, "put", str(staged))
 
     assert (refused.code, refused.out) == (1, "")
-    assert refused.err == (f"kblam put: .kblam/review-staging/SC-0001.yaml: id is 'SC-0009', but the file "
-                           f"name's ID is SC-0001; the ID never changes, and the installed record {path} "
-                           f"does not read as SC-0001 either: it has no id. Delete "
-                           f".kblam/review-staging/SC-0001.yaml, run kblam validate and do what its line "
+    assert refused.err == (f"kblam put: .kblam/review-staging/source-challenge-0001.yaml: id is 'source-challenge-0009', but the file "
+                           f"name's ID is source-challenge-0001; the ID never changes, and the installed record {path} "
+                           f"does not read as source-challenge-0001 either: it has no id. Delete "
+                           f".kblam/review-staging/source-challenge-0001.yaml, run kblam validate and do what its line "
                            f"for {path} says. {POINTER}\n")
 
     staged.unlink()                                      # the step it names: delete the staged copy
     restore = named_restore(m.validate(kb).out)          # and run the restore its line prints
     git(kb.root, *restore.split()[1:])
 
-    fresh = Path(m.kblam(kb, "challenge", "edit", "SC-0001").out.strip())   # a fresh edit
+    fresh = Path(m.kblam(kb, "challenge", "edit", "source-challenge-0001").out.strip())   # a fresh edit
     record_edit(fresh, proposition="The printed byte equality follows from the printed byte values, "
                                    "restated")                              # a free-field change
     assert m.put_ok(kb, fresh).code == 0
@@ -1016,8 +1025,8 @@ def test_a_staged_id_and_an_installed_id_with_no_id_name_deleting_the_staged_cop
 
 
 @pytest.mark.parametrize("kind, rec_id, word, folder", [
-    ("SC", "SC-0001", "challenge", "challenges"),
-    ("CT", "CT-0001", "task", "tasks"),
+    ("source-challenge", "source-challenge-0001", "challenge", "challenges"),
+    ("claim-task", "claim-task-0001", "task", "tasks"),
 ])
 def test_either_edit_command_refuses_an_installed_record_with_no_id(
         git_review_kb, kind, rec_id, word, folder):
@@ -1060,19 +1069,19 @@ def test_the_restore_step_says_that_it_undoes_a_write_made_since_git(git_review_
     the decision is gone."""
     kb = git_review_kb
     kb.add("F-0001", "motor", E1)
-    path = f"{REVIEW}/challenges/SC-0001.yaml"
-    sound = record_text("SC", "SC-0001")
+    path = f"{REVIEW}/challenges/source-challenge-0001.yaml"
+    sound = record_text("source-challenge", "source-challenge-0001")
     kb.write(path, sound)
     m.accept_tree(kb)
     git(kb.root, "add", "-A")
     git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
 
-    decided = m.decide(kb, "SC-0001", "rejected", by="reviewer-b",
+    decided = m.decide(kb, "source-challenge-0001", "rejected", by="reviewer-b",
                        reason="The printed byte values do not support the claim.")
     assert decided.code == 0, decided.out + decided.err
     assert b"rejected" in (kb.root / path).read_bytes()      # a kblam write the commit does not hold
 
-    kb.write(path, record_text("SC", "SC-0001", id=DROP))    # the hand damage: no id
+    kb.write(path, record_text("source-challenge", "source-challenge-0001", id=DROP))    # the hand damage: no id
 
     failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
     line = next(line for line in failures if line.startswith(f"K13 {path}:"))
@@ -1096,13 +1105,13 @@ def test_a_commit_that_holds_the_damage_names_no_restore(git_review_kb, monkeypa
     instead, names no git command, and the file stays byte-identical."""
     kb = git_review_kb
     kb.add("F-0001", "motor", E1)
-    path = f"{REVIEW}/challenges/SC-0001.yaml"
-    kb.write(path, record_text("SC", "SC-0001"))
+    path = f"{REVIEW}/challenges/source-challenge-0001.yaml"
+    kb.write(path, record_text("source-challenge", "source-challenge-0001"))
     m.accept_tree(kb)
     git(kb.root, "add", "-A")
     git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
 
-    kb.write(path, record_text("SC", "SC-0001", id=DROP))    # the hand damage: no id
+    kb.write(path, record_text("source-challenge", "source-challenge-0001", id=DROP))    # the hand damage: no id
     git(kb.root, "add", "-A")                                # and it is committed as the damage
     git(kb.root, "commit", "-q", "--no-verify", "-m", "the damage, committed")
     before = (kb.root / path).read_bytes()
@@ -1151,7 +1160,7 @@ def test_a_misfiled_record_keeps_its_parse_error_bare(git_review_kb, monkeypatch
     m.accept_tree(kb)
     git(kb.root, "add", "-A")
     git(kb.root, "commit", "-q", "--no-verify", "-m", "the knowledge base")
-    path = f"{REVIEW}/challenges/CT-0001.yaml"               # a task record under challenges/
+    path = f"{REVIEW}/challenges/claim-task-0001.yaml"               # a task record under challenges/
     kb.write(path, "schema: 1\nid: [unterminated\n")
     before = (kb.root / path).read_bytes()
 
@@ -1174,19 +1183,19 @@ def test_a_duplicate_id_names_the_restore_of_the_file_that_causes_it(git_review_
     clean again."""
     kb = git_review_kb
     kb.add("F-0001", "motor", E1)
-    first, second = f"{REVIEW}/challenges/SC-0001.yaml", f"{REVIEW}/challenges/SC-0002.yaml"
-    kb.write(first, record_text("SC", "SC-0001"))
-    kb.write(second, record_text("SC", "SC-0002"))
+    first, second = f"{REVIEW}/challenges/source-challenge-0001.yaml", f"{REVIEW}/challenges/source-challenge-0002.yaml"
+    kb.write(first, record_text("source-challenge", "source-challenge-0001"))
+    kb.write(second, record_text("source-challenge", "source-challenge-0002"))
     m.accept_tree(kb)
     git(kb.root, "add", "-A")
     git(kb.root, "commit", "-q", "--no-verify", "-m", "two records")
-    kb.write(second, record_text("SC", "SC-0002", id="SC-0001"))   # the hand edit: SC-0001 claims SC-0001
+    kb.write(second, record_text("source-challenge", "source-challenge-0002", id="source-challenge-0001"))   # the hand edit: source-challenge-0001 claims source-challenge-0001
 
     failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
     line = next(line for line in failures if "claimed by more than one record file" in line
                 and line.startswith(f"K13 {second}:"))
 
-    assert line.endswith(f"the ID SC-0001 is claimed by more than one record file ({first}, {second}); "
+    assert line.endswith(f"the ID source-challenge-0001 is claimed by more than one record file ({first}, {second}); "
                          f"each ID names one record, and records are never renamed. Restore the record's "
                          f"file from git (git restore --source=HEAD --staged --worktree {second}), which "
                          f"puts back the file as git's last commit holds it and undoes any kblam put or "
@@ -1194,7 +1203,7 @@ def test_a_duplicate_id_names_the_restore_of_the_file_that_causes_it(git_review_
                          f"instead")
 
     git(kb.root, *named_restore(line).split()[1:])           # the step as printed, run
-    assert (kb.root / second).read_text(encoding="utf-8") == record_text("SC", "SC-0002")
+    assert (kb.root / second).read_text(encoding="utf-8") == record_text("source-challenge", "source-challenge-0002")
     assert m.validate(kb, "--record").code == 0
 
 
@@ -1204,13 +1213,13 @@ def test_a_hand_copied_duplicate_id_names_no_restore(git_review_kb, monkeypatch,
     is and tell the user, and the copy stays byte-identical."""
     kb = git_review_kb
     kb.add("F-0001", "motor", E1)
-    path = f"{REVIEW}/challenges/SC-0001.yaml"
-    kb.write(path, record_text("SC", "SC-0001"))
+    path = f"{REVIEW}/challenges/source-challenge-0001.yaml"
+    kb.write(path, record_text("source-challenge", "source-challenge-0001"))
     m.accept_tree(kb)
     git(kb.root, "add", "-A")
     git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
-    copy = f"{REVIEW}/challenges/SC-0002.yaml"
-    kb.write(copy, record_text("SC", "SC-0001"))             # a hand copy, never committed
+    copy = f"{REVIEW}/challenges/source-challenge-0002.yaml"
+    kb.write(copy, record_text("source-challenge", "source-challenge-0001"))             # a hand copy, never committed
     before = (kb.root / copy).read_bytes()
 
     failures, fix, pointer = blocked_parts(kb, monkeypatch, capsys)
@@ -1218,7 +1227,7 @@ def test_a_hand_copied_duplicate_id_names_no_restore(git_review_kb, monkeypatch,
                 and line.startswith(f"K13 {copy}:"))
 
     assert (fix, pointer) == (STOP_FIX, POINTER)
-    assert line.endswith(f"the ID SC-0001 is claimed by more than one record file ({path}, {copy}); each "
+    assert line.endswith(f"the ID source-challenge-0001 is claimed by more than one record file ({path}, {copy}); each "
                          f"ID names one record, and records are never renamed. Git's last commit does not "
                          f"hold a file at {copy}, so leave it as it is and tell the user")
     assert "git restore" not in line
@@ -1231,13 +1240,13 @@ def test_a_duplicate_id_that_no_restore_can_fix_names_no_command(git_review_kb, 
     the step names the files it concerns, names no command, and says to leave them and tell the user."""
     kb = git_review_kb
     kb.add("F-0001", "motor", E1)
-    path = f"{REVIEW}/challenges/SC-0001.yaml"
-    sound = record_text("SC", "SC-0001")
+    path = f"{REVIEW}/challenges/source-challenge-0001.yaml"
+    sound = record_text("source-challenge", "source-challenge-0001")
     kb.write(path, sound)
     m.accept_tree(kb)
     git(kb.root, "add", "-A")
     git(kb.root, "commit", "-q", "--no-verify", "-m", "the record as it was")
-    copy = f"{REVIEW}/tasks/SC-0001.yaml"
+    copy = f"{REVIEW}/tasks/source-challenge-0001.yaml"
     kb.write(copy, sound)                                    # a hand copy, committed where it sits
     git(kb.root, "add", "-f", copy)
     git(kb.root, "commit", "-q", "--no-verify", "-m", "a hand copy")
@@ -1247,7 +1256,7 @@ def test_a_duplicate_id_that_no_restore_can_fix_names_no_command(git_review_kb, 
                 and line.startswith(f"K13 {copy}:"))
 
     assert (fix, pointer) == (STOP_FIX, POINTER)
-    assert line.endswith(f"the ID SC-0001 is claimed by more than one record file ({path}, {copy}); each "
+    assert line.endswith(f"the ID source-challenge-0001 is claimed by more than one record file ({path}, {copy}); each "
                          f"ID names one record, and records are never renamed. No command an agent may run "
                          f"puts {path}, {copy} right; leave them as they are and tell the user")
     assert "git restore" not in line

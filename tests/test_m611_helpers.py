@@ -27,7 +27,7 @@ def test_the_challenge_alone_leaves_validate_failing(kb, source_repo):
     m.confirmed_challenge(kb, source_repo, "3-3", by="reviewer-a", decider="reviewer-b")
     failing = m.validate(kb)
     assert failing.code == 1
-    assert "K14 findings/calibration/F-0001-ratio.md:15: SC-0001 challenges this quoted assertion at " \
+    assert "K14 findings/calibration/F-0001-ratio.md:15: source-challenge-0001 challenges this quoted assertion at " \
            f"{m.TRACE}@" in failing.out
 
 
@@ -41,20 +41,20 @@ def test_the_whole_round_trip_through_the_helpers(kb, source_repo):
     m.accept_tree(kb)
 
     sc = m.confirmed_challenge(kb, source_repo, "3-3", by="reviewer-a", decider="reviewer-b")
-    assert sc == "SC-0001"
+    assert sc == "source-challenge-0001"
     cu = m.approved_use(kb, sc, "F-0001", 1, proponent="researcher-a", reviewer="reviewer-b")
-    assert cu == "CU-0001"
+    assert cu == "checked-use-0001"
     ct = m.open_task(kb, "F-0001", kind="replication", by="reviewer-a", proponent="researcher-a")
-    assert ct == "CT-0001"
+    assert ct == "claim-task-0001"
     m.ok(m.confirmed_task(kb, ct, by="reviewer-b"), "review decide")
 
     assert m.ok(m.validate(kb), "validate").out == "kblam validate: OK (1 findings)\n"
 
     listing = m.ok(m.kblam(kb, "review", "list"), "review list")
     assert listing.out.splitlines() == [
-        f"SC-0001 challenge confirmed {m.expect(kb, sc)[:12]} {m.TRACE}:3-3 current",
-        f"CT-0001 task confirmed {m.expect(kb, ct)[:12]} replication of F-0001 current",
-        f"CU-0001 use approved {m.expect(kb, cu)[:12]} SC-0001 in F-0001 excerpt 1 current",
+        f"source-challenge-0001 challenge confirmed {m.expect(kb, sc)[:12]} {m.TRACE}:3-3 current",
+        f"claim-task-0001 task confirmed {m.expect(kb, ct)[:12]} replication of F-0001 current",
+        f"checked-use-0001 use approved {m.expect(kb, cu)[:12]} source-challenge-0001 in F-0001 excerpt 1 current",
     ]
     assert source_repo.snapshot() == before
     # frozen_today reached the modules review_stage and review_write write the dates from
@@ -64,15 +64,15 @@ def test_the_whole_round_trip_through_the_helpers(kb, source_repo):
 def _prepare_record_stage(kb, source_repo, kind):
     """Prepare the subject before patching the runner; return the staging helper call to test."""
     m.quoting_finding(kb, "F-0001", source_repo, "3-3")
-    if kind == "SC":
+    if kind == "source-challenge":
         return lambda: m.stage_challenge(kb, source_repo, "3-3", by="reviewer-a")
-    if kind == "CT":
+    if kind == "claim-task":
         return lambda: m.stage_task(kb, "F-0001", by="reviewer-a", proponent="researcher-a")
     sc = m.confirmed_challenge(kb, source_repo, "3-3", by="reviewer-a", decider="reviewer-b")
     return lambda: m.stage_use(kb, sc, "F-0001", by="reviewer-b", proponent="researcher-a")
 
 
-@pytest.mark.parametrize("kind", ["SC", "CT", "CU"])
+@pytest.mark.parametrize("kind", ["source-challenge", "claim-task", "checked-use"])
 @pytest.mark.parametrize("fault", [
     "stderr", "extra-line", "other-path", "other-kind", "short-id", "missing-newline", "whitespace",
 ])
@@ -114,7 +114,7 @@ def test_record_staging_rejects_unexpected_streams(kb, source_repo, monkeypatch,
     assert f"stderr: {runs[0].err!r}" in str(exc.value)
 
 
-@pytest.mark.parametrize("kind", ["SC", "CT", "CU"])
+@pytest.mark.parametrize("kind", ["source-challenge", "claim-task", "checked-use"])
 @pytest.mark.parametrize("fault", ["missing-file", "other-id"])
 def test_record_staging_checks_the_printed_file(kb, source_repo, monkeypatch, kind, fault):
     """A well-shaped stdout line still has to name a file containing that same record ID."""
@@ -155,10 +155,10 @@ def test_changed_reports_exactly_the_files_a_put_wrote(kb, source_repo):
 
     assert m.changed(before, m.tree(kb)) == {
         ".kblam/review-ids",
-        ".kblam/review-staging/SC-0001.yaml",
+        ".kblam/review-staging/source-challenge-0001.yaml",
         ".kblam/tree.hash",
         "research-review/INDEX.md",
-        "research-review/challenges/SC-0001.yaml",
+        "research-review/challenges/source-challenge-0001.yaml",
     }
     assert m.record_path(kb, staged.id).is_file() and not staged.path.exists()
 

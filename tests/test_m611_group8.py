@@ -57,7 +57,7 @@ OK = "kblam validate: OK (0 findings)"
 OK_ONE = "kblam validate: OK (1 findings)"
 RECORDED = "; recorded .kblam/tree.hash for this tree"
 NOT_RECORDED = "; tree.hash not recorded"
-PENDING = "CT-0001 open replication of F-0001: Does an independent measurement establish the claim?"
+PENDING = "claim-task-0001 open replication of F-0001: Does an independent measurement establish the claim?"
 # The §6 check phase's own output for the one finding the clone tests install.
 JEV_NOTE = ("kblam validate --record: [jev.thresholds] enables no Jev verdict, so Jev was not asked "
             "(quantities were compared)\n")
@@ -198,7 +198,8 @@ def new_challenge(kb, source_repo, rec_id: str, lines: str, *, by: str = "review
 
 
 def install(kb, source_repo, staged: Path, rec_id: str) -> None:
-    """`kblam put <staged SC- or CT->` (bracketed: the record, the review index, the registry and
+    """`kblam put <staged source-challenge- or claim-task->` (bracketed: the record, the review index,
+    the registry and
     tree.hash; the staged file is gone), printing the record's path."""
     rel = record_rel(kb, rec_id)
     run = cli(kb, source_repo,
@@ -271,7 +272,7 @@ def test_a_deleted_record_is_missing_and_restoring_it_clears_the_report(kb, sour
     source it stages. Commands, each bracketed: `challenge new --lines 3-3 --by reviewer-a` (writes the
     staged record and its allocation receipt), the author's filling (a fixture edit), `kblam put` (writes
     the record, the review index, the registry and tree.hash; the staged file is gone), `kblam review
-    decide SC-0001 --status confirmed --by reviewer-b --reason ... --expect D` (writes the record, the
+    decide source-challenge-0001 --status confirmed --by reviewer-b --reason ... --expect D` (writes the record, the
     review index and tree.hash), `kblam validate` and `kblam review list` (reads: exit 0, the validation
     OK and the confirmed challenge listed). Fixture edit: the installed record file is deleted out of
     band, as a checkout that lost it leaves the KB. Commands after it, each bracketed: `kblam validate`
@@ -284,51 +285,51 @@ def test_a_deleted_record_is_missing_and_restoring_it_clears_the_report(kb, sour
     review index alone (its bytes change to the empty index), then the check pair cache and open-item
     file, and nothing else — all five reads change nothing, in the KB or the source repository.
     Diagnostics: the K13 issue "INDEX.md differs from the generated review index ..." on
-    research-review/INDEX.md (line 0), then "SC-0001 is missing from research-review/; records are never
+    research-review/INDEX.md (line 0), then "source-challenge-0001 is missing from research-review/; records are never
     deleted or renamed; restore it from git" on the canonical path the record should have, then "kblam
     validate: 2 error(s) in research-review/"; after `review index` the one missing error and "kblam validate: 1
     error(s) in research-review/; tree.hash not recorded". `review index` exits 0 with "kblam review index: wrote
     research-review/INDEX.md" and the stderr note that tree.hash was not advanced because the two roots
-    changed outside kblam. The registry still lists SC-0001 after all of it: neither `review index` nor
+    changed outside kblam. The registry still lists source-challenge-0001 after all of it: neither `review index` nor
     `validate --record` forgets a registered ID. Restoring the two files puts both roots back byte for
     byte and validate exits 0 again. Acceptance 6: a deleted record is reported, and no write silently
     drops its registration."""
-    challenge(kb, source_repo, "SC-0001", "3-3")
-    confirm(kb, source_repo, "SC-0001")
-    digest = m.expect(kb, "SC-0001")
+    challenge(kb, source_repo, "source-challenge-0001", "3-3")
+    confirm(kb, source_repo, "source-challenge-0001")
+    digest = m.expect(kb, "source-challenge-0001")
     read(kb, source_repo, "validate", out=f"{OK}\n")
     read(kb, source_repo, "review", "list",
-         out=f"SC-0001 challenge confirmed {digest[:12]} {m.TRACE}:3-3 current\n")
-    assert m.registry(kb) == ["SC-0001"]
+         out=f"source-challenge-0001 challenge confirmed {digest[:12]} {m.TRACE}:3-3 current\n")
+    assert m.registry(kb) == ["source-challenge-0001"]
 
     before = m.tree(kb)                                   # the tree as the last command left it
-    (kb.root / record_rel(kb, "SC-0001")).unlink()        # fixture edit: the record is gone
+    (kb.root / record_rel(kb, "source-challenge-0001")).unlink()        # fixture edit: the record is gone
 
     read(kb, source_repo, "validate", code=1, out="\n".join([
         STALE_INDEX,
-        missing(kb, "SC-0001"),
+        missing(kb, "source-challenge-0001"),
         "kblam validate: 2 error(s) in research-review/",
     ]) + "\n")
 
     run = cli(kb, source_repo, {INDEX}, "review", "index")
     exactly(run, INDEX_WRITTEN, "review index", err=OUT_OF_BAND)
-    assert m.registry(kb) == ["SC-0001"]                  # the index never forgets a registered ID
+    assert m.registry(kb) == ["source-challenge-0001"]                  # the index never forgets a registered ID
 
     run = cli(kb, source_repo, CHECK_STATE_EMPTY, "validate", "--record")
     exactly(run, "\n".join([
-        missing(kb, "SC-0001"),
+        missing(kb, "source-challenge-0001"),
         f"kblam validate: 1 error(s) in research-review/{NOT_RECORDED}",
     ]) + "\n", "validate --record", code=1)
-    assert m.registry(kb) == ["SC-0001"]                  # nor does validate --record
+    assert m.registry(kb) == ["source-challenge-0001"]                  # nor does validate --record
 
-    for rel in (record_rel(kb, "SC-0001"), INDEX):        # fixture edit: restore from git
+    for rel in (record_rel(kb, "source-challenge-0001"), INDEX):        # fixture edit: restore from git
         (kb.root / rel).write_bytes(before[rel])
     assert roots_of(m.tree(kb)) == roots_of(before), "the restore did not put the tree back"
 
     read(kb, source_repo, "validate", out=f"{OK}\n")
     read(kb, source_repo, "review", "list",
-         out=f"SC-0001 challenge confirmed {digest[:12]} {m.TRACE}:3-3 current\n")
-    assert m.registry(kb) == ["SC-0001"]
+         out=f"source-challenge-0001 challenge confirmed {digest[:12]} {m.TRACE}:3-3 current\n")
+    assert m.registry(kb) == ["source-challenge-0001"]
 
 
 # --- a record renamed ------------------------------------------------------------------------------
@@ -338,7 +339,7 @@ def test_a_renamed_record_is_missing_and_the_forget_drop_stands(kb, source_repo)
     """Start: no findings, no records; the trace is committed and clean. Commands, each bracketed:
     `challenge new --lines 3-3 --by reviewer-a` (staged record and receipt), the author's filling (a
     fixture edit), `kblam put` (the record, the review index, the registry and tree.hash; the staged file
-    is gone). Fixture edit: the record file is renamed in its own folder, SC-0001.yaml to SC-0002.yaml —
+    is gone). Fixture edit: the record file is renamed in its own folder, source-challenge-0001.yaml to source-challenge-0002.yaml —
     neither a deletion nor an edit kblam can follow. Commands after it, each bracketed: `kblam validate`
     (a read: it fails), `kblam review index` (rewrites the index), `kblam validate --record` (refused: no
     record write, but its §6 check phase writes `.kblam/pairs.sqlite` and `.kblam/review.jsonl` first),
@@ -347,49 +348,49 @@ def test_a_renamed_record_is_missing_and_the_forget_drop_stands(kb, source_repo)
     its receipt, then the record, the review index, the registry and tree.hash, then the review index
     alone, then the pair cache and open-item file, then the registry alone (the drop), and nothing else —
     the two reads change nothing, in the KB or the source repository. Diagnostics: the stale-index issue,
-    the missing-record issue on research-review/challenges/SC-0001.yaml, and the K13 issue on the renamed
-    file's `id` line, "id: 'SC-0001' does not match the file name's ID (SC-0002); git's last commit does
-    not hold a file at research-review/challenges/SC-0002.yaml, and records are never renamed, so leave it
+    the missing-record issue on research-review/challenges/source-challenge-0001.yaml, and the K13 issue on the renamed
+    file's `id` line, "id: 'source-challenge-0001' does not match the file name's ID (source-challenge-0002); git's last commit does
+    not hold a file at research-review/challenges/source-challenge-0002.yaml, and records are never renamed, so leave it
     as it is and tell the user", then "kblam validate:
     3 error(s) in research-review/"; `review index` exits 0 with its one line and the out-of-band note on stderr;
-    `validate --record` exits 1, writes no record and still lists SC-0001 in the registry; `validate
-    --record --forget-missing` exits 1, prints "forgot SC-0001 (no record in research-review/)", empties
+    `validate --record` exits 1, writes no record and still lists source-challenge-0001 in the registry; `validate
+    --record --forget-missing` exits 1, prints "forgot source-challenge-0001 (no record in research-review/)", empties
     the registry and records no tree.hash — the drop stands while the tree still fails; the read afterwards
     shows only the id mismatch, and the renamed file is still on disk byte for byte. Acceptance 6: a
     renamed record is reported, and the flag's drop is not undone by a failing validation."""
-    challenge(kb, source_repo, "SC-0001", "3-3")
-    assert m.registry(kb) == ["SC-0001"]
+    challenge(kb, source_repo, "source-challenge-0001", "3-3")
+    assert m.registry(kb) == ["source-challenge-0001"]
 
-    old = kb.root / record_rel(kb, "SC-0001")
-    renamed = old.with_name("SC-0002.yaml")               # fixture edit: a rename, in place
+    old = kb.root / record_rel(kb, "source-challenge-0001")
+    renamed = old.with_name("source-challenge-0002.yaml")               # fixture edit: a rename, in place
     old.rename(renamed)
-    mismatch = (f"K13 {CHALLENGES}/SC-0002.yaml:{key_line(renamed, 'id')}: id: 'SC-0001' does not match "
-                f"the file name's ID (SC-0002); git's last commit does not hold a file at "
-                f"{CHALLENGES}/SC-0002.yaml, and records are never renamed, so leave it as it is and tell "
+    mismatch = (f"K13 {CHALLENGES}/source-challenge-0002.yaml:{key_line(renamed, 'id')}: id: 'source-challenge-0001' does not match "
+                f"the file name's ID (source-challenge-0002); git's last commit does not hold a file at "
+                f"{CHALLENGES}/source-challenge-0002.yaml, and records are never renamed, so leave it as it is and tell "
                 f"the user")
 
     read(kb, source_repo, "validate", code=1, out="\n".join([
         STALE_INDEX,
-        missing(kb, "SC-0001"),
+        missing(kb, "source-challenge-0001"),
         mismatch,
         "kblam validate: 3 error(s) in research-review/",
     ]) + "\n")
 
     run = cli(kb, source_repo, {INDEX}, "review", "index")
     exactly(run, INDEX_WRITTEN, "review index", err=OUT_OF_BAND)
-    assert m.registry(kb) == ["SC-0001"]
+    assert m.registry(kb) == ["source-challenge-0001"]
 
     run = cli(kb, source_repo, CHECK_STATE_EMPTY, "validate", "--record")
     exactly(run, "\n".join([
-        missing(kb, "SC-0001"),
+        missing(kb, "source-challenge-0001"),
         mismatch,
         f"kblam validate: 2 error(s) in research-review/{NOT_RECORDED}",
     ]) + "\n", "validate --record", code=1)
-    assert m.registry(kb) == ["SC-0001"]
+    assert m.registry(kb) == ["source-challenge-0001"]
 
     run = forget(kb, source_repo, code=1, changed={REGISTRY})
     assert run.out == "\n".join([
-        forgot("SC-0001"),
+        forgot("source-challenge-0001"),
         mismatch,
         f"kblam validate: 1 error(s) in research-review/{NOT_RECORDED}",
     ]) + "\n"
@@ -407,7 +408,7 @@ def test_a_moved_record_is_reported_as_a_known_record_out_of_place(kb, source_re
     `challenge new --lines 3-3 --by reviewer-a` (staged record and receipt), the author's filling (a
     fixture edit), `kblam put` (the record, the review index, the registry and tree.hash; the staged file
     is gone). Fixture edit: the record file is moved out of its kind's folder, to
-    research-review/SC-0001.yaml — a rename the review root cannot hold. Commands after it, each
+    research-review/source-challenge-0001.yaml — a rename the review root cannot hold. Commands after it, each
     bracketed: `kblam validate` (a read: it fails), `kblam review index` (rewrites the index),
     `kblam validate --record` (refused: no record write, but its §6 check phase writes
     `.kblam/pairs.sqlite` and `.kblam/review.jsonl` first), `kblam validate --record --forget-missing`
@@ -415,24 +416,24 @@ def test_a_moved_record_is_reported_as_a_known_record_out_of_place(kb, source_re
     the staged record and its receipt, then the record, the review index, the registry and tree.hash, then
     the review index alone, then the pair cache and open-item file, then the registry alone, and nothing
     else — the two reads change nothing, in the KB or the source repository. Diagnostics: the stale-index
-    issue; then, on the moved file and only while the registry still lists SC-0001, "a challenge must sit
-    directly in its kind's folder (research-review/challenges/SC-0001.yaml); this ID is a record kblam
+    issue; then, on the moved file and only while the registry still lists source-challenge-0001, "a challenge must sit
+    directly in its kind's folder (research-review/challenges/source-challenge-0001.yaml); this ID is a record kblam
     knows, so restore research-review/ from git (the record's place is its canonical path)" beside the
     missing-record issue, and "kblam validate: 3 error(s) in research-review/"; `validate --record` exits 1 and
-    writes no record; `validate --record --forget-missing` exits 1, prints "forgot SC-0001 (no record in
+    writes no record; `validate --record --forget-missing` exits 1, prints "forgot source-challenge-0001 (no record in
     research-review/)", empties the registry, records no tree.hash, and the moved file's message becomes
     the one for an ID kblam does not know, "this ID is not an installed record or a registered ID, so
     restage it with kblam challenge new, kblam task new or kblam use review, each of which writes the
     receipt kblam put needs"; the read afterwards still exits 1 on that message. Acceptance 6: a renamed
     record is reported with the recovery that fits it, and the flag drops the registration, never the
     file."""
-    challenge(kb, source_repo, "SC-0001", "3-3")
+    challenge(kb, source_repo, "source-challenge-0001", "3-3")
 
-    old = kb.root / record_rel(kb, "SC-0001")
-    moved = kb.root / REVIEW / "SC-0001.yaml"             # fixture edit: out of its kind's folder
+    old = kb.root / record_rel(kb, "source-challenge-0001")
+    moved = kb.root / REVIEW / "source-challenge-0001.yaml"             # fixture edit: out of its kind's folder
     old.rename(moved)
 
-    canonical = f"{CHALLENGES}/SC-0001.yaml"
+    canonical = f"{CHALLENGES}/source-challenge-0001.yaml"
     known = (f"a challenge must sit directly in its kind's folder ({canonical}); this ID is a record "
              f"kblam knows, so restore {REVIEW}/ from git (the record's place is its canonical path)")
     unknown = (f"a challenge must sit directly in its kind's folder ({canonical}); this ID is not an "
@@ -441,33 +442,33 @@ def test_a_moved_record_is_reported_as_a_known_record_out_of_place(kb, source_re
 
     read(kb, source_repo, "validate", code=1, out="\n".join([
         STALE_INDEX,
-        f"K13 {REVIEW}/SC-0001.yaml: {known}",
-        missing(kb, "SC-0001"),
+        missing(kb, "source-challenge-0001"),    # sorted by path: the kind folder's path comes first
+        f"K13 {REVIEW}/source-challenge-0001.yaml: {known}",
         "kblam validate: 3 error(s) in research-review/",
     ]) + "\n")
 
     run = cli(kb, source_repo, {INDEX}, "review", "index")
     exactly(run, INDEX_WRITTEN, "review index", err=OUT_OF_BAND)
-    assert m.registry(kb) == ["SC-0001"]
+    assert m.registry(kb) == ["source-challenge-0001"]
 
     run = cli(kb, source_repo, CHECK_STATE_EMPTY, "validate", "--record")
     exactly(run, "\n".join([
-        f"K13 {REVIEW}/SC-0001.yaml: {known}",
-        missing(kb, "SC-0001"),
+        missing(kb, "source-challenge-0001"),    # sorted by path: the kind folder's path comes first
+        f"K13 {REVIEW}/source-challenge-0001.yaml: {known}",
         f"kblam validate: 2 error(s) in research-review/{NOT_RECORDED}",
     ]) + "\n", "validate --record", code=1)
-    assert m.registry(kb) == ["SC-0001"]
+    assert m.registry(kb) == ["source-challenge-0001"]
 
     run = forget(kb, source_repo, code=1, changed={REGISTRY})
     assert run.out == "\n".join([
-        forgot("SC-0001"),
-        f"K13 {REVIEW}/SC-0001.yaml: {unknown}",
+        forgot("source-challenge-0001"),
+        f"K13 {REVIEW}/source-challenge-0001.yaml: {unknown}",
         f"kblam validate: 1 error(s) in research-review/{NOT_RECORDED}",
     ]) + "\n"
     assert m.registry(kb) == []
 
     read(kb, source_repo, "validate", code=1, out="\n".join([
-        f"K13 {REVIEW}/SC-0001.yaml: {unknown}",
+        f"K13 {REVIEW}/source-challenge-0001.yaml: {unknown}",
         "kblam validate: 1 error(s) in research-review/",
     ]) + "\n")
     assert moved.is_file()
@@ -494,54 +495,54 @@ def test_forget_missing_prints_each_id_it_drops(kb, source_repo):
     `.kblam/pairs.sqlite` and `.kblam/review.jsonl` (the check phase over F-0001), then `.kblam/checks.jsonl`
     again with the registry and tree.hash (the drop and the clean recording), and nothing else — the read
     changes nothing, in the KB or the source repository. Diagnostics: the stale-index issue and one
-    missing-record issue per ID — on research-review/challenges/SC-0001.yaml and
-    research-review/tasks/CT-0001.yaml — then "kblam validate: 3 error(s) in research-review/"; `review index`
+    missing-record issue per ID — on research-review/challenges/source-challenge-0001.yaml and
+    research-review/tasks/claim-task-0001.yaml — then "kblam validate: 3 error(s) in research-review/"; `review index`
     exits 0 and keeps both IDs registered; `validate --record` exits 1, prints the check line "kblam
     validate --record: F-0001 (<fingerprint>): 0 candidate(s)" and the §6 Jev note on stderr, and keeps
-    both IDs; `validate --record --forget-missing` exits 0, prints that check line, then "forgot CT-0001
-    (no record in research-review/)" and "forgot SC-0001 (no record in research-review/)" — one line per
+    both IDs; `validate --record --forget-missing` exits 0, prints that check line, then "forgot claim-task-0001
+    (no record in research-review/)" and "forgot source-challenge-0001 (no record in research-review/)" — one line per
     ID, in ID order — then "kblam validate: OK (1 findings); recorded .kblam/tree.hash for this tree", and
     empties the registry. Acceptance 6: every registered ID with no record is reported, and each is
     printed as it is dropped."""
     kb.add("F-0001", "ratio", m.CLAIM)                    # fixture edit: the finding the task binds
-    challenge(kb, source_repo, "SC-0001", "3-3")
-    task(kb, source_repo, "CT-0001", "F-0001")
-    assert m.registry(kb) == ["CT-0001", "SC-0001"]
+    challenge(kb, source_repo, "source-challenge-0001", "3-3")
+    task(kb, source_repo, "claim-task-0001", "F-0001")
+    assert m.registry(kb) == ["claim-task-0001", "source-challenge-0001"]
 
     read(kb, source_repo, "validate", out=f"{PENDING}\n{OK_ONE}; 1 pending task(s)\n")
     read(kb, source_repo, "review", "list", out="\n".join([
-        f"SC-0001 challenge open {m.expect(kb, 'SC-0001')[:12]} {m.TRACE}:3-3 current",
-        f"CT-0001 task open {m.expect(kb, 'CT-0001')[:12]} replication of F-0001 current",
+        f"source-challenge-0001 challenge open {m.expect(kb, 'source-challenge-0001')[:12]} {m.TRACE}:3-3 current",
+        f"claim-task-0001 task open {m.expect(kb, 'claim-task-0001')[:12]} replication of F-0001 current",
     ]) + "\n")
 
-    for rec_id in ("SC-0001", "CT-0001"):                 # fixture edit: both records are gone
+    for rec_id in ("source-challenge-0001", "claim-task-0001"):                 # fixture edit: both records are gone
         (kb.root / record_rel(kb, rec_id)).unlink()
 
     read(kb, source_repo, "validate", code=1, out="\n".join([
         STALE_INDEX,
-        missing(kb, "SC-0001"),
-        missing(kb, "CT-0001"),
+        missing(kb, "source-challenge-0001"),
+        missing(kb, "claim-task-0001"),
         "kblam validate: 3 error(s) in research-review/",
     ]) + "\n")
 
     run = cli(kb, source_repo, {INDEX}, "review", "index")
     exactly(run, INDEX_WRITTEN, "review index", err=OUT_OF_BAND)
-    assert m.registry(kb) == ["CT-0001", "SC-0001"]
+    assert m.registry(kb) == ["claim-task-0001", "source-challenge-0001"]
 
     run = cli(kb, source_repo, CHECK_STATE, "validate", "--record")
     exactly(run, "\n".join([
         check_line(kb, "F-0001"),
-        missing(kb, "SC-0001"),
-        missing(kb, "CT-0001"),
+        missing(kb, "source-challenge-0001"),
+        missing(kb, "claim-task-0001"),
         f"kblam validate: 2 error(s) in research-review/{NOT_RECORDED}",
     ]) + "\n", "validate --record", code=1, err=JEV_NOTE)
-    assert m.registry(kb) == ["CT-0001", "SC-0001"]
+    assert m.registry(kb) == ["claim-task-0001", "source-challenge-0001"]
 
     run = forget(kb, source_repo, code=0, changed={CHECKS, REGISTRY, TREE_HASH}, err=JEV_NOTE)
     assert run.out == "\n".join([
         check_line(kb, "F-0001"),
-        forgot("CT-0001"),
-        forgot("SC-0001"),
+        forgot("claim-task-0001"),
+        forgot("source-challenge-0001"),
         f"{OK_ONE}{RECORDED}",
     ]) + "\n"
     assert m.registry(kb) == []
@@ -555,7 +556,7 @@ def test_a_fresh_clone_creates_the_registry_from_the_records_present(kb, source_
     """Start: finding F-0001 installed through `kb.add` (a fixture edit), no records; the trace is
     committed and clean. Commands, each bracketed: `challenge new --lines 3-3 --by reviewer-a` (staged
     record and receipt), the author's filling (a fixture edit), `kblam put` (the record, the review index,
-    the registry and tree.hash; staged file gone), `kblam review decide SC-0001 --status confirmed --by
+    the registry and tree.hash; staged file gone), `kblam review decide source-challenge-0001 --status confirmed --by
     reviewer-b --reason ...
     --expect D` (the record, the review index and tree.hash), `task new F-0001 --kind replication --by
     reviewer-a --proponent researcher-a` (a second staged record and its receipt), the researcher's
@@ -577,20 +578,20 @@ def test_a_fresh_clone_creates_the_registry_from_the_records_present(kb, source_
     the repository, writing the same registry. Acceptance 6: the registry is created from the records
     present, so a clone loses no registration."""
     kb.add("F-0001", "ratio", m.CLAIM)                    # fixture edit: the finding the task binds
-    challenge(kb, source_repo, "SC-0001", "3-3")
-    confirm(kb, source_repo, "SC-0001")
-    task(kb, source_repo, "CT-0001", "F-0001")
-    assert m.registry(kb) == ["CT-0001", "SC-0001"]
+    challenge(kb, source_repo, "source-challenge-0001", "3-3")
+    confirm(kb, source_repo, "source-challenge-0001")
+    task(kb, source_repo, "claim-task-0001", "F-0001")
+    assert m.registry(kb) == ["claim-task-0001", "source-challenge-0001"]
 
     shutil.rmtree(kb.root / ".kblam")                     # fixture edit: the state a clone does not have
     assert not (kb.root / REGISTRY).exists() and not (kb.root / TREE_HASH).exists()
-    assert (kb.root / record_rel(kb, "SC-0001")).is_file() and (kb.root / INDEX).is_file()
+    assert (kb.root / record_rel(kb, "source-challenge-0001")).is_file() and (kb.root / INDEX).is_file()
 
     read(kb, source_repo, "validate", out=f"{PENDING}\n{OK_ONE}; 1 pending task(s)\n")
 
     run = cli(kb, source_repo, {REGISTRY, TREE_HASH, PAIRS}, "review", "index")
     exactly(run, f"kblam review index: wrote {INDEX} and .kblam/tree.hash\n", "review index")
-    assert m.registry(kb) == ["CT-0001", "SC-0001"]       # from the records present, not from nothing
+    assert m.registry(kb) == ["claim-task-0001", "source-challenge-0001"]       # from the records present, not from nothing
     assert recorded(kb) and accepted(kb, "F-0001")
 
     shutil.rmtree(kb.root / ".kblam")                     # fixture edit: a clone again
@@ -600,10 +601,10 @@ def test_a_fresh_clone_creates_the_registry_from_the_records_present(kb, source_
         f"{OK_ONE}; 1 pending task(s){RECORDED}",
         BASELINE,
     ]) + "\n", "validate --record")
-    assert m.registry(kb) == ["CT-0001", "SC-0001"]
+    assert m.registry(kb) == ["claim-task-0001", "source-challenge-0001"]
     assert recorded(kb) and accepted(kb, "F-0001")
 
     read(kb, source_repo, "review", "list", out="\n".join([
-        f"SC-0001 challenge confirmed {m.expect(kb, 'SC-0001')[:12]} {m.TRACE}:3-3 current",
-        f"CT-0001 task open {m.expect(kb, 'CT-0001')[:12]} replication of F-0001 current",
+        f"source-challenge-0001 challenge confirmed {m.expect(kb, 'source-challenge-0001')[:12]} {m.TRACE}:3-3 current",
+        f"claim-task-0001 task open {m.expect(kb, 'claim-task-0001')[:12]} replication of F-0001 current",
     ]) + "\n")

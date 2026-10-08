@@ -9,40 +9,42 @@ from kblam.records import RETIRED, STATUSES, Record
 from kblam.rules import Issue
 
 SUBJECT_FIELDS = {
-    "SC": ("id", "source", "proposition", "scope", "classification", "basis", "usable", "limits"),
-    "CT": ("id", "kind", "finding", "claim_fingerprint", "base_file_sha256", "question", "method",
+    "source-challenge": ("id", "source", "proposition", "scope", "classification", "basis", "usable", "limits"),
+    "claim-task": ("id", "kind", "finding", "claim_fingerprint", "base_file_sha256", "question", "method",
            "outcomes", "controls", "stop", "expected_evidence", "proponent"),
-    "CU": ("id", "challenge", "challenge_bind", "finding", "finding_fingerprint", "finding_file_sha256",
+    "checked-use": ("id", "challenge", "challenge_bind", "finding", "finding_fingerprint", "finding_file_sha256",
            "citation", "disposition", "reason", "proponent"),
 }
 
-KIND_WORDS = {"SC": "challenge", "CT": "task", "CU": "use"}
+KIND_WORDS = {"source-challenge": "challenge", "claim-task": "task", "checked-use": "use"}
 
 # The §5.2.2 table (SPEC lines 371-384) as data: kind -> from -> the statuses that kind's own rows
-# allow. The two rows that hold for every kind -- any status except `open` (and an SC's `confirmed`) to
+# allow. The two rows that hold for every kind -- any status except `open` (and a source challenge's
+# `confirmed`) to
 # `open`, and `open` to `stale` -- name no kind, so `_allowed` adds them.
 TRANSITIONS = {
-    "SC": {"open": ("confirmed", "rejected"),
+    "source-challenge": {"open": ("confirmed", "rejected"),
            "confirmed": ("stale",),
            "rejected": ("stale",)},
-    "CT": {"open": ("confirmed", "not_reproduced", "inconclusive"),
+    "claim-task": {"open": ("confirmed", "not_reproduced", "inconclusive"),
            "confirmed": ("stale",),
            "not_reproduced": ("stale",),
            "inconclusive": ("stale",)},
-    "CU": {"open": ("approved", "withdrawn"),
+    "checked-use": {"open": ("approved", "withdrawn"),
            "approved": ("stale",),
            "withdrawn": ("stale",)},
 }
 
-REBINDS = ("CT", "CU")   # `rebind` keeps a task's and a use's status; a challenge is never re-decided
+REBINDS = ("claim-task", "checked-use")   # `rebind` keeps a task's and a use's status; a challenge is never re-decided
 
 REOPEN_REFUSED = ("a confirmed challenge is never reopened; retire it with --status stale and file a "
                   "new challenge")
 
 # The fields `decide` and `rebind` compare `--by` against, in the order a message names them (SPEC
-# §5.2.2 "Independent means": an SC's creator; a CT's creator and proponent; a CU's proponent, whose
+# §5.2.2 "Independent means": a source challenge's creator; a claim task's creator and proponent; a
+# checked use's proponent, whose
 # creator may approve it).
-SELF_ROLES = {"SC": ("creator",), "CT": ("creator", "proponent"), "CU": ("proponent",)}
+SELF_ROLES = {"source-challenge": ("creator",), "claim-task": ("creator", "proponent"), "checked-use": ("proponent",)}
 
 
 def canonical_json(obj) -> bytes:
@@ -67,7 +69,7 @@ def _allowed(kind: str, old: str) -> tuple[str, ...]:
     allowed = list(TRANSITIONS[kind].get(old, ()))
     if old == "open":
         allowed.append(RETIRED)                      # any kind: open -> stale, anyone
-    elif not (kind == "SC" and old == "confirmed"):  # any status except open and an SC's confirmed
+    elif not (kind == "source-challenge" and old == "confirmed"):  # open, and a challenge's confirmed
         allowed.append("open")
     return tuple(allowed)
 
@@ -75,8 +77,9 @@ def _allowed(kind: str, old: str) -> tuple[str, ...]:
 def transition_problem(kind: str, old: str, new: str) -> str | None:
     """None if a decision may take a `kind` record from `old` to `new`, else why not.
 
-    The §5.2.2 table, plus `rebind` keeping the status (old == new, for CT and CU, old not stale). A
-    confirmed SC never goes back to open ("a confirmed challenge is never reopened; retire it with
+    The §5.2.2 table, plus `rebind` keeping the status (old == new, for a claim task and a checked
+    use, old not stale). A confirmed source challenge never goes back to open ("a confirmed challenge
+    is never reopened; retire it with
     --status stale and file a new challenge").
     """
     word = KIND_WORDS.get(kind, kind)
@@ -87,14 +90,14 @@ def transition_problem(kind: str, old: str, new: str) -> str | None:
     if new == old:
         if kind in REBINDS and old != RETIRED:
             return None                              # rebind keeps the status
-        if kind == "SC":
+        if kind == "source-challenge":
             return (f"a {word} cannot be decided to its own status {old}: a challenge has no rebind, and "
                     f"a changed assertion or judgement is a new challenge")
         return (f"a {word} in status {old} cannot be re-decided to {old}: {old} is retired, and a retired "
                 f"record stays as audit data")
     if new in allowed:
         return None
-    if kind == "SC" and old == "confirmed" and new == "open":
+    if kind == "source-challenge" and old == "confirmed" and new == "open":
         return REOPEN_REFUSED
     return f"a {word} cannot go from {old} to {new}; from {old} a decision can set {' or '.join(allowed)}"
 
@@ -105,9 +108,10 @@ def needs_independence(kind: str, old: str, new: str) -> bool:
 
 
 def independence_problem(kind: str, data: dict, by: str) -> str | None:
-    """None if `by` is independent for this record (SPEC §5.2.2): for SC, by != creator; for CT, by differs
-    from creator and proponent; for CU, by != proponent (the creator may approve). Else a message naming
-    the role, e.g. "reviewer-b is SC-0001's creator; a closing decision needs someone else"."""
+    """None if `by` is independent for this record (SPEC §5.2.2): for a source challenge, by != creator;
+    for a claim task, by differs from creator and proponent; for a checked use, by != proponent (the
+    creator may approve). Else a message naming
+    the role, e.g. "reviewer-b is source-challenge-0001's creator; a closing decision needs someone else"."""
     rid = data.get("id")
     rid = rid if isinstance(rid, str) and rid else "the record"
     for role in SELF_ROLES.get(kind, ()):

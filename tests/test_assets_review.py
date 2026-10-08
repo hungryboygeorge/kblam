@@ -46,7 +46,7 @@ SUBSTITUTIONS = (
     (re.compile(r"F-NNNN"), "F-0137"),
     (re.compile(r"F-target"), "F-0017"),
     (re.compile(r"F-x"), "F-0014"),
-    (re.compile(r"SC-NNNN"), "SC-0001"),
+    (re.compile(r"SC-NNNN"), "source-challenge-0001"),
     (re.compile(r"\bA-B\b"), "63-65"),
     (re.compile(r"\bD\b"), "0123456789ab"),
     (re.compile(r"\bTEXT\b"), '"the printed equality cannot hold"'),
@@ -60,7 +60,7 @@ QUOTED = (
     ("records are never deleted or renamed", k13),
     ("INDEX.md is missing; run kblam review index", k13),
     ("INDEX.md differs from the generated review index", k13),
-    ("holds only SC-, CT- and CU- records in their kind's folder", k13),
+    ("records in their kind's folder", k13),   # the skill's quote is reworded by R3d part 3
     ("only an open challenge can be pinned", review_write),
     ("changed since your edit", review_write),
     ("changed since you inspected it; show it again", review_write),
@@ -180,8 +180,8 @@ def test_every_command_the_assets_show_parses_with_the_cli(rel):
 def test_the_skill_shows_the_commands_the_diagnostics_print():
     """The command a K14 or a K15 diagnostic names is the one the skill gives the author (§5.2.4)."""
     skill = one_line(rendered(SKILL))
-    assert k14.USE_REVIEW.format(challenge="SC-0001", finding="F-0012", ordinal=2) in skill
-    assert k15.REBIND.format(rid="CT-0001") in skill
+    assert k14.USE_REVIEW.format(challenge="SC-0001", finding="F-0012", ordinal=2) in skill   # the skill's
+    assert k15.REBIND.format(rid="CT-0001") in skill                        # IDs are R3d part 3's to rename
     assert f"{k15.REBIND.format(rid='CT-0001')} --evidence PROVENANCE:PATH:LOCATOR" in skill
     assert "kblam challenge new <source-path> --lines A-B --by NAME" in skill
 

@@ -1,4 +1,5 @@
-"""Text matching shared by assertions, K10 and K14 (SPEC §5.2.3 Assertion, CU tag_sha256; §5.2.4 K14).
+"""Text matching shared by assertions, K10 and K14 (SPEC §5.2.3 Assertion, checked-use tag_sha256;
+§5.2.4 K14).
 
 Text is the source decoded as UTF-8 with line endings normalised to LF (finding.normalise_newlines),
 nothing else normalised. Spans are half-open character ranges [start, end) in that text.
@@ -130,7 +131,7 @@ def byte_to_char_map(data: bytes) -> list[int]:
 def tag_sha256(body_lines: list[str], start: int, end: int) -> str:
     """sha256 hex of UTF-8("\\n".join(body_lines[start:end])): the verbatim tag's line through the end of
     its block (end exclusive), fences or blockquote markers and indentation included, no final newline
-    (SPEC §5.2.3 CU citation)."""
+    (SPEC §5.2.3 checked-use citation)."""
     return hashlib.sha256("\n".join(body_lines[start:end]).encode("utf-8")).hexdigest()
 
 
@@ -151,7 +152,7 @@ class ExcerptMatch:
     verified: bool                # K10 verification of a text excerpt or hex bytes
     binary: bool                  # source classification: NUL bytes or not valid UTF-8
     tag_sha256: str               # tag_sha256(body_lines, start, end)
-    is_hex: bool = False          # hex rendering, excluded from K14 text relations and reviewed uses
+    is_hex: bool = False          # hex rendering, excluded from K14 text relations and checked uses
 
 
 def finding_matches(view, reader, finding) -> list[ExcerptMatch]:

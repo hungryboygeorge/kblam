@@ -32,11 +32,11 @@ from kblam.finding import yaml_rt
 frozen_today = m.frozen_today
 
 REVIEW = "research-review"
-SC = "SC-0001"                     # every test in this group installs exactly one challenge
+SC = "source-challenge-0001"                     # every test in this group installs exactly one challenge
 CHALLENGE = f"{REVIEW}/challenges/{SC}.yaml"
 INDEX = f"{REVIEW}/INDEX.md"
-STAGED = ".kblam/review-staging/SC-0001.yaml"
-RECEIPT = ".kblam/review-receipts/SC-0001.json"
+STAGED = ".kblam/review-staging/source-challenge-0001.yaml"
+RECEIPT = ".kblam/review-receipts/source-challenge-0001.json"
 REGISTRY = ".kblam/review-ids"
 TREE_HASH = ".kblam/tree.hash"
 
@@ -134,10 +134,11 @@ def stage(kb, source_repo, *, by="reviewer-a", lines="3-3", classification="cont
 
 
 def install(kb, source_repo, staged: Path) -> None:
-    """`kblam put <staged SC->` (bracketed: the record, the review index, the registry and tree.hash; the
+    """`kblam put <staged source-challenge->` (bracketed: the record, the review index, the registry,
+    tree.hash; the
     staged file is gone)."""
     run = cli(kb, source_repo, PUT_WRITES, "put", str(staged))
-    exactly(run, f"kblam put: SC-0001 -> {CHALLENGE}\n", "put")
+    exactly(run, f"kblam put: source-challenge-0001 -> {CHALLENGE}\n", "put")
     assert not staged.exists()
 
 
@@ -188,12 +189,12 @@ def test_a_contradicted_challenge_needs_a_counterevidence_role(kb, source_repo):
     new --lines 3-3 --by reviewer-a` (writes the staged record and its allocation receipt), the author's
     filling (a fixture edit: classification `contradicted`, one basis entry of role `model-mismatch`),
     `kblam put` (writes the record, the review index, the registry and tree.hash; the staged file is
-    gone), `kblam validate` (a read), `kblam review decide SC-0001 --status confirmed --by reviewer-b
+    gone), `kblam validate` (a read), `kblam review decide source-challenge-0001 --status confirmed --by reviewer-b
     --reason ... --expect D` (refused, exit 1) and `kblam validate` again (a read). Files changed: the
     staged record and its receipt, then the record, the review index, the registry and tree.hash, and
-    nothing else — both reads and the refusal change nothing. Diagnostics: the K13 issue "SC-0001 is classified contradicted but no basis
-    entry has role counterevidence or internal-inconsistency" on SC-0001's `basis:` line, then "kblam
-    review decide: refused SC-0001 (1 error(s)); research-review/ is unchanged. Fix what is listed above
+    nothing else — both reads and the refusal change nothing. Diagnostics: the K13 issue "source-challenge-0001 is classified contradicted but no basis
+    entry has role counterevidence or internal-inconsistency" on source-challenge-0001's `basis:` line, then "kblam
+    review decide: refused source-challenge-0001 (1 error(s)); research-review/ is unchanged. Fix what is listed above
     and run it again.". The source repository is untouched throughout. `validate` exits 0 after the
     refusal (only a confirmation needs the role) and the record stays open. Acceptance 5: a closing
     decision needs the support its classification names."""
@@ -204,7 +205,7 @@ def test_a_contradicted_challenge_needs_a_counterevidence_role(kb, source_repo):
 
     run = refuse_confirmation(kb, source_repo, SC)
 
-    refusal(kb, run, "SC-0001 is classified contradicted but no basis entry has role counterevidence or "
+    refusal(kb, run, "source-challenge-0001 is classified contradicted but no basis entry has role counterevidence or "
                      "internal-inconsistency")
     exactly(read(kb, source_repo, "validate"), f"{OK}\n", "validate")
     assert installed(kb)["status"] == "open"
@@ -215,7 +216,7 @@ def test_a_contradicted_challenge_with_counterevidence_confirms(kb, source_repo)
     `challenge new --lines 3-3 --by reviewer-a` (staged record and receipt), the author's filling
     (classification `contradicted`, one basis entry on the source with role `counterevidence` and the
     primary provenance `observed`), `kblam put` (writes the record, the review index, the registry and
-    tree.hash; the staged file is gone), `kblam review decide SC-0001 --status confirmed --by reviewer-b
+    tree.hash; the staged file is gone), `kblam review decide source-challenge-0001 --status confirmed --by reviewer-b
     --reason ... --expect D` (writes the record, the review index and tree.hash), `kblam validate` and
     `kblam review list` (reads). Files changed: the staged record and its receipt, then the record, the
     review index, the registry and tree.hash, then the record, the review index and tree.hash; the two
@@ -231,7 +232,7 @@ def test_a_contradicted_challenge_with_counterevidence_confirms(kb, source_repo)
 
     exactly(read(kb, source_repo, "validate"), f"{OK}\n", "validate")
     exactly(read(kb, source_repo, "review", "list"),
-            f"SC-0001 challenge confirmed {m.expect(kb, SC)[:12]} {m.TRACE}:3-3 current\n",
+            f"source-challenge-0001 challenge confirmed {m.expect(kb, SC)[:12]} {m.TRACE}:3-3 current\n",
             "review list")
     assert installed(kb)["basis"][0]["role"] == "counterevidence"
     assert installed(kb)["basis"][0]["provenance"] == "observed"
@@ -242,11 +243,11 @@ def test_a_wrong_model_challenge_needs_a_model_mismatch_role(kb, source_repo):
     `challenge new --lines 3-3 --by reviewer-a` (staged record and receipt), the author's filling
     (a fixture edit: classification `wrong_model`, one basis entry of role `internal-inconsistency`),
     `kblam put` (writes the record, the review index, the registry and tree.hash; the staged file is
-    gone), `kblam validate` (a read), `kblam review decide SC-0001 --status confirmed --by reviewer-b
+    gone), `kblam validate` (a read), `kblam review decide source-challenge-0001 --status confirmed --by reviewer-b
     --reason ... --expect D` (refused, exit 1) and `kblam validate` again (a read). Files changed: the
     staged record and its receipt, then the record, the review index, the registry and tree.hash, and
-    nothing else — both reads and the refusal change nothing. Diagnostics: the K13 issue "SC-0001 is
-    classified wrong_model but no basis entry has role model-mismatch" on SC-0001's `basis:` line, then
+    nothing else — both reads and the refusal change nothing. Diagnostics: the K13 issue "source-challenge-0001 is
+    classified wrong_model but no basis entry has role model-mismatch" on source-challenge-0001's `basis:` line, then
     the refusal line. The source repository is untouched. `validate` exits 0 afterwards and
     the record stays open. Acceptance 5: a `wrong_model` judgment needs model-mismatch support, which
     internal inconsistency is not."""
@@ -257,7 +258,7 @@ def test_a_wrong_model_challenge_needs_a_model_mismatch_role(kb, source_repo):
 
     run = refuse_confirmation(kb, source_repo, SC)
 
-    refusal(kb, run, "SC-0001 is classified wrong_model but no basis entry has role model-mismatch")
+    refusal(kb, run, "source-challenge-0001 is classified wrong_model but no basis entry has role model-mismatch")
     exactly(read(kb, source_repo, "validate"), f"{OK}\n", "validate")
     assert installed(kb)["status"] == "open"
 
@@ -267,7 +268,7 @@ def test_a_wrong_model_challenge_with_a_model_mismatch_confirms(kb, source_repo)
     `challenge new --lines 3-3 --by reviewer-a` (staged record and receipt), the author's filling
     (a fixture edit: classification `wrong_model`, one basis entry on the source whose role is
     `model-mismatch`), `kblam put` (writes the record, the review index, the registry and tree.hash; the
-    staged file is gone), `kblam review decide SC-0001 --status confirmed --by reviewer-b --reason ...
+    staged file is gone), `kblam review decide source-challenge-0001 --status confirmed --by reviewer-b --reason ...
     --expect D` (writes the record, the review index and tree.hash), `kblam validate` (a read). Files
     changed: the staged record and its receipt, then the record, the review index, the registry and
     tree.hash, then the record, the review index and tree.hash; the read changes nothing, in the KB or
@@ -290,7 +291,7 @@ def test_an_unsupported_challenge_needs_no_counterevidence_role(kb, source_repo)
     `challenge new --lines 3-3 --by reviewer-a` (staged record and receipt), the author's filling
     (a fixture edit: classification `unsupported`, one basis entry on the source whose role is
     `missing-support`), `kblam put` (writes the record, the review index, the registry and tree.hash; the
-    staged file is gone), `kblam review decide SC-0001 --status confirmed --by reviewer-b --reason ...
+    staged file is gone), `kblam review decide source-challenge-0001 --status confirmed --by reviewer-b --reason ...
     --expect D` (writes the record, the review index and tree.hash), `kblam validate` (a read). Files
     changed: the staged record and its receipt, then the record, the review index, the registry and
     tree.hash, then the record, the review index and tree.hash; the read changes nothing, in the KB or
@@ -317,13 +318,13 @@ def test_confirming_without_primary_provenance_is_refused(kb, source_repo):
     `challenge new --lines 3-3 --by reviewer-a` (staged record and receipt), the author's filling (one
     basis entry on the source whose provenance is `inferred`, which is not in `[review]
     primary_provenance`), `kblam put` (writes the record, the review index, the registry and tree.hash;
-    the staged file is gone), `kblam validate` (a read), `kblam review decide SC-0001 --status confirmed
+    the staged file is gone), `kblam validate` (a read), `kblam review decide source-challenge-0001 --status confirmed
     --by reviewer-b --reason ... --expect D` (refused, exit 1) and `kblam validate` again (a read). Files
     changed: the staged record and its receipt, then the record, the review index, the registry and
     tree.hash, and nothing else — both reads and the refusal change nothing. Diagnostics: the K13 issue
-    "SC-0001 is confirmed with no primary support; a confirmation needs a basis entry whose provenance
+    "source-challenge-0001 is confirmed with no primary support; a confirmation needs a basis entry whose provenance
     is one of observed, decoded and whose resolved path is outside findings/, research-review/ and the
-    history folders" on SC-0001's `basis:` line, then the refusal line. The source repository is untouched. `validate` exits 0 afterwards and the record stays open.
+    history folders" on source-challenge-0001's `basis:` line, then the refusal line. The source repository is untouched. `validate` exits 0 afterwards and the record stays open.
     Acceptance 5: a decision needs support kblam can hash as primary."""
     staged = stage(kb, source_repo, by="reviewer-a",
                    basis=[basis_of(SOURCE_ENTRY, provenance="inferred")])
@@ -332,7 +333,7 @@ def test_confirming_without_primary_provenance_is_refused(kb, source_repo):
 
     run = refuse_confirmation(kb, source_repo, SC)
 
-    message = ("SC-0001 is confirmed with no primary support; a confirmation needs a basis entry whose "
+    message = ("source-challenge-0001 is confirmed with no primary support; a confirmation needs a basis entry whose "
                f"provenance is one of observed, decoded and whose resolved path is outside findings/, "
                f"{REVIEW}/ and the history folders")
     refusal(kb, run, message)
@@ -346,13 +347,13 @@ def test_confirming_on_a_finding_alone_is_refused(kb, source_repo):
     record and receipt), the author's filling (a fixture edit: whose only basis entry is that finding
     file, role `internal-inconsistency` and the primary provenance `observed`), `kblam put` (writes the
     record, the review index, the registry and tree.hash; the staged file is gone), `kblam validate`, a
-    read over 1 finding, `kblam review decide SC-0001 --status confirmed --by reviewer-b --reason ...
+    read over 1 finding, `kblam review decide source-challenge-0001 --status confirmed --by reviewer-b --reason ...
     --expect D`, refused, exit 1, and `kblam validate` again. Files changed: F-0001, findings/INDEX.md
     and .kblam/tree.hash (the fixture edit: `kb.add` reindexes and records the tree), then the staged
     record and its receipt, then the record, the review index, the registry and tree.hash, and nothing
     else — both reads and the refusal change nothing.
     Diagnostics: the "no primary support"
-    K13 issue (a second KB paraphrase is not primary support) on SC-0001's `basis:` line, then the
+    K13 issue (a second KB paraphrase is not primary support) on source-challenge-0001's `basis:` line, then the
     refusal line. The source repository is untouched and F-0001 is unchanged. `validate` exits 0
     afterwards with F-0001 untouched. Acceptance 5: primary support cannot be the KB's own
     restatement."""
@@ -364,7 +365,7 @@ def test_confirming_on_a_finding_alone_is_refused(kb, source_repo):
 
     run = refuse_confirmation(kb, source_repo, SC)
 
-    refusal(kb, run, "SC-0001 is confirmed with no primary support; a confirmation needs a basis entry "
+    refusal(kb, run, "source-challenge-0001 is confirmed with no primary support; a confirmation needs a basis entry "
                      f"whose provenance is one of observed, decoded and whose resolved path is outside "
                      f"findings/, {REVIEW}/ and the history folders")
     exactly(read(kb, source_repo, "validate"), f"{OK_ONE}\n", "validate")
@@ -377,12 +378,12 @@ def test_confirming_on_a_history_document_alone_is_refused(kb, source_repo):
     `challenge new --lines 3-3 --by reviewer-a` (staged record and receipt), the author's filling (whose
     only basis entry is that history document, role `internal-inconsistency` and the primary provenance
     `observed`), `kblam put` (writes the record, the review index, the registry and tree.hash; the
-    staged file is gone), `kblam validate` (a read), `kblam review decide SC-0001 --status confirmed --by
+    staged file is gone), `kblam validate` (a read), `kblam review decide source-challenge-0001 --status confirmed --by
     reviewer-b --reason ... --expect D` (refused, exit 1) and `kblam validate` again (a read). Files
     changed: the history document (the fixture edit), then the staged record and its receipt, then the
     record, the review index, the registry and tree.hash, and nothing else — both reads and the refusal
     change nothing. Diagnostics: the "no primary support" K13 issue, which names the history folders, on
-    SC-0001's
+    source-challenge-0001's
     `basis:` line, then the refusal line. The source repository is untouched. `validate` exits 0
     afterwards and the record stays open. Acceptance 5: history is the KB's own older writing, not
     primary support."""
@@ -393,7 +394,7 @@ def test_confirming_on_a_history_document_alone_is_refused(kb, source_repo):
 
     run = refuse_confirmation(kb, source_repo, SC)
 
-    refusal(kb, run, "SC-0001 is confirmed with no primary support; a confirmation needs a basis entry "
+    refusal(kb, run, "source-challenge-0001 is confirmed with no primary support; a confirmation needs a basis entry "
                      f"whose provenance is one of observed, decoded and whose resolved path is outside "
                      f"findings/, {REVIEW}/ and the history folders")
     exactly(read(kb, source_repo, "validate"), f"{OK}\n", "validate")
@@ -407,10 +408,10 @@ def test_confirming_with_a_provisional_source_is_refused(kb, source_repo):
     reviewer-a` (writes the staged record and its allocation receipt, the source reference left
     provisional), the author's filling (a fixture edit), `kblam put` (writes the record, the review
     index, the registry and tree.hash; the staged file is gone), `kblam validate` (a read), `kblam
-    review decide SC-0001 --status confirmed --by reviewer-b --reason ... --expect D` (refused, exit 1)
+    review decide source-challenge-0001 --status confirmed --by reviewer-b --reason ... --expect D` (refused, exit 1)
     and `kblam validate` again (a read). Files changed: the staged record and its receipt, then the
     record, the review index, the registry and tree.hash, and nothing else — both reads and the refusal
-    change nothing. Diagnostics: the K13 issue on SC-0001's `source:` line explains that confirmation
+    change nothing. Diagnostics: the K13 issue on source-challenge-0001's `source:` line explains that confirmation
     needs a pinned source, only an open challenge is pinned, and a confirmed record must be restored or
     retired and replaced through staging, filling and put (with a snapshot pin if needed), then the
     refusal line. The source repository is untouched. `validate` exits 0 afterwards (a provisional source is no
@@ -424,13 +425,13 @@ def test_confirming_with_a_provisional_source_is_refused(kb, source_repo):
     run = refuse_confirmation(kb, source_repo, SC)
 
     message = (
-        "SC-0001 is confirmed with a provisional source; a confirmation needs a pinned source, and only "
+        "source-challenge-0001 is confirmed with a provisional source; a confirmation needs a pinned source, and only "
         "an open challenge is pinned (a confirmed challenge's source is fixed from the decision that "
-        "closes it). Restore it from git, or retire it (kblam review decide SC-0001 --status stale --by "
+        "closes it). Restore it from git, or retire it (kblam review decide source-challenge-0001 --status stale --by "
         "NAME --reason TEXT --expect D) and write a new challenge (kblam challenge new "
         f"{m.TRACE} --lines A-B --by NAME, fill the staged record and kblam put it, which pins the source "
         "when its worktree's HEAD holds those bytes; where it does not, pin the installed challenge with "
-        "kblam challenge pin SC-NNNN --expect D --snapshot PATH)")
+        "kblam challenge pin source-challenge-NNNN --expect D --snapshot PATH)")
     refusal(kb, run, message, key="source")
     exactly(read(kb, source_repo, "validate"), f"{OK}\n", "validate")
     assert installed(kb)["status"] == "open"
@@ -444,11 +445,11 @@ def test_a_basis_entry_on_the_source_itself_survives_another_commit(kb, source_r
     --lines 3-3 --by reviewer-a` (writes the staged record and its allocation receipt, the source pinned
     to HEAD's blob), the author's filling (a fixture edit: one basis entry on the source itself, without
     a pin of its own and with `sha256` left for `put`), `kblam put` (writes the record, the review index,
-    the registry and tree.hash; the staged file is gone), `kblam review decide SC-0001 --status
+    the registry and tree.hash; the staged file is gone), `kblam review decide source-challenge-0001 --status
     confirmed --by reviewer-b --reason ... --expect D` (writes the record, the review index and
     tree.hash), `kblam validate` (a read). Fixture edit: a second version of the trace is committed, so
     another commit is checked out and the working bytes are no longer the challenged version. Commands
-    after it, each bracketed: `kblam validate`, `kblam challenge show SC-0001` (reads). Files changed:
+    after it, each bracketed: `kblam validate`, `kblam challenge show source-challenge-0001` (reads). Files changed:
     the staged record and its receipt, then the record, the review index, the registry and tree.hash,
     then the record, the review index and tree.hash, and nothing else — the two reads change nothing in
     the KB or the source repository (acceptance 1). Exit 0 throughout, no diagnostic. `challenge show`
@@ -467,7 +468,7 @@ def test_a_basis_entry_on_the_source_itself_survives_another_commit(kb, source_r
 
     exactly(read(kb, source_repo, "validate"), f"{OK}\n", "validate")
     exactly(read(kb, source_repo, "challenge", "show", SC), "\n".join([
-        "SC-0001 confirmed",
+        "source-challenge-0001 confirmed",
         f"subject digest: {m.expect(kb, SC)}",
         f"source: {m.TRACE}",
         f"version: {pinned_blob}",
@@ -495,10 +496,10 @@ def test_another_basis_file_changed_is_a_warning_while_the_challenge_is_open(kb,
     evidence/2026-09-22-ratio/README.md, which no worktree owns and so stays provisional — `kblam put`
     (writes the record, the review index, the registry and tree.hash; the staged file is gone),
     `kblam validate` (a read). Fixture edit: the README's bytes change. Commands after it, each
-    bracketed: `kblam validate`, then `kblam challenge show SC-0001` (reads). Files changed: the staged
+    bracketed: `kblam validate`, then `kblam challenge show source-challenge-0001` (reads). Files changed: the staged
     record and its receipt, then the record, the review index, the registry and tree.hash, then the
     README (the fixture edit), and nothing else — the three reads change nothing, in the KB or the
-    source repository. The validate exits 0 and prints the one K13 warning "basis[1]: the source changed since SC-0001 was written" on the
+    source repository. The validate exits 0 and prints the one K13 warning "basis[1]: the source changed since source-challenge-0001 was written" on the
     record's `basis:` line, then OK; it changes nothing, the source repository is untouched, and
     `challenge show` prints the whole block below with the entry marked stale. Acceptance 5: an input a
     decision would hash has changed, so the challenge is not confirmable as it stands — but while it is
@@ -512,11 +513,11 @@ def test_another_basis_file_changed_is_a_warning_while_the_challenge_is_open(kb,
 
     exactly(read(kb, source_repo, "validate"), "\n".join([
         f"K13 warning {CHALLENGE}:{key_line(kb, SC, 'basis')}: basis[1]: the source changed since "
-        f"SC-0001 was written{RETIRE}",
+        f"source-challenge-0001 was written{RETIRE}",
         OK,
     ]) + "\n", "validate")
     exactly(read(kb, source_repo, "challenge", "show", SC), "\n".join([
-        "SC-0001 open",
+        "source-challenge-0001 open",
         f"subject digest: {m.expect(kb, SC)}",
         f"source: {m.TRACE}",
         f"version: {source_repo.blob(m.TRACE_PATH)}",
@@ -542,7 +543,7 @@ def test_another_basis_file_changed_is_an_error_once_the_challenge_is_confirmed(
     """Start: no findings; the trace is committed and clean. Commands, each bracketed: `challenge new
     --lines 3-3 --by reviewer-a` (writes the staged record and its allocation receipt), the author's
     filling (a fixture edit) with the same two basis entries, `kblam put` (writes the record, the review
-    index, the registry and tree.hash; the staged file is gone), `kblam review decide SC-0001 --status
+    index, the registry and tree.hash; the staged file is gone), `kblam review decide source-challenge-0001 --status
     confirmed --by reviewer-b --reason ... --expect D` (writes the record, the review index and
     tree.hash), `kblam validate` (a read). Fixture edit: the README's bytes change after the
     confirmation. Command after it, bracketed, run twice: `kblam validate` (reads). Files changed: the
@@ -550,7 +551,7 @@ def test_another_basis_file_changed_is_an_error_once_the_challenge_is_confirmed(
     the record, the review index and tree.hash, then the README (the fixture edit), and nothing else —
     the three reads change nothing in the KB or the source repository. The initial validate exits 0;
     both post-edit validates exit 1 and print the one K13 error
-    "basis[1]: the source changed since SC-0001 was written" on the record's `basis:` line, then "kblam
+    "basis[1]: the source changed since source-challenge-0001 was written" on the record's `basis:` line, then "kblam
     validate: 1 error(s) in research-review/". It changes nothing, prints the same bytes both times, and leaves
     the source repository untouched. Acceptance 5: the confirmation rests on a file whose bytes changed,
     so it no longer holds, and validate says so rather than rewriting the reference."""
@@ -563,7 +564,7 @@ def test_another_basis_file_changed_is_an_error_once_the_challenge_is_confirmed(
     (kb.root / OTHER_ENTRY).write_bytes(b"manifest, revised after the confirmation\n")
 
     issue = "\n".join([
-        f"K13 {CHALLENGE}:{key_line(kb, SC, 'basis')}: basis[1]: the source changed since SC-0001 "
+        f"K13 {CHALLENGE}:{key_line(kb, SC, 'basis')}: basis[1]: the source changed since source-challenge-0001 "
         f"was written{RETIRE}",
         FAILED,
     ]) + "\n"
@@ -581,9 +582,9 @@ def test_a_missing_original_capture_is_recorded_as_unsupported_with_its_limits(k
     author's filling (a fixture edit) with classification `unsupported`, a proposition saying the
     original capture is missing, one basis entry on the source with role `missing-support`, a usable
     remainder and limits that say what may not be inferred; `kblam put` (writes the record, the review
-    index, the registry and tree.hash; the staged file is gone); `kblam review decide SC-0001 --status
+    index, the registry and tree.hash; the staged file is gone); `kblam review decide source-challenge-0001 --status
     confirmed --by reviewer-b --reason ... --expect D` (writes the record, the review index and
-    tree.hash); `kblam validate` and `kblam challenge show SC-0001` (reads). Files changed: the staged
+    tree.hash); `kblam validate` and `kblam challenge show source-challenge-0001` (reads). Files changed: the staged
     record and its receipt, then the record, the review index, the registry and tree.hash, then the
     record, the review index and tree.hash, and nothing else — the two reads change nothing, in the KB
     or the source repository. Exit 0 throughout, no diagnostic. `validate` exits 0, the review index
@@ -605,7 +606,7 @@ def test_a_missing_original_capture_is_recorded_as_unsupported_with_its_limits(k
 
     exactly(read(kb, source_repo, "validate"), f"{OK}\n", "validate")
     exactly(read(kb, source_repo, "challenge", "show", SC), "\n".join([
-        "SC-0001 confirmed",
+        "source-challenge-0001 confirmed",
         f"subject digest: {m.expect(kb, SC)}",
         f"source: {m.TRACE}",
         f"version: {source_repo.blob(m.TRACE_PATH)}",
@@ -625,4 +626,4 @@ def test_a_missing_original_capture_is_recorded_as_unsupported_with_its_limits(k
         f"  2026-09-28 reviewer-b confirmed: reread the transcription; nothing else survives "
         f"bind {m.expect(kb, SC)[:12]}",
     ]) + "\n", "challenge show")
-    assert "| SC-0001 | 3-3 | unsupported | confirmed |" in (kb.root / INDEX).read_text("utf-8")
+    assert "| source-challenge-0001 | 3-3 | unsupported | confirmed |" in (kb.root / INDEX).read_text("utf-8")

@@ -31,18 +31,20 @@ Driving the CLI
 Records
 -------
 All three record-staging helpers assert exit 0, full stdout of exactly the staged path plus a newline,
-empty stderr, and a staged file whose ID matches the printed SC-/CT-/CU- ID (four digits or more).
+empty stderr, and a staged file whose ID matches the printed source-challenge-/claim-task-/
+checked-use- ID (four digits or more).
 
 - `stage_challenge(kb, source_repo, lines, *, by, path=None, **fields) -> Staged`: `challenge new`,
   then the author's filling: a proposition, a scope, `contradicted`, one basis entry on the source
-  itself with a primary provenance, a usable remainder and limits. `fields` are the SC's free fields
+  itself with a primary provenance, a usable remainder and limits. `fields` are the source
+  challenge's free fields
   (proposition, scope, classification, basis, usable, limits, linked_findings) and replace those
   defaults: `""` or `[]` leaves a field blank for a put that must be refused, and `DROP` (conftest)
   as a value drops the key. `classification="wrong_model"` makes the default basis role
   `model-mismatch`. `path` is the source, relative to the KB root (default: the fixture trace).
 - `stage_task(kb, finding_id, *, kind="replication", by, proponent, **fields) -> Staged`: `task new`
   plus a question, a method, the three outcomes, controls, a stop condition and expected evidence.
-  `fields` are the CT's free fields.
+  `fields` are the claim task's free fields.
 - `stage_use(kb, sc_id, finding_id, ordinal=1, *, by, proponent, **fields) -> Staged`: `use review`
   plus `unaffected_raw_bytes` and a reason; `fields` are `disposition` and `reason`.
 - `put(kb, staged_or_path) -> Run`, `put_ok(kb, staged_or_path) -> Run` (put, asserting exit 0).
@@ -218,7 +220,7 @@ def expect(kb, rec_id: str) -> str:
 
 def record_path(kb, rec_id: str) -> Path:
     """Where the record is installed: <review root>/challenges|tasks|uses/<ID>.yaml."""
-    return kb.root / kb.cfg.review_dir / records.KINDS[rec_id[:2]] / f"{rec_id}.yaml"
+    return kb.root / kb.cfg.review_dir / records.KINDS[rec_id.rsplit("-", 1)[0]] / f"{rec_id}.yaml"
 
 
 def registry(kb) -> list[str] | None:
@@ -367,35 +369,39 @@ def _staged_path(kb, run: Run, kind: str, what: str) -> Path:
 
 def stage_challenge(kb, source_repo, lines: object, *, by: str, path: str | None = None,
                     **fields) -> Staged:
-    """`challenge new` plus the author's filling: an SC ready for `put`. Assert exit 0, exactly the
+    """`challenge new` plus the author's filling: a source challenge ready for `put`. Assert exit 0,
+    exactly the
     staged SC path plus newline, empty stderr and a file with the same ID. `lines` is "A-B", (A, B) or
-    one line number; `path` is the source (default: the fixture trace); `fields` are the SC's free
+    one line number; `path` is the source (default: the fixture trace); `fields` are the source
+    challenge's free
     fields and replace the defaults (DROP drops a key, "" leaves it blank)."""
     path = path or source_repo.kb_path()
     run = kblam(kb, "challenge", "new", path, "--lines", _lines_arg(lines), "--by", by)
-    staged = _staged_path(kb, run, "SC", "challenge new")
+    staged = _staged_path(kb, run, "source-challenge", "challenge new")
     data = _fill(staged, _sc_defaults(kb, path, fields.get("classification", "contradicted")), fields)
     return Staged(data["id"], staged)
 
 
 def stage_task(kb, finding_id: str, *, kind: str = "replication", by: str, proponent: str,
                **fields) -> Staged:
-    """`task new` plus the researcher's filling: a CT ready for `put`. Assert exit 0, exactly the
+    """`task new` plus the researcher's filling: a claim task ready for `put`. Assert exit 0, exactly
+    the
     staged CT path plus newline, empty stderr and a file with the same ID."""
     run = kblam(kb, "task", "new", finding_id, "--kind", kind, "--by", by,
                 "--proponent", proponent)
-    staged = _staged_path(kb, run, "CT", "task new")
+    staged = _staged_path(kb, run, "claim-task", "task new")
     data = _fill(staged, _ct_defaults(), fields)
     return Staged(data["id"], staged)
 
 
 def stage_use(kb, sc_id: str, finding_id: str, ordinal: int = 1, *, by: str, proponent: str,
               **fields) -> Staged:
-    """`use review` plus the reviewer's filling: a CU ready for `put`. Assert exit 0, exactly the
+    """`use review` plus the reviewer's filling: a checked use ready for `put`. Assert exit 0, exactly
+    the
     staged CU path plus newline, empty stderr and a file with the same ID."""
     run = kblam(kb, "use", "review", sc_id, finding_id, ordinal, "--by", by,
                 "--proponent", proponent)
-    staged = _staged_path(kb, run, "CU", "use review")
+    staged = _staged_path(kb, run, "checked-use", "use review")
     data = _fill(staged, _cu_defaults(), fields)
     return Staged(data["id"], staged)
 

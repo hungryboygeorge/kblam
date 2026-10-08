@@ -18,7 +18,7 @@ from kblam.sources import SourceReader, sha256_hex
 from kblam.view import load_view
 
 REVIEW = "research-review"
-CT = "CT-0001"
+CT = "claim-task-0001"
 CT_PATH = f"{REVIEW}/tasks/{CT}.yaml"
 MANIFEST = "evidence/2026-09-22-ratio/README.md"     # the kb fixture's manifest, outside the KB's own roots
 LOG = "evidence/2026-09-22-ratio/log.txt"
@@ -37,7 +37,7 @@ def finding_of(view, finding_id: str = "F-0001"):
 def task_data(view, rec_id: str = CT, **fields) -> dict:
     """A CT bound to F-0001 as `view` now holds it; `fields` replace top-level keys."""
     finding = finding_of(view)
-    data = record_data("CT", rec_id)
+    data = record_data("claim-task", rec_id)
     data["claim_fingerprint"] = fingerprint(finding, view.cfg.scope_separator)
     data["base_file_sha256"] = sha256_hex(finding.raw)
     data.update(fields)
@@ -63,7 +63,7 @@ def decide(data: dict, status: str, entries: list[dict] = (), *, by: str = "revi
     data["decisions"] = [{"date": DATE, "by": by, "status": status,
                           "reason": "Reread the capture and repeated the run under the same controls.",
                           "evidence": list(entries), "bind": ZERO64}]
-    data["decisions"][0]["bind"] = subject_digest("CT", data)
+    data["decisions"][0]["bind"] = subject_digest("claim-task", data)
     return data
 
 
@@ -141,7 +141,7 @@ def test_task_identity_is_restored_before_each_rebind_suggestion(task_kb, proble
     if problem == "unavailable_evidence":
         task_kb.write(LOG, raw)                      # the message also names these bytes to restore
     blocked = ["review", "rebind", CT, "--by", "reviewer-b", "--reason", "reviewed-after-restoration",
-               "--expect", subject_digest("CT", data)]
+               "--expect", subject_digest("claim-task", data)]
     if evidence_problem:
         blocked += ["--evidence", f"observed:{MANIFEST}:section 1"]
     assert cli(*blocked) == 1
@@ -161,7 +161,7 @@ def test_task_identity_is_restored_before_each_rebind_suggestion(task_kb, proble
     assert expected in captured.out and recovery not in captured.out
     command = captured.out[captured.out.index("kblam review rebind"):].splitlines()[0].split()
     values = {"NAME": "reviewer-b", "TEXT": "reviewed-after-restoration",
-              "D": subject_digest("CT", load(task_kb)[0].data),
+              "D": subject_digest("claim-task", load(task_kb)[0].data),
               "PROVENANCE:PATH:LOCATOR": f"observed:{MANIFEST}:section 1"}
     command = [values.get(token, token) for token in command][1:]
     if problem == "missing_finding":
@@ -325,12 +325,12 @@ def test_a_binding_field_of_the_wrong_shape_is_left_to_the_schema(task_kb):
 
 
 def test_a_use_or_challenge_record_is_not_a_task(task_kb):
-    task_kb.write(f"{REVIEW}/uses/CU-0001.yaml",
-                  dump_record(record_data("CU", "CU-0001", finding_fingerprint="deadbeef0000")))
-    task_kb.write(f"{REVIEW}/challenges/SC-0001.yaml", dump_record(record_data("SC", "SC-0001")))
-    _rec, view, reader = load(task_kb, "CU-0001")
+    task_kb.write(f"{REVIEW}/uses/checked-use-0001.yaml",
+                  dump_record(record_data("checked-use", "checked-use-0001", finding_fingerprint="deadbeef0000")))
+    task_kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", dump_record(record_data("source-challenge", "source-challenge-0001")))
+    _rec, view, reader = load(task_kb, "checked-use-0001")
 
-    assert k15(view, reader) == []               # a CU's binding is K13's warning row, not K15's
+    assert k15(view, reader) == []               # a checked use's binding is K13's warning row
     assert k15_pending(view, reader) == []
 
 
@@ -412,30 +412,30 @@ def test_an_open_task_gets_no_evidence_check(task_kb):
 
 def test_pending_lines_are_in_id_order(task_kb):
     view = load_view(task_kb.cfg)
-    write(task_kb, task_data(view, "CT-0002"), "CT-0002")
-    write(task_kb, task_data(view, "CT-0009", question="Does the ninth run agree?"), "CT-0009")
-    write(task_kb, task_data(view, "CT-0010", question="Does the tenth run agree?"), "CT-0010")
-    _rec, view, reader = load(task_kb, "CT-0002")
+    write(task_kb, task_data(view, "claim-task-0002"), "claim-task-0002")
+    write(task_kb, task_data(view, "claim-task-0009", question="Does the ninth run agree?"), "claim-task-0009")
+    write(task_kb, task_data(view, "claim-task-0010", question="Does the tenth run agree?"), "claim-task-0010")
+    _rec, view, reader = load(task_kb, "claim-task-0002")
 
     assert k15_pending(view, reader) == [
-        f"CT-0002 open replication of F-0001: {QUESTION}",
-        "CT-0009 open replication of F-0001: Does the ninth run agree?",
-        "CT-0010 open replication of F-0001: Does the tenth run agree?",
+        f"claim-task-0002 open replication of F-0001: {QUESTION}",
+        "claim-task-0009 open replication of F-0001: Does the ninth run agree?",
+        "claim-task-0010 open replication of F-0001: Does the tenth run agree?",
     ]
 
 
 def test_pending_skips_a_task_k13_reports(task_kb):
     view = load_view(task_kb.cfg)
     write(task_kb, task_data(view), CT)
-    write(task_kb, task_data(view, "CT-0002", question=""), "CT-0002")
-    misstated = task_data(view, "CT-0003")               # the last decision is not the record's status
+    write(task_kb, task_data(view, "claim-task-0002", question=""), "claim-task-0002")
+    misstated = task_data(view, "claim-task-0003")               # the last decision is not the record's status
     misstated["decisions"] = [{"date": DATE, "by": "reviewer-b", "status": "confirmed",
                                "reason": "Looks reproduced.", "evidence": [], "bind": ZERO64}]
-    write(task_kb, misstated, "CT-0003")
+    write(task_kb, misstated, "claim-task-0003")
     _rec, view, reader = load(task_kb)
 
-    assert len(schema_issues(next(r for r in view.records if r.id == "CT-0002"), staged=False)) == 1
-    assert len(decision_issues(next(r for r in view.records if r.id == "CT-0003"))) == 1
+    assert len(schema_issues(next(r for r in view.records if r.id == "claim-task-0002"), staged=False)) == 1
+    assert len(decision_issues(next(r for r in view.records if r.id == "claim-task-0003"))) == 1
     assert k15_pending(view, reader) == [f"{CT} open replication of F-0001: {QUESTION}"]
     assert k15(view, reader) == []
 

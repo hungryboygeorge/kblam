@@ -45,10 +45,10 @@ def deciding(kind: str, data: dict) -> dict:
     return data
 
 
-def sc(repo, status: str = "confirmed", *, rec_id: str = "SC-0001", rel: str = TRACE_PATH,
+def sc(repo, status: str = "confirmed", *, rec_id: str = "source-challenge-0001", rel: str = TRACE_PATH,
        text: str = WORD, lines=(3, 3), pin: bool = True) -> dict:
     """A challenge on the source's working bytes as they are now, pinned at HEAD when `pin`."""
-    data = record_data("SC", rec_id, status=status)
+    data = record_data("source-challenge", rec_id, status=status)
     sha = sha_of((repo.root / rel).read_bytes())
     source = data["source"]
     source.update(path=repo.kb_path(rel), sha256=sha)
@@ -56,7 +56,7 @@ def sc(repo, status: str = "confirmed", *, rec_id: str = "SC-0001", rel: str = T
         source.update(repo=SOURCE_REPO, commit=repo.head(), blob=repo.blob(rel))
     source["assertion"] = {"lines": list(lines), "text": text, "sha256": sha_of(text), "occurrence": 1}
     data["basis"][0].update(path=repo.kb_path(rel), sha256=sha)
-    return deciding("SC", data)
+    return deciding("source-challenge", data)
 
 
 def put(kb, kind: str, data: dict) -> None:
@@ -92,19 +92,19 @@ def warnings_of(issues) -> list:
     return [i for i in issues if i.level == "warning"]
 
 
-def use(kb, *, status: str = "approved", challenge: str = "SC-0001", fid: str = "F-0001",
-        ordinal: int = 1, rec_id: str = "CU-0001") -> dict:
+def use(kb, *, status: str = "approved", challenge: str = "source-challenge-0001", fid: str = "F-0001",
+        ordinal: int = 1, rec_id: str = "checked-use-0001") -> dict:
     """A use bound to the finding, challenge and excerpt as they are now."""
     view, reader = scene(kb)
     finding = next(f for f in view.findings if f.file_id == fid)
     match = next(m for m in finding_matches(view, reader, finding) if m.ordinal == ordinal)
     rec = next(r for r in view.records if r.id == challenge)
-    data = record_data("CU", rec_id, status=status, challenge=challenge, finding=fid,
-                       challenge_bind=subject_digest("SC", rec.data),
+    data = record_data("checked-use", rec_id, status=status, challenge=challenge, finding=fid,
+                       challenge_bind=subject_digest("source-challenge", rec.data),
                        finding_fingerprint=fingerprint(finding, kb.cfg.scope_separator), finding_file_sha256=sha256_hex(finding.raw),
                        citation={"ordinal": ordinal, "path": match.path, "range": list(match.range),
                                  "tag_sha256": match.tag_sha256})
-    return deciding("CU", data)
+    return deciding("checked-use", data)
 
 
 def same_bytes_message(repo, blob: bool = True, ordinal: int = 1, lines: str = "3-3",
@@ -114,8 +114,8 @@ def same_bytes_message(repo, blob: bool = True, ordinal: int = 1, lines: str = "
     version = repo.blob(TRACE_PATH)[:12] if blob else sha_of(TRACE_TEXT)[:12]
     review = (f"kblam review decide {open_use} --status approved --by NAME --reason TEXT --expect D; its "
               f"--by must not be its proponent ({open_use}'s proponent is researcher-a)"
-              if open_use else f"kblam use review SC-0001 F-0001 {ordinal} --by NAME --proponent NAME")
-    return (f"SC-0001 challenges this quoted assertion at {TRACE}@{version}:{lines}; edit the finding or "
+              if open_use else f"kblam use review source-challenge-0001 F-0001 {ordinal} --by NAME --proponent NAME")
+    return (f"source-challenge-0001 challenges this quoted assertion at {TRACE}@{version}:{lines}; edit the finding or "
             f"have this use reviewed ({review}). K10 is checked separately.")
 
 
@@ -123,7 +123,7 @@ NEW_TEXT = "# a heading added above\n" + TRACE_TEXT      # another version of th
 
 
 def test_findings_and_record_rules_share_the_actual_source_read(kb, source_repo, monkeypatch):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     add_finding(kb, "3", LINE3)
     view = load_view(kb.cfg)
     read_bytes = Path.read_bytes
@@ -149,7 +149,7 @@ def test_verified_hex_bytes_are_never_text_relations_or_current_uses(kb, source_
     suffix = b"\x00" if binary else b""
     original = b"61 62\n" + suffix
     source_repo.commit(TRACE_PATH, original, "hex source")
-    put(kb, "SC", sc(source_repo, text="61 62", lines=(1, 1)))
+    put(kb, "source-challenge", sc(source_repo, text="61 62", lines=(1, 1)))
     current = b"ab\n" + suffix if changed else original
     if changed:
         source_repo.write(TRACE_PATH, current)
@@ -164,15 +164,15 @@ def test_verified_hex_bytes_are_never_text_relations_or_current_uses(kb, source_
     assert rules.k10_verbatim(view, reader) == []
     assert k14(view, reader) == []
     assert affected_triples(view, reader, "F-0001") == set()
-    put(kb, "CU", use(kb))
+    put(kb, "checked-use", use(kb))
     view, reader = scene(kb)
-    rec = next(rec for rec in view.records if rec.kind == "CU")
+    rec = next(rec for rec in view.records if rec.kind == "checked-use")
     assert not k13.use_current(view, reader, rec)
 
 
 def test_validate_cli_accepts_hex_of_changed_utf8_source_without_a_k14_text_relation(kb, source_repo, capsys):
     source_repo.commit(TRACE_PATH, "61 62\n", "assertion")
-    put(kb, "SC", sc(source_repo, text="61 62", lines=(1, 1)))
+    put(kb, "source-challenge", sc(source_repo, text="61 62", lines=(1, 1)))
     source_repo.write(TRACE_PATH, "ab\n")
     kb.add("F-0001", "ratio", CLAIM,
            body=f"<!-- verbatim: {TRACE}:@0x0 hex -->\n```\n61 62\n```")
@@ -184,14 +184,14 @@ def test_validate_cli_accepts_hex_of_changed_utf8_source_without_a_k14_text_rela
 
     assert capsys.readouterr().out == "kblam validate: OK (1 findings)\n"
     with pytest.raises(StoreError, match="hex byte rendering, which never qualifies as a use"):
-        review_stage.use_review(kb.cfg, "SC-0001", "F-0001", 1, "reviewer-a", "author-a")
+        review_stage.use_review(kb.cfg, "source-challenge-0001", "F-0001", 1, "reviewer-a", "author-a")
 
 
 # --- same bytes ---------------------------------------------------------------------------------
 
 
 def test_same_bytes_and_an_intersecting_excerpt_is_an_error_with_the_spec_message(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     add_finding(kb, "3", LINE3)
     view, reader = scene(kb)
     finding = view.findings[0]
@@ -201,19 +201,19 @@ def test_same_bytes_and_an_intersecting_excerpt_is_an_error_with_the_spec_messag
     [match] = finding_matches(view, reader, finding)
     assert issues[0].line == finding.body_start_line + match.start == 15
     assert issues[0].message == same_bytes_message(source_repo)
-    assert issues[0].format(view).startswith(f"K14 {finding.path}:{issues[0].line}: SC-0001 challenges ")
+    assert issues[0].format(view).startswith(f"K14 {finding.path}:{issues[0].line}: source-challenge-0001 challenges ")
 
 
 def test_an_unpinned_source_names_the_sha256_prefix(kb, source_repo):
-    put(kb, "SC", sc(source_repo, pin=False))
+    put(kb, "source-challenge", sc(source_repo, pin=False))
     add_finding(kb, "3", LINE3)
     assert [i.message for i in errors_of(k14_of(kb))] == [same_bytes_message(source_repo, blob=False)]
 
 
 def test_a_current_approved_use_covers_the_excerpt(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     add_finding(kb, "3", LINE3)
-    put(kb, "CU", use(kb))
+    put(kb, "checked-use", use(kb))
     assert k14_of(kb) == []
 
 
@@ -221,23 +221,23 @@ def test_an_open_use_makes_the_error_name_the_decide_that_approves_it(kb, source
     """SPEC §5.2.4 K14: a second `kblam use review` for one excerpt settles nothing the open use does not,
     so where an open use already names the excerpt the error names the decision that approves that use —
     with a `--by` of its own — and running it clears the error."""
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     add_finding(kb, "3", LINE3)
     data = use(kb, status="open")
-    put(kb, "CU", data)
+    put(kb, "checked-use", data)
     assert [i.message for i in errors_of(k14_of(kb))] == [
-        same_bytes_message(source_repo, open_use="CU-0001")]
+        same_bytes_message(source_repo, open_use="checked-use-0001")]
 
     view = load_view(kb.cfg)
     kb.write(view.review_index_path, generate_review_index(view))
-    assert cli.main(["--root", str(kb.root), "review", "decide", "CU-0001", "--status", "approved",
+    assert cli.main(["--root", str(kb.root), "review", "decide", "checked-use-0001", "--status", "approved",
                      "--by", "reviewer-b", "--reason", "the excerpt really is used for the printed bytes",
-                     "--expect", subject_digest("CU", data)]) == 0
+                     "--expect", subject_digest("checked-use", data)]) == 0
     assert k14_of(kb) == []
 
 
 def test_two_matches_in_the_cited_range_where_only_the_second_intersects(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     add_finding(kb, "3", "bytes")           # "bytes 0x3A" is outside the assertion, "bytes are equal" is in it
     view, reader = scene(kb)
     assert len(finding_matches(view, reader, view.findings[0])[0].spans) == 2
@@ -245,32 +245,32 @@ def test_two_matches_in_the_cited_range_where_only_the_second_intersects(kb, sou
 
 
 def test_a_range_that_overlaps_without_quoting_is_a_warning(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     add_finding(kb, "3", "Row 102: bytes 0x3A 0x3B")
     issues = k14_of(kb)
     assert errors_of(issues) == []
     assert [(i.level, i.owner) for i in issues] == [("warning", "F-0001")]
-    assert issues[0].message.startswith(f"the cited range {TRACE}:3-3 overlaps lines 3-3 of SC-0001's assertion")
+    assert issues[0].message.startswith(f"the cited range {TRACE}:3-3 overlaps lines 3-3 of source-challenge-0001's assertion")
 
 
 def test_an_offset_tag_never_gets_the_range_warning(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     offset = TRACE_TEXT.index("Row 102")
     add_finding(kb, f"@0x{offset:X}", "Row 102: bytes 0x3A 0x3B")
     assert k14_of(kb) == []
 
 
 def test_a_range_beside_the_assertion_reports_nothing(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     add_finding(kb, "2", "Row 101: bytes 0x3A 0x3B")
     assert k14_of(kb) == []
 
 
 def test_two_identical_copies_are_separate_uses_told_apart_by_ordinal(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     block = quoted(f"{TRACE}:3", LINE3)
     kb.add("F-0001", "ratio", CLAIM, body=f"{block}\n\n{block}")
-    put(kb, "CU", use(kb, ordinal=1))
+    put(kb, "checked-use", use(kb, ordinal=1))
     issues = k14_of(kb)
     assert [i.message for i in errors_of(issues)] == [same_bytes_message(source_repo, ordinal=2)]
 
@@ -278,7 +278,7 @@ def test_two_identical_copies_are_separate_uses_told_apart_by_ordinal(kb, source
 def test_offset_tag_in_a_crlf_multibyte_source_maps_to_the_right_span(kb, source_repo):
     data = "Aé\r\nRow 102: bytes 0x3A 0x3B; the two bytes are equal.\r\n".encode("utf-8")
     source_repo.commit("notes/crlf.md", data)
-    put(kb, "SC", sc(source_repo, rel="notes/crlf.md", lines=(2, 2)))
+    put(kb, "source-challenge", sc(source_repo, rel="notes/crlf.md", lines=(2, 2)))
     path = source_repo.kb_path("notes/crlf.md")
     inside = data.index(b"the two bytes")
     outside = data.index(b"Row 102")
@@ -292,7 +292,7 @@ def test_offset_tag_in_a_crlf_multibyte_source_maps_to_the_right_span(kb, source
 
 
 def test_another_version_quoting_the_assertion_is_version_unproved(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     blob = source_repo.blob(TRACE_PATH)[:12]
     source_repo.write(TRACE_PATH, NEW_TEXT)
     add_finding(kb, "4", LINE3)
@@ -300,14 +300,14 @@ def test_another_version_quoting_the_assertion_is_version_unproved(kb, source_re
     issues = k14(view, reader)
     assert [(i.level, i.owner) for i in issues] == [("error", "F-0001")]
     assert issues[0].message == (
-        f"SC-0001 was judged on {TRACE}@{blob} only, and this excerpt quotes its assertion text from "
+        f"source-challenge-0001 was judged on {TRACE}@{blob} only, and this excerpt quotes its assertion text from "
         f"another version of that file. This does not show that the version is wrong: challenge it "
         f"(kblam challenge new {TRACE} --lines 4-4 --by NAME) or have this use reviewed "
-        f"(kblam use review SC-0001 F-0001 1 --by NAME --proponent NAME).")
+        f"(kblam use review source-challenge-0001 F-0001 1 --by NAME --proponent NAME).")
 
 
 def test_version_unproved_for_an_offset_tag_names_the_lines_its_span_covers(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     source_repo.write(TRACE_PATH, NEW_TEXT)
     offset = NEW_TEXT.index(LINE3)
     add_finding(kb, f"@0x{offset:X}", LINE3)
@@ -316,24 +316,24 @@ def test_version_unproved_for_an_offset_tag_names_the_lines_its_span_covers(kb, 
 
 
 def test_an_excerpt_inside_the_assertion_text_is_also_version_unproved(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     source_repo.write(TRACE_PATH, NEW_TEXT)
     add_finding(kb, "4", "two bytes")
     assert len(errors_of(k14_of(kb))) == 1
 
 
 def test_another_version_that_does_not_quote_the_assertion_reports_nothing(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     source_repo.write(TRACE_PATH, NEW_TEXT)
     add_finding(kb, "3", "Row 101: bytes 0x3A 0x3B")
     assert k14_of(kb) == []
 
 
 def test_a_current_use_covers_a_version_unproved_excerpt(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     source_repo.write(TRACE_PATH, NEW_TEXT)
     add_finding(kb, "4", LINE3)
-    put(kb, "CU", use(kb))
+    put(kb, "checked-use", use(kb))
     assert k14_of(kb) == []
 
 
@@ -342,30 +342,30 @@ def test_a_current_use_covers_a_version_unproved_excerpt(kb, source_repo):
 
 @pytest.mark.parametrize("status", ["open", "withdrawn", "stale"])
 def test_a_use_that_is_not_approved_does_not_cover(kb, source_repo, status):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     add_finding(kb, "3", LINE3)
-    put(kb, "CU", use(kb, status=status))
+    put(kb, "checked-use", use(kb, status=status))
     assert len(errors_of(k14_of(kb))) == 1
 
 
 def test_a_use_with_a_broken_binding_does_not_cover(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     add_finding(kb, "3", LINE3)
-    put(kb, "CU", use(kb))
+    put(kb, "checked-use", use(kb))
     kb.add("F-0001", "ratio", CLAIM + " Edited.", body=quoted(f"{TRACE}:3", LINE3))
     assert len(errors_of(k14_of(kb))) == 1
 
 
 @pytest.mark.parametrize("change", ["ordinal", "challenge", "finding"])
 def test_a_use_of_another_excerpt_or_challenge_or_finding_does_not_cover(kb, source_repo, change):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     add_finding(kb, "3", LINE3)
     data = use(kb)
     if change == "ordinal":
         data["citation"]["ordinal"] = 2
     else:
-        data[change] = "SC-0002" if change == "challenge" else "F-0002"
-    put(kb, "CU", data)
+        data[change] = "source-challenge-0002" if change == "challenge" else "F-0002"
+    put(kb, "checked-use", data)
     assert len(errors_of(k14_of(kb))) == 1
 
 
@@ -373,7 +373,7 @@ def test_a_use_of_another_excerpt_or_challenge_or_finding_does_not_cover(kb, sou
 
 
 def test_an_excerpt_failing_k10_is_not_k14s(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     add_finding(kb, "3", "Row 102: bytes 0x3A 0x3C; the two bytes are equal.")
     view, reader = scene(kb)
     assert [i.code for i in rules.k10_verbatim(view, reader)] == ["K10"]
@@ -381,7 +381,7 @@ def test_an_excerpt_failing_k10_is_not_k14s(kb, source_repo):
 
 
 def test_a_binary_exempt_excerpt_is_not_k14s(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     source_repo.write(TRACE_PATH, b"\x00\x01binary")       # the same path is now a binary file
     add_finding(kb, "@0x0", "anything at all")
     view, reader = scene(kb)
@@ -392,7 +392,7 @@ def test_a_binary_exempt_excerpt_is_not_k14s(kb, source_repo):
 
 @pytest.mark.parametrize("status", ["open", "rejected", "stale"])
 def test_a_challenge_that_is_not_confirmed_reports_nothing(kb, source_repo, status):
-    put(kb, "SC", sc(source_repo, status))
+    put(kb, "source-challenge", sc(source_repo, status))
     add_finding(kb, "3", LINE3, evidence=f"[{TRACE}]")
     assert k14_of(kb) == []
 
@@ -401,26 +401,26 @@ def test_a_challenge_that_is_not_confirmed_reports_nothing(kb, source_repo, stat
 
 
 def test_a_finding_listing_the_challenged_source_in_evidence_gets_a_warning(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     kb.add("F-0001", "ratio", CLAIM, evidence=f"[{TRACE}]")
     view, reader = scene(kb)
     [issue] = k14(view, reader)
     finding = view.findings[0]
     assert (issue.level, issue.owner, issue.line) == ("warning", "F-0001", finding.key_line("evidence"))
     assert issue.message == (
-        f"evidence lists {TRACE}, which SC-0001 challenges; a listed source is not shown to be safe, so "
-        f"check what this finding takes from it against SC-0001's assertion and limits (kblam challenge "
-        f"uses SC-0001 lists what SC-0001 affects)")
+        f"evidence lists {TRACE}, which source-challenge-0001 challenges; a listed source is not shown to be safe, so "
+        f"check what this finding takes from it against source-challenge-0001's assertion and limits (kblam challenge "
+        f"uses source-challenge-0001 lists what source-challenge-0001 affects)")
 
 
 def test_evidence_spelled_another_way_still_names_the_source(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     kb.add("F-0001", "ratio", CLAIM, evidence=f"[./{TRACE}]")
     assert [i.level for i in k14_of(kb)] == ["warning"]
 
 
 def test_prose_naming_the_source_path_gets_a_warning(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     kb.add("F-0001", "ratio", CLAIM, body=f"See {TRACE} for the trace.")
     view, reader = scene(kb)
     [issue] = k14(view, reader)
@@ -428,11 +428,11 @@ def test_prose_naming_the_source_path_gets_a_warning(kb, source_repo):
     finding = view.findings[0]
     assert issue.line == finding.body_start_line + next(
         i for i, line in enumerate(finding.body_lines) if TRACE in line)
-    assert issue.message.startswith(f"the text names {TRACE}, which SC-0001 challenges;")
+    assert issue.message.startswith(f"the text names {TRACE}, which source-challenge-0001 challenges;")
 
 
 def test_a_path_inside_a_verbatim_block_is_not_prose(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     kb.add("F-0001", "ratio", CLAIM,
            body=f"<!-- verbatim: {TRACE}:2 -->\n> Row 101: bytes 0x3A 0x3B")
     assert k14_of(kb) == []
@@ -442,22 +442,22 @@ def test_a_path_inside_a_verbatim_block_is_not_prose(kb, source_repo):
 
 
 def test_affected_triples_include_covered_excerpts_and_exclude_warnings(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     block = quoted(f"{TRACE}:3", LINE3)
     warn = quoted(f"{TRACE}:3", "Row 102: bytes 0x3A 0x3B")
     kb.add("F-0001", "ratio", CLAIM, body=f"{block}\n\n{warn}", evidence=f"[{TRACE}]")
-    put(kb, "CU", use(kb))
+    put(kb, "checked-use", use(kb))
     view, reader = scene(kb)
     matches = finding_matches(view, reader, view.findings[0])
     assert errors_of(k14(view, reader)) == []           # the use covers the excerpt
-    assert affected_triples(view, reader, "F-0001") == {("SC-0001", TRACE, matches[0].tag_sha256)}
+    assert affected_triples(view, reader, "F-0001") == {("source-challenge-0001", TRACE, matches[0].tag_sha256)}
     assert affected_triples(view, reader, "F-0002") == set()
 
 
 def test_affected_triples_include_version_unproved_excerpts(kb, source_repo):
-    put(kb, "SC", sc(source_repo))
+    put(kb, "source-challenge", sc(source_repo))
     source_repo.write(TRACE_PATH, NEW_TEXT)
     add_finding(kb, "4", LINE3)
     view, reader = scene(kb)
     [match] = finding_matches(view, reader, view.findings[0])
-    assert affected_triples(view, reader, "F-0001") == {("SC-0001", TRACE, match.tag_sha256)}
+    assert affected_triples(view, reader, "F-0001") == {("source-challenge-0001", TRACE, match.tag_sha256)}

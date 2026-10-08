@@ -199,7 +199,8 @@ def finish(kb, ct: str, put: str) -> None:
 
 
 def linked(kb) -> tuple[str, str]:
-    """F-0012 and F-0020 installed with a CT linking F-0012, and the refusal's message: (CT id, stderr)."""
+    """F-0012 and F-0020 installed with a claim task linking F-0012, and the refusal's message: (task
+    ID, stderr)."""
     pair(kb)
     ct = m.task(kb, "F-0012", by="reviewer-a", proponent="researcher-a")
     refused = m.kblam(kb, "rm", "F-0012", "--merged-into", "F-0020")

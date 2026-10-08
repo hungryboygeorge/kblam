@@ -153,11 +153,11 @@ def _link(target: Path, link: Path, *, directory: bool = False) -> Path:
 
 def _sc(repo, *, status: str = "confirmed", path: str | None = None, pin: bool = True,
         rel: str = TRACE_PATH, text: str = LINE3, lines: tuple[int, int] = (3, 3),
-        rec_id: str = "SC-0001") -> dict:
+        rec_id: str = "source-challenge-0001") -> dict:
     """A challenge on the source's working bytes as they are now, pinned at HEAD unless `pin` is false.
     `path` overrides the source path as the record spells it. A status other than open gets its one
     decision, bound to the record as it then stands."""
-    data = record_data("SC", rec_id, status=status)
+    data = record_data("source-challenge", rec_id, status=status)
     digest = _sha((repo.root / rel).read_bytes())
     data["source"].update(path=path or repo.kb_path(rel), sha256=digest)
     if pin:
@@ -168,14 +168,14 @@ def _sc(repo, *, status: str = "confirmed", path: str | None = None, pin: bool =
     if status != "open":
         data["decisions"] = [{"date": TODAY, "by": DECIDER, "status": status, "evidence": [],
                               "reason": "read the source at its pin", "bind": None}]
-        data["decisions"][0]["bind"] = subject_digest("SC", data)
+        data["decisions"][0]["bind"] = subject_digest("source-challenge", data)
     return data
 
 
-def _ct(kb, *, rec_id: str = "CT-0001") -> dict:
+def _ct(kb, *, rec_id: str = "claim-task-0001") -> dict:
     """An open task bound to F-0001's current fingerprint and file bytes, as `task new` writes it."""
     finding = next(f for f in load_view(kb.cfg).findings if f.file_id == "F-0001")
-    return record_data("CT", rec_id, status="open", finding="F-0001",
+    return record_data("claim-task", rec_id, status="open", finding="F-0001",
                        claim_fingerprint=fingerprint(finding, kb.cfg.scope_separator),
                        base_file_sha256=sha256_hex(finding.raw))
 
@@ -277,10 +277,10 @@ def _ct_fields() -> dict:
 
 
 def _k14_same(repo, *, source: str = TRACE, lines: str = "3-3", ordinal: int = 1) -> str:
-    """The K14 same-bytes diagnostic (SPEC §5.2.4) for excerpt `ordinal` of F-0001 against SC-0001."""
+    """The K14 same-bytes diagnostic (SPEC §5.2.4) for excerpt `ordinal` of F-0001 against source-challenge-0001."""
     version = repo.blob(TRACE_PATH)[:12]
-    return (f"SC-0001 challenges this quoted assertion at {source}@{version}:{lines}; edit the finding "
-            f"or have this use reviewed (kblam use review SC-0001 F-0001 {ordinal} --by NAME --proponent "
+    return (f"source-challenge-0001 challenges this quoted assertion at {source}@{version}:{lines}; edit the finding "
+            f"or have this use reviewed (kblam use review source-challenge-0001 F-0001 {ordinal} --by NAME --proponent "
             f"NAME). K10 is checked separately.")
 
 
@@ -371,62 +371,62 @@ def test_challenge_new_refuses_a_symlink_into_a_protected_root(kb, source_repo, 
     ("notes:x.md", "':' (an alternate data stream)"),
 ])
 def test_a_record_path_spelling_is_a_k13_error(kb, source_repo, capsys, spelled, reason):
-    """Start: SC-0001 confirmed, its source path hand-edited to <spelled> (an editor ignores the lock,
-    §5.2.6). Command: kblam validate. Exit 1; "K13 research-review/challenges/SC-0001.yaml:<line>:
+    """Start: source-challenge-0001 confirmed, its source path hand-edited to <spelled> (an editor ignores the lock,
+    §5.2.6). Command: kblam validate. Exit 1; "K13 research-review/challenges/source-challenge-0001.yaml:<line>:
     source.path: <reason>", then the error summary. Files changed: none in either tree. Acceptance 1:
     a record path that is not repo-relative is refused, never read."""
-    _install(kb, "SC", _sc(source_repo, path=spelled))
+    _install(kb, "source-challenge", _sc(source_repo, path=spelled))
     _accept(kb, capsys)
 
     assert _untouched(source_repo, kb, "validate") == 1
     assert capsys.readouterr().out.splitlines() == [
-        f"K13 {CHALLENGES}/SC-0001.yaml:{_key_line(kb, f'{CHALLENGES}/SC-0001.yaml', 'source')}: "
+        f"K13 {CHALLENGES}/source-challenge-0001.yaml:{_key_line(kb, f'{CHALLENGES}/source-challenge-0001.yaml', 'source')}: "
         f"source.path: {reason}",
         "kblam validate: 1 error(s) in research-review/",
     ]
 
 
 def test_a_record_path_through_an_escaping_symlink_is_a_k13_error(kb, source_repo, capsys, tmp_path):
-    """Start: escape.md is a symlink out of the repository; SC-0001 confirmed with it as its source
+    """Start: escape.md is a symlink out of the repository; source-challenge-0001 confirmed with it as its source
     path (no syntax problem — the escape is only visible once it is resolved). Command: kblam validate.
-    Exit 1; "K13 ...SC-0001.yaml:<line>: source: path 'escape.md': resolves outside the repository".
+    Exit 1; "K13 ...source-challenge-0001.yaml:<line>: source: path 'escape.md': resolves outside the repository".
     Files changed: none in either tree. Acceptance 1: the resolver refuses the escape rather than
     reading it."""
     outside = tmp_path / "outside.md"
     outside.write_text("outside the KB\n", encoding="utf-8")
     _link(outside, kb.root / "escape.md")
-    _install(kb, "SC", _sc(source_repo, path="escape.md"))
+    _install(kb, "source-challenge", _sc(source_repo, path="escape.md"))
     _accept(kb, capsys)
 
     assert _untouched(source_repo, kb, "validate") == 1
     assert capsys.readouterr().out.splitlines() == [
-        f"K13 {CHALLENGES}/SC-0001.yaml:{_key_line(kb, f'{CHALLENGES}/SC-0001.yaml', 'source')}: "
+        f"K13 {CHALLENGES}/source-challenge-0001.yaml:{_key_line(kb, f'{CHALLENGES}/source-challenge-0001.yaml', 'source')}: "
         f"source: path 'escape.md': resolves outside the repository",
         "kblam validate: 1 error(s) in research-review/",
     ]
 
 
 def test_put_refuses_a_staged_record_whose_basis_path_traverses(kb, source_repo, capsys):
-    """Start: SC-0001 is staged and complete except that a basis entry's path (a free field, so the
+    """Start: source-challenge-0001 is staged and complete except that a basis entry's path (a free field, so the
     allocation receipt does not bind it) was hand-edited to "../../outside.md" after `challenge new`.
     Command: kblam put <staged>. Exit 1; the K13 lines for basis[0] at the path the record would be
-    installed at, then "kblam put: rejected SC-0001 (...); research-review/ is unchanged...". Files
+    installed at, then "kblam put: rejected source-challenge-0001 (...); research-review/ is unchanged...". Files
     changed: none in either tree — no record, no registry, the staged file stays as the author filled
     it — so validate afterwards exits 0, with no record installed. Acceptance 1."""
     staged, changed = _staged(source_repo, kb, capsys, "challenge", "new", TRACE, "--lines", "3-3",
                               "--by", "reviewer-a")
-    assert set(changed) == {f"{STAGING}/SC-0001.yaml", f"{RECEIPTS}/SC-0001.json"}
+    assert set(changed) == {f"{STAGING}/source-challenge-0001.yaml", f"{RECEIPTS}/source-challenge-0001.json"}
     _fill(staged, **_sc_fields(source_repo))
     _rewrite(staged, "basis[0].path", "../../outside.md")
-    key_line = _key_line(kb, f"{STAGING}/SC-0001.yaml", "basis")   # the same line in either copy
-    where = {f"{STAGING}/SC-0001.yaml:{key_line}", f"{CHALLENGES}/SC-0001.yaml:{key_line}"}
+    key_line = _key_line(kb, f"{STAGING}/source-challenge-0001.yaml", "basis")   # the same line in either copy
+    where = {f"{STAGING}/source-challenge-0001.yaml:{key_line}", f"{CHALLENGES}/source-challenge-0001.yaml:{key_line}"}
 
     assert _untouched(source_repo, kb, "put", str(staged)) == 1
     lines = capsys.readouterr().out.splitlines()
     assert lines[0] in {f"K13 {place}: basis[0].path: '..' segment" for place in where}
     assert lines[1] in {f"K13 {place}: basis[0].sha256: required" for place in where}
     assert lines[2] == \
-        (f"kblam put: rejected SC-0001 (2 error(s)); {REVIEW}/ is unchanged. Fix the staged file and "
+        (f"kblam put: rejected source-challenge-0001 (2 error(s)); {REVIEW}/ is unchanged. Fix the staged file and "
          f"put it again. {SKILL_POINTER}")
     assert staged.is_file() and not (kb.root / CHALLENGES).exists()
     assert not (kb.root / REGISTRY).exists()
@@ -463,11 +463,11 @@ SPELLINGS = [
 
 @pytest.mark.parametrize("spelled", SPELLINGS)
 def test_k14_applies_to_every_spelling_of_the_quoted_source(kb, source_repo, capsys, spelled):
-    """Start: SC-0001 confirmed on TRACE lines 3-3; F-0001 quotes that line through <spelled>, which the
-    tag keeps as written. Command: kblam validate. Exit 1 with the K14 same-bytes error naming SC-0001,
+    """Start: source-challenge-0001 confirmed on TRACE lines 3-3; F-0001 quotes that line through <spelled>, which the
+    tag keeps as written. Command: kblam validate. Exit 1 with the K14 same-bytes error naming source-challenge-0001,
     the source as the challenge writes it and the pinned version. Files changed: none in either tree.
     Acceptance 2 through the canonical key: every spelling reaches the one challenge."""
-    _install(kb, "SC", _sc(source_repo))
+    _install(kb, "source-challenge", _sc(source_repo))
     tag = f"{spelled}:3"
     _finding(kb, tag)
     _accept(kb, capsys)
@@ -480,12 +480,12 @@ def test_k14_applies_to_every_spelling_of_the_quoted_source(kb, source_repo, cap
 
 
 def test_a_symlink_alias_gives_k14_one_canonical_key(kb, source_repo, capsys, tmp_path):
-    """Start: SC-0001 confirmed on TRACE; trace-alias.md is a symlink to it in the repository root;
-    F-0001 quotes line 3 through the alias. Command: kblam validate, then kblam challenge uses SC-0001.
+    """Start: source-challenge-0001 confirmed on TRACE; trace-alias.md is a symlink to it in the repository root;
+    F-0001 quotes line 3 through the alias. Command: kblam validate, then kblam challenge uses source-challenge-0001.
     Exit 1 with the K14 same-bytes error (the diagnostic names the source as the challenge writes it,
     not as the finding spells it); challenge uses names the excerpt and the command to fix it, exit 0.
     Files changed: none in either tree for both commands. Acceptance 2 through the canonical key."""
-    _install(kb, "SC", _sc(source_repo))
+    _install(kb, "source-challenge", _sc(source_repo))
     _link(Path(TRACE), kb.root / "trace-alias.md")
     tag = "trace-alias.md:3"
     _finding(kb, tag)
@@ -497,14 +497,14 @@ def test_a_symlink_alias_gives_k14_one_canonical_key(kb, source_repo, capsys, tm
         f"K14 {FINDING_PATH}:{line}: {_k14_same(source_repo)}",
         "kblam validate: 1 error(s) in findings/",
     ]
-    assert _untouched(source_repo, kb, "challenge", "uses", "SC-0001") == 0
+    assert _untouched(source_repo, kb, "challenge", "uses", "source-challenge-0001") == 0
     assert capsys.readouterr().out == \
         (f"F-0001 {FINDING_PATH}:{line} excerpt 1 same: error; "
-         f"kblam use review SC-0001 F-0001 1 --by NAME --proponent NAME\n")
+         f"kblam use review source-challenge-0001 F-0001 1 --by NAME --proponent NAME\n")
 
 
 def test_a_case_differing_spelling_is_one_key_on_windows_only(kb, source_repo, capsys):
-    """Start: SC-0001 confirmed on TRACE lines 3-3; F-0001 quotes line 3 through the upper-cased path.
+    """Start: source-challenge-0001 confirmed on TRACE lines 3-3; F-0001 quotes line 3 through the upper-cased path.
     Command: kblam validate. The canonical key is case-folded with os.path.normcase on Windows only
     (§5.2.2), so on Windows the tag keys to the same source and K14 fires with the same-bytes error;
     on a case-sensitive filesystem the two paths are different keys, K14 relates nothing and K10
@@ -512,7 +512,7 @@ def test_a_case_differing_spelling_is_one_key_on_windows_only(kb, source_repo, c
     A case-insensitive volume off Windows (macOS, usually) names the real file under the upper-cased
     spelling, so the test skips there rather than assert a rule that platform does not have.
     Acceptance 2 on Windows."""
-    _install(kb, "SC", _sc(source_repo))
+    _install(kb, "source-challenge", _sc(source_repo))
     tag = f"{TRACE.upper()}:3"
     _finding(kb, tag)
     _accept(kb, capsys)
@@ -542,10 +542,10 @@ def test_a_case_differing_spelling_is_one_key_on_windows_only(kb, source_repo, c
 ])
 def test_challenge_pin_refuses_a_snapshot_path_outside_the_repository(kb, source_repo, capsys, tmp_path,
                                                                      spelled, message):
-    """Start: SC-0001 is open and provisional — it was installed without a pin, so `challenge pin` is
+    """Start: source-challenge-0001 is open and provisional — it was installed without a pin, so `challenge pin` is
     the command that could set one; the source's working bytes are the HEAD blob's. F-0001 exists, and
     for the escape.md case escape.md is a symlink out of the repository. Command: kblam challenge pin
-    SC-0001 --expect D --snapshot <spelled> (pin takes no --by). Exit 1; stderr "kblam challenge pin:
+    source-challenge-0001 --expect D --snapshot <spelled> (pin takes no --by). Exit 1; stderr "kblam challenge pin:
     <message>". Files changed: none in either tree (the record keeps its blank pin); validate afterwards
     exits 0, clean. Acceptance 1."""
     _finding(kb, f"{TRACE}:3")
@@ -553,32 +553,32 @@ def test_challenge_pin_refuses_a_snapshot_path_outside_the_repository(kb, source
         outside = tmp_path / "outside.md"
         outside.write_text("outside the KB\n", encoding="utf-8")
         _link(outside, kb.root / "escape.md")
-    _install(kb, "SC", _sc(source_repo, status="open", pin=False))
+    _install(kb, "source-challenge", _sc(source_repo, status="open", pin=False))
     _accept(kb, capsys)
 
-    assert _untouched(source_repo, kb, "challenge", "pin", "SC-0001", "--expect", _digest(kb, "SC-0001"),
+    assert _untouched(source_repo, kb, "challenge", "pin", "source-challenge-0001", "--expect", _digest(kb, "source-challenge-0001"),
                       "--snapshot", spelled) == 1
     assert capsys.readouterr().err == f"kblam challenge pin: {message}\n"
-    source = _record(kb, "SC-0001").data["source"]
+    source = _record(kb, "source-challenge-0001").data["source"]
     assert all(source[key] is None for key in (*records.PIN_KEYS, "snapshot"))
     _validate_clean(source_repo, kb, capsys, ["kblam validate: OK (1 findings)"])
 
 
 def test_review_decide_refuses_an_evidence_path_that_escapes_or_streams(kb, source_repo, capsys):
-    """Start: SC-0001 open and complete. Command: kblam review decide SC-0001 --status confirmed --by
+    """Start: source-challenge-0001 open and complete. Command: kblam review decide source-challenge-0001 --status confirmed --by
     reviewer-b --reason ... --expect D --evidence observed:../outside.md:row 0. Exit 1; stderr
     "--evidence path '../outside.md': '..' segment". Files changed: none in either tree (no decision is
-    appended; the record is still open), and validate afterwards exits 0 with SC-0001 open.
+    appended; the record is still open), and validate afterwards exits 0 with source-challenge-0001 open.
     Acceptance 1."""
-    _install(kb, "SC", _sc(source_repo, status="open"))
+    _install(kb, "source-challenge", _sc(source_repo, status="open"))
     _accept(kb, capsys)
 
-    assert _untouched(source_repo, kb, "review", "decide", "SC-0001", "--status", "confirmed",
+    assert _untouched(source_repo, kb, "review", "decide", "source-challenge-0001", "--status", "confirmed",
                       "--by", DECIDER, "--reason", "read the source at its pin",
-                      "--expect", _digest(kb, "SC-0001"),
+                      "--expect", _digest(kb, "source-challenge-0001"),
                       "--evidence", "observed:../outside.md:row 0") == 1
     assert capsys.readouterr().err == "kblam review decide: --evidence path '../outside.md': '..' segment\n"
-    assert _record(kb, "SC-0001").status == "open"
+    assert _record(kb, "source-challenge-0001").status == "open"
     _validate_clean(source_repo, kb, capsys, ["kblam validate: OK (0 findings)"])
 
 
@@ -586,22 +586,22 @@ def test_review_decide_refuses_an_evidence_path_that_escapes_or_streams(kb, sour
 
 
 def test_challenge_pin_pins_an_open_challenge_to_head(kb, source_repo, capsys):
-    """Start: SC-0001 open and provisional (installed without a pin; the source's working bytes are the
-    HEAD blob's, so the worktree can pin them). Command: kblam challenge pin SC-0001 --expect D. Exit 0;
-    "kblam challenge pin: SC-0001 pinned (subject digest <12 hex>)". Files changed: the record, whose
+    """Start: source-challenge-0001 open and provisional (installed without a pin; the source's working bytes are the
+    HEAD blob's, so the worktree can pin them). Command: kblam challenge pin source-challenge-0001 --expect D. Exit 0;
+    "kblam challenge pin: source-challenge-0001 pinned (subject digest <12 hex>)". Files changed: the record, whose
     source now carries the Git pin, plus .kblam/review-ids and .kblam/tree.hash — the fixture
     hand-installed the record, so this first kblam write bootstraps the registry and the tree digest.
     validate afterwards exits 0 and the source is unchanged. Acceptance 1."""
-    _install(kb, "SC", _sc(source_repo, status="open", pin=False))
+    _install(kb, "source-challenge", _sc(source_repo, status="open", pin=False))
     _accept(kb, capsys)
 
-    code, changed = _written(source_repo, kb, "challenge", "pin", "SC-0001",
-                             "--expect", _digest(kb, "SC-0001"))
+    code, changed = _written(source_repo, kb, "challenge", "pin", "source-challenge-0001",
+                             "--expect", _digest(kb, "source-challenge-0001"))
     assert code == 0
     assert capsys.readouterr().out == \
-        (f"kblam challenge pin: SC-0001 pinned (subject digest {_digest(kb, 'SC-0001')[:12]})\n")
-    assert set(changed) == {f"{CHALLENGES}/SC-0001.yaml", REGISTRY, TREE_HASH}
-    source = _record(kb, "SC-0001").data["source"]
+        (f"kblam challenge pin: source-challenge-0001 pinned (subject digest {_digest(kb, 'source-challenge-0001')[:12]})\n")
+    assert set(changed) == {f"{CHALLENGES}/source-challenge-0001.yaml", REGISTRY, TREE_HASH}
+    source = _record(kb, "source-challenge-0001").data["source"]
     assert (source["repo"], source["commit"], source["blob"]) == \
         (SOURCE_REPO, source_repo.head(), source_repo.blob(TRACE_PATH))
     assert source["snapshot"] is None
@@ -609,42 +609,42 @@ def test_challenge_pin_pins_an_open_challenge_to_head(kb, source_repo, capsys):
 
 
 def test_challenge_pin_records_a_project_owned_snapshot(kb, source_repo, capsys):
-    """Start: SC-0001 open and provisional; snapshots/trace-copy.md is a project-owned copy of the
+    """Start: source-challenge-0001 open and provisional; snapshots/trace-copy.md is a project-owned copy of the
     source's bytes, outside every source repository and every root kblam owns. Command: kblam challenge
-    pin SC-0001 --expect D --snapshot snapshots/trace-copy.md. Exit 0; the same pinned line as pinning
+    pin source-challenge-0001 --expect D --snapshot snapshots/trace-copy.md. Exit 0; the same pinned line as pinning
     to HEAD. Files changed: the record, whose source now names the snapshot and keeps repo/commit/blob
     null, plus .kblam/review-ids and .kblam/tree.hash, bootstrapped by this first kblam write; the copy
     itself is kblam's to read, never to write. validate afterwards exits 0; the source repository is
     unchanged. Acceptance 1."""
     kb.write("snapshots/trace-copy.md", TRACE_TEXT)
-    _install(kb, "SC", _sc(source_repo, status="open", pin=False))
+    _install(kb, "source-challenge", _sc(source_repo, status="open", pin=False))
     _accept(kb, capsys)
 
-    code, changed = _written(source_repo, kb, "challenge", "pin", "SC-0001",
-                             "--expect", _digest(kb, "SC-0001"),
+    code, changed = _written(source_repo, kb, "challenge", "pin", "source-challenge-0001",
+                             "--expect", _digest(kb, "source-challenge-0001"),
                              "--snapshot", "snapshots/trace-copy.md")
     assert code == 0
     assert capsys.readouterr().out == \
-        (f"kblam challenge pin: SC-0001 pinned (subject digest {_digest(kb, 'SC-0001')[:12]})\n")
-    assert set(changed) == {f"{CHALLENGES}/SC-0001.yaml", REGISTRY, TREE_HASH}
-    source = _record(kb, "SC-0001").data["source"]
+        (f"kblam challenge pin: source-challenge-0001 pinned (subject digest {_digest(kb, 'source-challenge-0001')[:12]})\n")
+    assert set(changed) == {f"{CHALLENGES}/source-challenge-0001.yaml", REGISTRY, TREE_HASH}
+    source = _record(kb, "source-challenge-0001").data["source"]
     assert source["snapshot"] == "snapshots/trace-copy.md"
     assert all(source[key] is None for key in records.PIN_KEYS)
     _validate_clean(source_repo, kb, capsys, ["kblam validate: OK (0 findings)"])
 
 
 def test_challenge_edit_stages_a_copy_of_an_open_challenge(kb, source_repo, capsys):
-    """Start: SC-0001 open and installed, its tree accepted. Command: kblam challenge edit SC-0001.
+    """Start: source-challenge-0001 open and installed, its tree accepted. Command: kblam challenge edit source-challenge-0001.
     Exit 0; stdout the staged path, whose bytes equal the installed record's. Files changed: the staged
     copy and its edit-base receipt, nothing else. validate afterwards exits 0; the source repository is
     unchanged. Acceptance 1."""
-    _install(kb, "SC", _sc(source_repo, status="open"))
+    _install(kb, "source-challenge", _sc(source_repo, status="open"))
     _accept(kb, capsys)
 
-    staged, changed = _staged(source_repo, kb, capsys, "challenge", "edit", "SC-0001")
-    assert staged == kb.root / STAGING / "SC-0001.yaml"
-    assert set(changed) == {f"{STAGING}/SC-0001.yaml", f"{RECEIPTS}/SC-0001.edit-base.json"}
-    assert staged.read_bytes() == (kb.root / CHALLENGES / "SC-0001.yaml").read_bytes()
+    staged, changed = _staged(source_repo, kb, capsys, "challenge", "edit", "source-challenge-0001")
+    assert staged == kb.root / STAGING / "source-challenge-0001.yaml"
+    assert set(changed) == {f"{STAGING}/source-challenge-0001.yaml", f"{RECEIPTS}/source-challenge-0001.edit-base.json"}
+    assert staged.read_bytes() == (kb.root / CHALLENGES / "source-challenge-0001.yaml").read_bytes()
     _validate_clean(source_repo, kb, capsys, ["kblam validate: OK (0 findings)"])
 
 
@@ -666,82 +666,82 @@ def test_a_whole_review_workflow_leaves_the_source_repository_unchanged(kb, sour
 
     staged, changed = _staged(source_repo, kb, capsys, "challenge", "new", TRACE, "--lines", "3-3",
                               "--by", "reviewer-a")
-    assert staged == kb.root / STAGING / "SC-0001.yaml"
-    assert set(changed) == {f"{STAGING}/SC-0001.yaml", f"{RECEIPTS}/SC-0001.json"}
+    assert staged == kb.root / STAGING / "source-challenge-0001.yaml"
+    assert set(changed) == {f"{STAGING}/source-challenge-0001.yaml", f"{RECEIPTS}/source-challenge-0001.json"}
     _fill(staged, **_sc_fields(source_repo))
 
     code, changed = _written(source_repo, kb, "put", str(staged))
     assert code == 0
-    assert capsys.readouterr().out == f"kblam put: SC-0001 -> {CHALLENGES}/SC-0001.yaml\n"
-    assert set(changed) == {f"{CHALLENGES}/SC-0001.yaml", INDEX, REGISTRY, TREE_HASH,
-                            f"{STAGING}/SC-0001.yaml"}
+    assert capsys.readouterr().out == f"kblam put: source-challenge-0001 -> {CHALLENGES}/source-challenge-0001.yaml\n"
+    assert set(changed) == {f"{CHALLENGES}/source-challenge-0001.yaml", INDEX, REGISTRY, TREE_HASH,
+                            f"{STAGING}/source-challenge-0001.yaml"}
 
-    assert _untouched(source_repo, kb, "challenge", "show", "SC-0001") == 0
-    assert capsys.readouterr().out.startswith("SC-0001 open\nsubject digest: ")
+    assert _untouched(source_repo, kb, "challenge", "show", "source-challenge-0001") == 0
+    assert capsys.readouterr().out.startswith("source-challenge-0001 open\nsubject digest: ")
 
-    code, changed = _written(source_repo, kb, "review", "decide", "SC-0001", "--status", "confirmed",
+    code, changed = _written(source_repo, kb, "review", "decide", "source-challenge-0001", "--status", "confirmed",
                              "--by", DECIDER, "--reason", "read the source at its pin",
-                             "--expect", _digest(kb, "SC-0001"))
+                             "--expect", _digest(kb, "source-challenge-0001"))
     assert code == 0
     text = capsys.readouterr().out
     assert text.splitlines()[0] == \
-        f"kblam review decide: SC-0001 is now confirmed (subject digest {_digest(kb, 'SC-0001')[:12]})"
+        f"kblam review decide: source-challenge-0001 is now confirmed (subject digest {_digest(kb, 'source-challenge-0001')[:12]})"
     assert text.splitlines()[-1] == \
         ("kblam review decide: done, but kblam validate still fails (1 error(s) listed above, owned by "
          "other findings or records)")
-    assert set(changed) == {f"{CHALLENGES}/SC-0001.yaml", INDEX, TREE_HASH}
+    assert set(changed) == {f"{CHALLENGES}/source-challenge-0001.yaml", INDEX, TREE_HASH}
 
-    assert _untouched(source_repo, kb, "challenge", "uses", "SC-0001") == 0
+    assert _untouched(source_repo, kb, "challenge", "uses", "source-challenge-0001") == 0
     line = _tag_line(kb, f"{TRACE}:3")
     assert capsys.readouterr().out == \
         (f"F-0001 {FINDING_PATH}:{line} excerpt 1 same: error; "
-         f"kblam use review SC-0001 F-0001 1 --by NAME --proponent NAME\n")
+         f"kblam use review source-challenge-0001 F-0001 1 --by NAME --proponent NAME\n")
 
-    use_staged, changed = _staged(source_repo, kb, capsys, "use", "review", "SC-0001", "F-0001", "1",
+    use_staged, changed = _staged(source_repo, kb, capsys, "use", "review", "source-challenge-0001", "F-0001", "1",
                                   "--by", "reviewer-a", "--proponent", "researcher-a")
-    assert set(changed) == {f"{STAGING}/CU-0001.yaml", f"{RECEIPTS}/CU-0001.json"}
+    assert set(changed) == {f"{STAGING}/checked-use-0001.yaml", f"{RECEIPTS}/checked-use-0001.json"}
     _fill(use_staged, **_cu_fields())
 
     code, changed = _written(source_repo, kb, "put", str(use_staged))
     assert code == 0
-    assert capsys.readouterr().out.splitlines()[0] == f"kblam put: CU-0001 -> {USES}/CU-0001.yaml"
-    assert set(changed) == {f"{USES}/CU-0001.yaml", INDEX, REGISTRY, TREE_HASH,
-                            f"{STAGING}/CU-0001.yaml"}
+    assert capsys.readouterr().out.splitlines()[0] == f"kblam put: checked-use-0001 -> {USES}/checked-use-0001.yaml"
+    assert set(changed) == {f"{USES}/checked-use-0001.yaml", INDEX, REGISTRY, TREE_HASH,
+                            f"{STAGING}/checked-use-0001.yaml"}
 
-    code, changed = _written(source_repo, kb, "review", "decide", "CU-0001", "--status", "approved",
+    code, changed = _written(source_repo, kb, "review", "decide", "checked-use-0001", "--status", "approved",
                              "--by", DECIDER, "--reason", "the excerpt is used only for the printed bytes",
-                             "--expect", _digest(kb, "CU-0001"))
+                             "--expect", _digest(kb, "checked-use-0001"))
     assert code == 0
     assert capsys.readouterr().out == \
-        (f"kblam review decide: CU-0001 is now approved (subject digest {_digest(kb, 'CU-0001')[:12]})\n")
-    assert set(changed) == {f"{USES}/CU-0001.yaml", INDEX, TREE_HASH}
+        (f"kblam review decide: checked-use-0001 is now approved (subject digest {_digest(kb, 'checked-use-0001')[:12]})\n")
+    assert set(changed) == {f"{USES}/checked-use-0001.yaml", INDEX, TREE_HASH}
 
-    code, changed = _written(source_repo, kb, "review", "rebind", "CU-0001", "--by", DECIDER,
+    code, changed = _written(source_repo, kb, "review", "rebind", "checked-use-0001", "--by", DECIDER,
                              "--reason", "rechecked the excerpt in this revision",
-                             "--expect", _digest(kb, "CU-0001"))
+                             "--expect", _digest(kb, "checked-use-0001"))
     assert code == 0
     assert capsys.readouterr().out.endswith(
-        f"kblam review rebind: CU-0001 rebound, now approved "
-        f"(subject digest {_digest(kb, 'CU-0001')[:12]})\n")
-    assert set(changed) == {f"{USES}/CU-0001.yaml", TREE_HASH}      # the status is unchanged
+        f"kblam review rebind: checked-use-0001 rebound, now approved "
+        f"(subject digest {_digest(kb, 'checked-use-0001')[:12]})\n")
+    assert set(changed) == {f"{USES}/checked-use-0001.yaml", TREE_HASH}      # the status is unchanged
 
     task_staged, changed = _staged(source_repo, kb, capsys, "task", "new", "F-0001",
                                    "--kind", "replication", "--by", "reviewer-a",
                                    "--proponent", "researcher-a")
-    assert set(changed) == {f"{STAGING}/CT-0001.yaml", f"{RECEIPTS}/CT-0001.json"}
+    assert set(changed) == {f"{STAGING}/claim-task-0001.yaml", f"{RECEIPTS}/claim-task-0001.json"}
     _fill(task_staged, **_ct_fields())
 
     code, changed = _written(source_repo, kb, "put", str(task_staged))
     assert code == 0
-    assert capsys.readouterr().out == f"kblam put: CT-0001 -> {TASKS}/CT-0001.yaml\n"
-    assert set(changed) == {f"{TASKS}/CT-0001.yaml", INDEX, REGISTRY, TREE_HASH,
-                            f"{STAGING}/CT-0001.yaml"}
+    assert capsys.readouterr().out == f"kblam put: claim-task-0001 -> {TASKS}/claim-task-0001.yaml\n"
+    assert set(changed) == {f"{TASKS}/claim-task-0001.yaml", INDEX, REGISTRY, TREE_HASH,
+                            f"{STAGING}/claim-task-0001.yaml"}
 
-    assert _untouched(source_repo, kb, "task", "show", "CT-0001") == 0
-    binding = _record(kb, "CT-0001").data
+    assert _untouched(source_repo, kb, "task", "show", "claim-task-0001") == 0
+    binding = _record(kb, "claim-task-0001").data
     assert capsys.readouterr().out.splitlines() == [
-        "CT-0001 open",
-        f"subject digest: {_digest(kb, 'CT-0001')}",
+        "claim-task-0001 open",
+        f"subject digest: {_digest(kb, 'claim-task-0001')}",
         "kind: replication",
         "finding: F-0001",
         "proponent: researcher-a",
@@ -760,13 +760,13 @@ def test_a_whole_review_workflow_leaves_the_source_repository_unchanged(kb, sour
         "  none",
     ]
 
-    edited, changed = _staged(source_repo, kb, capsys, "task", "edit", "CT-0001")
-    assert edited == kb.root / STAGING / "CT-0001.yaml"
-    assert set(changed) == {f"{STAGING}/CT-0001.yaml", f"{RECEIPTS}/CT-0001.edit-base.json"}
+    edited, changed = _staged(source_repo, kb, capsys, "task", "edit", "claim-task-0001")
+    assert edited == kb.root / STAGING / "claim-task-0001.yaml"
+    assert set(changed) == {f"{STAGING}/claim-task-0001.yaml", f"{RECEIPTS}/claim-task-0001.edit-base.json"}
 
     assert _untouched(source_repo, kb, "review", "list") == 0
     assert [line.split()[0] for line in capsys.readouterr().out.splitlines()] == \
-        ["SC-0001", "CT-0001", "CU-0001"]
+        ["source-challenge-0001", "claim-task-0001", "checked-use-0001"]
 
     code, changed = _written(source_repo, kb, "review", "index")
     assert code == 0
@@ -774,16 +774,16 @@ def test_a_whole_review_workflow_leaves_the_source_repository_unchanged(kb, sour
     assert set(changed) == set()      # the bytes the preceding puts wrote are already current
 
     _validate_clean(source_repo, kb, capsys, [
-        "CT-0001 open replication of F-0001: Does an independent measurement establish the claim?",
+        "claim-task-0001 open replication of F-0001: Does an independent measurement establish the claim?",
         "kblam validate: OK (1 findings); 1 pending task(s)",
     ])
 
     # the two refusals: each still leaves both trees alone
-    assert _untouched(source_repo, kb, "challenge", "pin", "SC-0001",
-                      "--expect", _digest(kb, "SC-0001")) == 1
+    assert _untouched(source_repo, kb, "challenge", "pin", "source-challenge-0001",
+                      "--expect", _digest(kb, "source-challenge-0001")) == 1
     assert capsys.readouterr().err == \
-        ("kblam challenge pin: SC-0001 is confirmed; only an open challenge can be pinned (its source is "
+        ("kblam challenge pin: source-challenge-0001 is confirmed; only an open challenge can be pinned (its source is "
          "fixed from the decision that closes it)\n")
-    assert _untouched(source_repo, kb, "challenge", "edit", "SC-0001") == 1
+    assert _untouched(source_repo, kb, "challenge", "edit", "source-challenge-0001") == 1
     assert capsys.readouterr().err == \
-        "kblam challenge edit: SC-0001 is confirmed; only an open challenge can be edited\n"
+        "kblam challenge edit: source-challenge-0001 is confirmed; only an open challenge can be edited\n"

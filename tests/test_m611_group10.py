@@ -27,9 +27,9 @@ REVIEW = "research-review/INDEX.md"
 IDS = ".kblam/review-ids"
 HASH = ".kblam/tree.hash"
 JOURNAL = ".kblam/journal.json"
-SC = "research-review/challenges/SC-0001.yaml"
-CT = "research-review/tasks/CT-0001.yaml"
-STAGED = ".kblam/review-staging/SC-0001.yaml"
+SC = "research-review/challenges/source-challenge-0001.yaml"
+CT = "research-review/tasks/claim-task-0001.yaml"
+STAGED = ".kblam/review-staging/source-challenge-0001.yaml"
 QUESTION = "Does an independent measurement establish the claim?"
 
 
@@ -61,7 +61,7 @@ def fill(path, **fields):
 
 
 def stage_challenge(kb, source_repo, number=1):
-    rec_id = f"SC-{number:04d}"
+    rec_id = f"source-challenge-{number:04d}"
     staged = kb.root / f".kblam/review-staging/{rec_id}.yaml"
     run(kb, source_repo,
         ["challenge", "new", m.TRACE, "--lines", "3-3", "--by", "reviewer-a"],
@@ -80,7 +80,7 @@ def stage_challenge(kb, source_repo, number=1):
 
 def put_challenge(kb, source_repo, number=1):
     staged = stage_challenge(kb, source_repo, number)
-    rec_id = f"SC-{number:04d}"
+    rec_id = f"source-challenge-{number:04d}"
     installed = f"research-review/challenges/{rec_id}.yaml"
     run(kb, source_repo, ["put", staged],
         {installed, REVIEW, IDS, HASH, staged.relative_to(kb.root).as_posix()},
@@ -111,7 +111,7 @@ def validate(kb, source_repo, *, tasks=(), record=False):
 
 
 def edit_record(kb, source_repo, rec_id, **fields):
-    word = "challenge" if rec_id.startswith("SC-") else "task"
+    word = "challenge" if rec_id.startswith("source-challenge-") else "task"
     staged = kb.root / f".kblam/review-staging/{rec_id}.yaml"
     receipt = f".kblam/review-receipts/{rec_id}.edit-base.json"
     run(kb, source_repo, [word, "edit", rec_id],
@@ -119,18 +119,18 @@ def edit_record(kb, source_repo, rec_id, **fields):
     fill(staged, **fields)
     installed = m.record_path(kb, rec_id).relative_to(kb.root).as_posix()
     changed = {installed, HASH, receipt, staged.relative_to(kb.root).as_posix()}
-    if rec_id.startswith("CT-"):
+    if rec_id.startswith("claim-task-"):
         changed.add(REVIEW)
     run(kb, source_repo, ["put", staged], changed,
         out=f"kblam put: {rec_id} -> {installed}\n")
 
 
 def show_challenge(kb, source_repo):
-    digest = m.expect(kb, "SC-0001")
-    source = data(m.record_path(kb, "SC-0001"))["source"]
+    digest = m.expect(kb, "source-challenge-0001")
+    source = data(m.record_path(kb, "source-challenge-0001"))["source"]
     version = source["blob"] if source["repo"] else "provisional"
-    run(kb, source_repo, ["challenge", "show", "SC-0001"], set(), out=(
-        f"SC-0001 open\nsubject digest: {digest}\nsource: {m.TRACE}\n"
+    run(kb, source_repo, ["challenge", "show", "source-challenge-0001"], set(), out=(
+        f"source-challenge-0001 open\nsubject digest: {digest}\nsource: {m.TRACE}\n"
         f"version: {version}\nstate: current\nassertion: lines 3-3\n  {m.LINE3}\n"
         "proposition: The printed byte equality follows from the printed byte values\n"
         "scope: MX-100 capture transcription\nclassification: contradicted\nbasis:\n"
@@ -142,22 +142,22 @@ def show_challenge(kb, source_repo):
 
 @pytest.mark.parametrize("command", ["decide", "pin"])
 def test_changed_challenge_refuses_inspected_digest_then_fresh_digest_succeeds(kb, source_repo, command):
-    """Start without records, clean source (dirty at allocation for pin); SC-0001 put open.
+    """Start without records, clean source (dirty at allocation for pin); source-challenge-0001 put open.
 
     Acceptance 6. challenge new --by reviewer-a exits 0, path only; changes
-    .kblam/review-staging/SC-0001.yaml and .kblam/review-receipts/SC-0001.json.
-    First put exits 0, SC-0001 -> canonical path; changes that staged path, the canonical
-    research-review/challenges/SC-0001.yaml, research-review/INDEX.md, .kblam/review-ids
+    .kblam/review-staging/source-challenge-0001.yaml and .kblam/review-receipts/source-challenge-0001.json.
+    First put exits 0, source-challenge-0001 -> canonical path; changes that staged path, the canonical
+    research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md, .kblam/review-ids
     and .kblam/tree.hash. challenge show exits 0, full subject/source report; changes none.
-    challenge edit exits 0, staged path; changes {.kblam/review-staging/SC-0001.yaml,
-    .kblam/review-receipts/SC-0001.edit-base.json}. Its put exits 0; changes
-    {research-review/challenges/SC-0001.yaml, .kblam/review-staging/SC-0001.yaml,
-    .kblam/review-receipts/SC-0001.edit-base.json, .kblam/tree.hash}.
+    challenge edit exits 0, staged path; changes {.kblam/review-staging/source-challenge-0001.yaml,
+    .kblam/review-receipts/source-challenge-0001.edit-base.json}. Its put exits 0; changes
+    {research-review/challenges/source-challenge-0001.yaml, .kblam/review-staging/source-challenge-0001.yaml,
+    .kblam/review-receipts/source-challenge-0001.edit-base.json, .kblam/tree.hash}.
     review decide --by reviewer-b or challenge pin (no actor flag) with old --expect
     exits 1, 'changed since you inspected it; show it again'; changes none.
     Retrying with current --expect exits 0, 'is now confirmed' or 'pinned'; decide
-    changes {research-review/challenges/SC-0001.yaml, research-review/INDEX.md,
-    .kblam/tree.hash}; pin changes {research-review/challenges/SC-0001.yaml,
+    changes {research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md,
+    .kblam/tree.hash}; pin changes {research-review/challenges/source-challenge-0001.yaml,
     .kblam/tree.hash}. validate exits 0, OK (0 findings); changes none.
     Every command leaves source bytes, HEAD, index and refs unchanged; fixture commit
     before pin is outside command windows. No K13/K14/K15 diagnostic remains.
@@ -166,23 +166,23 @@ def test_changed_challenge_refuses_inspected_digest_then_fresh_digest_succeeds(k
         source_repo.write(m.TRACE_PATH, m.TRACE_TEXT + "A new final line.\n")
     put_challenge(kb, source_repo)
     inspected = show_challenge(kb, source_repo)
-    edit_record(kb, source_repo, "SC-0001", proposition="The byte equality needs independent checking")
+    edit_record(kb, source_repo, "source-challenge-0001", proposition="The byte equality needs independent checking")
     if command == "pin":
         source_repo.commit(m.TRACE_PATH, m.TRACE_TEXT + "A new final line.\n")
-    argv = (["review", "decide", "SC-0001", "--status", "confirmed", "--by", "reviewer-b",
+    argv = (["review", "decide", "source-challenge-0001", "--status", "confirmed", "--by", "reviewer-b",
              "--reason", "Checked the printed values"] if command == "decide"
-            else ["challenge", "pin", "SC-0001"])
+            else ["challenge", "pin", "source-challenge-0001"])
     prefix = "review decide" if command == "decide" else "challenge pin"
     run(kb, source_repo, [*argv, "--expect", inspected], set(), code=1,
-        err=f"kblam {prefix}: SC-0001 changed since you inspected it; show it again: "
-            "kblam challenge show SC-0001\n")
+        err=f"kblam {prefix}: source-challenge-0001 changed since you inspected it; show it again: "
+            "kblam challenge show source-challenge-0001\n")
     expected = {SC, HASH, REVIEW} if command == "decide" else {SC, HASH}
     with changes(kb, source_repo, expected):
-        result = m.kblam(kb, *argv, "--expect", m.expect(kb, "SC-0001"))
-    digest = m.expect(kb, "SC-0001")[:12]
+        result = m.kblam(kb, *argv, "--expect", m.expect(kb, "source-challenge-0001"))
+    digest = m.expect(kb, "source-challenge-0001")[:12]
     text = "is now confirmed" if command == "decide" else "pinned"
-    assert result == m.Run(0, f"kblam {prefix}: SC-0001 {text} (subject digest {digest})\n", "")
-    installed = data(m.record_path(kb, "SC-0001"))
+    assert result == m.Run(0, f"kblam {prefix}: source-challenge-0001 {text} (subject digest {digest})\n", "")
+    installed = data(m.record_path(kb, "source-challenge-0001"))
     assert installed["status"] == ("confirmed" if command == "decide" else "open")
     assert len(installed["decisions"]) == (1 if command == "decide" else 0)
     assert installed["source"]["commit"] == source_repo.head()
@@ -190,28 +190,28 @@ def test_changed_challenge_refuses_inspected_digest_then_fresh_digest_succeeds(k
 
 
 def test_changed_task_refuses_rebind_digest_then_current_rebind_succeeds(kb, source_repo):
-    """Start F-0001 installed, clean committed source, no records; CT-0001 allocated/put open.
+    """Start F-0001 installed, clean committed source, no records; claim-task-0001 allocated/put open.
 
     Acceptance 6. task new --by researcher-a --proponent researcher-a exits 0, path;
-    changes .kblam/review-staging/CT-0001.yaml and .kblam/review-receipts/CT-0001.json.
-    Put exits 0, CT-0001 -> canonical; changes staged path, research-review/tasks/CT-0001.yaml,
+    changes .kblam/review-staging/claim-task-0001.yaml and .kblam/review-receipts/claim-task-0001.json.
+    Put exits 0, claim-task-0001 -> canonical; changes staged path, research-review/tasks/claim-task-0001.yaml,
     research-review/INDEX.md, .kblam/review-ids and .kblam/tree.hash. task show exits 0,
     current binding and digest; changes none. task edit exits 0, path; changes staged
-    .kblam/review-staging/CT-0001.yaml and .kblam/review-receipts/CT-0001.edit-base.json.
-    Edit put exits 0; changes {research-review/tasks/CT-0001.yaml,
-    .kblam/review-staging/CT-0001.yaml, .kblam/review-receipts/CT-0001.edit-base.json,
+    .kblam/review-staging/claim-task-0001.yaml and .kblam/review-receipts/claim-task-0001.edit-base.json.
+    Edit put exits 0; changes {research-review/tasks/claim-task-0001.yaml,
+    .kblam/review-staging/claim-task-0001.yaml, .kblam/review-receipts/claim-task-0001.edit-base.json,
     research-review/INDEX.md, .kblam/tree.hash}.
     review rebind --by reviewer-b with inspected --expect exits 1, 'changed since you
     inspected it; show it again'; changes none. Fresh rebind exits 0, 'rebound, now open';
-    changes {research-review/tasks/CT-0001.yaml, .kblam/tree.hash}. validate exits 0, revised pending
+    changes {research-review/tasks/claim-task-0001.yaml, .kblam/tree.hash}. validate exits 0, revised pending
     question and OK (1 findings); changes none. Source unchanged for every command.
     """
     kb.add("F-0001", "ratio", m.CLAIM)
-    staged = kb.root / ".kblam/review-staging/CT-0001.yaml"
+    staged = kb.root / ".kblam/review-staging/claim-task-0001.yaml"
     run(kb, source_repo,
         ["task", "new", "F-0001", "--kind", "replication", "--by", "researcher-a",
          "--proponent", "researcher-a"],
-        {".kblam/review-staging/CT-0001.yaml", ".kblam/review-receipts/CT-0001.json"},
+        {".kblam/review-staging/claim-task-0001.yaml", ".kblam/review-receipts/claim-task-0001.json"},
         out=f"{staged}\n")
     fill(staged, question=QUESTION, method="Repeat the capture with the documented settings.",
          outcomes={"supports": "The ratio is within 0.1%.", "refutes": "The ratio differs by more.",
@@ -219,12 +219,12 @@ def test_changed_task_refuses_rebind_digest_then_current_rebind_succeeds(kb, sou
          controls=["same firmware version"], stop="Stop after three captures.",
          expected_evidence=["an evidence/ capture package"])
     run(kb, source_repo, ["put", staged],
-        {CT, REVIEW, IDS, HASH, ".kblam/review-staging/CT-0001.yaml"},
-        out=f"kblam put: CT-0001 -> {CT}\n")
-    inspected = m.expect(kb, "CT-0001")
-    record = data(m.record_path(kb, "CT-0001"))
-    run(kb, source_repo, ["task", "show", "CT-0001"], set(), out=(
-        f"CT-0001 open\nsubject digest: {inspected}\nkind: replication\nfinding: F-0001\n"
+        {CT, REVIEW, IDS, HASH, ".kblam/review-staging/claim-task-0001.yaml"},
+        out=f"kblam put: claim-task-0001 -> {CT}\n")
+    inspected = m.expect(kb, "claim-task-0001")
+    record = data(m.record_path(kb, "claim-task-0001"))
+    run(kb, source_repo, ["task", "show", "claim-task-0001"], set(), out=(
+        f"claim-task-0001 open\nsubject digest: {inspected}\nkind: replication\nfinding: F-0001\n"
         f"proponent: researcher-a\nbinding: fingerprint {record['claim_fingerprint']}, "
         f"file sha256 {record['base_file_sha256']}\nbinding: current\nquestion: {QUESTION}\n"
         "method: Repeat the capture with the documented settings.\n"
@@ -233,17 +233,17 @@ def test_changed_task_refuses_rebind_digest_then_current_rebind_succeeds(kb, sou
         "stop: Stop after three captures.\nexpected evidence: an evidence/ capture package\n"
         "decisions:\n  none\n"))
     question = "Does the revised method establish the claim?"
-    edit_record(kb, source_repo, "CT-0001", question=question)
-    argv = ["review", "rebind", "CT-0001", "--by", "reviewer-b", "--reason", "Reread the method"]
+    edit_record(kb, source_repo, "claim-task-0001", question=question)
+    argv = ["review", "rebind", "claim-task-0001", "--by", "reviewer-b", "--reason", "Reread the method"]
     run(kb, source_repo, [*argv, "--expect", inspected], set(), code=1,
-        err="kblam review rebind: CT-0001 changed since you inspected it; show it again: "
-            "kblam task show CT-0001\n")
-    digest = m.expect(kb, "CT-0001")
+        err="kblam review rebind: claim-task-0001 changed since you inspected it; show it again: "
+            "kblam task show claim-task-0001\n")
+    digest = m.expect(kb, "claim-task-0001")
     run(kb, source_repo, [*argv, "--expect", digest], {CT, HASH},
-        out=f"kblam review rebind: CT-0001 rebound, now open (subject digest {digest[:12]})\n")
-    decision = data(m.record_path(kb, "CT-0001"))["decisions"][-1]
+        out=f"kblam review rebind: claim-task-0001 rebound, now open (subject digest {digest[:12]})\n")
+    decision = data(m.record_path(kb, "claim-task-0001"))["decisions"][-1]
     assert decision["by"] == "reviewer-b" and decision["bind"] == digest
-    validate(kb, source_repo, tasks=[("CT-0001", question)])
+    validate(kb, source_repo, tasks=[("claim-task-0001", question)])
 
 
 def interrupted_put(kb, source_repo, monkeypatch, checkpoint):
@@ -276,21 +276,21 @@ def interrupted_put(kb, source_repo, monkeypatch, checkpoint):
     assert seen == order[:order.index(checkpoint) + 1]
     assert staged.is_file()
     assert json.loads((kb.root / JOURNAL).read_bytes()) == {
-        "command": "put SC-0001", "paths": [SC, REVIEW, IDS],
+        "command": "put source-challenge-0001", "paths": [SC, REVIEW, IDS],
         "tree_hash": original.decode("utf-8") if original is not None else None}
     return original
 
 
 def recovery_new(kb, source_repo, expected):
-    staged = kb.root / ".kblam/review-staging/SC-0002.yaml"
+    staged = kb.root / ".kblam/review-staging/source-challenge-0002.yaml"
     run(kb, source_repo,
         ["challenge", "new", m.TRACE, "--lines", "2-2", "--by", "reviewer-c"],
-        {*expected, ".kblam/review-staging/SC-0002.yaml", ".kblam/review-receipts/SC-0002.json"},
+        {*expected, ".kblam/review-staging/source-challenge-0002.yaml", ".kblam/review-receipts/source-challenge-0002.json"},
         out=f"{staged}\n",
-        err="kblam challenge new: the interrupted put SC-0001 may be partial: run kblam validate, "
+        err="kblam challenge new: the interrupted put source-challenge-0001 may be partial: run kblam validate, "
             "fix what it reports, then kblam validate --record\n")
     assert not (kb.root / JOURNAL).exists()
-    assert m.registry(kb) == ["SC-0001"]
+    assert m.registry(kb) == ["source-challenge-0001"]
     view = load_view(kb.cfg)
     assert (kb.root / "findings/INDEX.md").read_bytes() == generate_index(view)
     assert (kb.root / REVIEW).read_bytes() == generate_review_index(view)
@@ -300,18 +300,18 @@ def recovery_new(kb, source_repo, expected):
 @pytest.mark.parametrize("recorded", [True, False], ids=["recorded-hash", "missing-hash"])
 def test_each_partial_record_write_recovers_without_accepting_tree(kb, source_repo, monkeypatch,
                                                                   checkpoint, recorded):
-    """Start no records, clean source, tree.hash present or absent; allocate SC-0001 open.
+    """Start no records, clean source, tree.hash present or absent; allocate source-challenge-0001 open.
 
     Acceptance 6. challenge new --by reviewer-a exits 0, staged path; changes
-    .kblam/review-staging/SC-0001.yaml and .kblam/review-receipts/SC-0001.json.
+    .kblam/review-staging/source-challenge-0001.yaml and .kblam/review-receipts/source-challenge-0001.json.
     Put has injected OSError (no CLI exit code), no stdout/stderr; changes .kblam/journal.json
-    plus each written prefix of [research-review/challenges/SC-0001.yaml,
+    plus each written prefix of [research-review/challenges/source-challenge-0001.yaml,
     research-review/INDEX.md, .kblam/review-ids, .kblam/tree.hash], including the named
     checkpoint. The staged draft and allocation receipt stay. Next challenge new
-    --by reviewer-c exits 0, SC-0002 path; stderr 'the interrupted put SC-0001 may be
+    --by reviewer-c exits 0, source-challenge-0002 path; stderr 'the interrupted put source-challenge-0001 may be
     partial: run kblam validate, fix what it reports, then kblam validate --record'.
-    That call changes {.kblam/review-staging/SC-0002.yaml,
-    .kblam/review-receipts/SC-0002.json, .kblam/journal.json} (journal removed), plus
+    That call changes {.kblam/review-staging/source-challenge-0002.yaml,
+    .kblam/review-receipts/source-challenge-0002.json, .kblam/journal.json} (journal removed), plus
     research-review/INDEX.md iff interrupted after record, .kblam/review-ids iff
     interrupted before registry, .kblam/tree.hash iff interrupted after tree.hash
     (restore previous bytes, or remove when absent). findings/INDEX.md is regenerated identically.
@@ -319,7 +319,7 @@ def test_each_partial_record_write_recovers_without_accepting_tree(kb, source_re
     'recorded .kblam/tree.hash for this tree'; changes tree.hash, .kblam/pairs.sqlite and .kblam/review.jsonl
     (with tree.hash missing, it is the bootstrap: it asks Jev nothing, says so, and changes tree.hash and
     .kblam/pairs.sqlite). Recovery registers
-    only the existing SC-0001, invents no record, preserves its open status and all
+    only the existing source-challenge-0001, invents no record, preserves its open status and all
     draft bytes, and leaves the source unchanged around every CLI invocation.
     """
     if not recorded:
@@ -336,8 +336,8 @@ def test_each_partial_record_write_recovers_without_accepting_tree(kb, source_re
     recovery_new(kb, source_repo, expected)
     assert ((kb.root / HASH).read_bytes() if (kb.root / HASH).exists() else None) == original
     assert (kb.root / STAGED).read_bytes() == draft
-    assert data(m.record_path(kb, "SC-0001"))["status"] == "open"
-    assert not m.record_path(kb, "SC-0002").exists()
+    assert data(m.record_path(kb, "source-challenge-0001"))["status"] == "open"
+    assert not m.record_path(kb, "source-challenge-0002").exists()
     validate(kb, source_repo)
     validate(kb, source_repo, record=True)
 
@@ -345,20 +345,20 @@ def test_each_partial_record_write_recovers_without_accepting_tree(kb, source_re
 @pytest.mark.parametrize("failed_index", ["findings/INDEX.md", REVIEW])
 def test_failed_recovery_keeps_journal_and_retry_restores_both_indexes(kb, source_repo, monkeypatch,
                                                                      failed_index):
-    """Start no records and clean source; interrupt SC-0001 put after tree.hash.
+    """Start no records and clean source; interrupt source-challenge-0001 put after tree.hash.
 
     Acceptance 6. challenge new --by reviewer-a exits 0, path; changes
-    {.kblam/review-staging/SC-0001.yaml, .kblam/review-receipts/SC-0001.json}.
+    {.kblam/review-staging/source-challenge-0001.yaml, .kblam/review-receipts/source-challenge-0001.json}.
     Put raises exact injected OSError, no exit code/output; changes
-    {research-review/challenges/SC-0001.yaml, research-review/INDEX.md,
+    {research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md,
     .kblam/review-ids, .kblam/tree.hash, .kblam/journal.json}.
     Fixture corrupts both indexes outside windows. challenge new --by reviewer-c with
     recovery index failure exits 1, 'cannot recover the interrupted write recorded in
     .kblam/journal.json: injected recovery index failure; the journal is kept'; no stdout.
     Changes none if findings index fails; only findings/INDEX.md if review index fails.
-    Journal and advanced hash remain byte-identical; no SC-0002 allocated. Retry exits 0,
-    SC-0002 staged path, exact partial-operation stderr; changes
-    {.kblam/review-staging/SC-0002.yaml, .kblam/review-receipts/SC-0002.json,
+    Journal and advanced hash remain byte-identical; no source-challenge-0002 allocated. Retry exits 0,
+    source-challenge-0002 staged path, exact partial-operation stderr; changes
+    {.kblam/review-staging/source-challenge-0002.yaml, .kblam/review-receipts/source-challenge-0002.json,
     .kblam/journal.json, .kblam/tree.hash, research-review/INDEX.md} (journal removed,
     hash restored), and findings/INDEX.md iff it previously failed. Registry unchanged.
     validate exits 0, OK
@@ -386,7 +386,7 @@ def test_failed_recovery_keeps_journal_and_retry_restores_both_indexes(kb, sourc
                 ".kblam/journal.json: injected recovery index failure; the journal is kept\n")
     assert (kb.root / JOURNAL).read_bytes() == journal
     assert (kb.root / HASH).read_bytes() == advanced
-    assert not (kb.root / ".kblam/review-staging/SC-0002.yaml").exists()
+    assert not (kb.root / ".kblam/review-staging/source-challenge-0002.yaml").exists()
     expected = {JOURNAL, HASH, REVIEW}
     if failed_index == "findings/INDEX.md":
         expected.add("findings/INDEX.md")
@@ -397,17 +397,17 @@ def test_failed_recovery_keeps_journal_and_retry_restores_both_indexes(kb, sourc
 
 
 def test_record_put_leaves_hash_stale_over_out_of_band_change(kb, source_repo):
-    """Start SC-0001 open on clean source; fixture changes its proposition out of band.
+    """Start source-challenge-0001 open on clean source; fixture changes its proposition out of band.
 
-    Acceptance 6. Each challenge new --by reviewer-a (SC-0001 then SC-0002) exits 0,
-    path; SC-0001 new changes {.kblam/review-staging/SC-0001.yaml,
-    .kblam/review-receipts/SC-0001.json}; SC-0002 new changes
-    {.kblam/review-staging/SC-0002.yaml, .kblam/review-receipts/SC-0002.json}.
-    First put exits 0, canonical SC-0001 path; changes
-    {research-review/challenges/SC-0001.yaml, .kblam/review-staging/SC-0001.yaml,
+    Acceptance 6. Each challenge new --by reviewer-a (source-challenge-0001 then source-challenge-0002) exits 0,
+    path; source-challenge-0001 new changes {.kblam/review-staging/source-challenge-0001.yaml,
+    .kblam/review-receipts/source-challenge-0001.json}; source-challenge-0002 new changes
+    {.kblam/review-staging/source-challenge-0002.yaml, .kblam/review-receipts/source-challenge-0002.json}.
+    First put exits 0, canonical source-challenge-0001 path; changes
+    {research-review/challenges/source-challenge-0001.yaml, .kblam/review-staging/source-challenge-0001.yaml,
     research-review/INDEX.md, .kblam/review-ids, .kblam/tree.hash}.
-    Second put exits 0, canonical SC-0002 path; changes
-    {research-review/challenges/SC-0002.yaml, .kblam/review-staging/SC-0002.yaml,
+    Second put exits 0, canonical source-challenge-0002 path; changes
+    {research-review/challenges/source-challenge-0002.yaml, .kblam/review-staging/source-challenge-0002.yaml,
     research-review/INDEX.md, .kblam/review-ids}. stderr names findings/ or
     research-review/ changed outside kblam and 'tree.hash not advanced'. No journal
     remains and the unvalidated change survives. validate exits 0, OK (0 findings),
@@ -416,17 +416,17 @@ def test_record_put_leaves_hash_stale_over_out_of_band_change(kb, source_repo):
     """
     put_challenge(kb, source_repo)
     recorded = (kb.root / HASH).read_bytes()
-    fill(m.record_path(kb, "SC-0001"), proposition="An out-of-band revised proposition")
+    fill(m.record_path(kb, "source-challenge-0001"), proposition="An out-of-band revised proposition")
     staged = stage_challenge(kb, source_repo, 2)
-    sc2 = "research-review/challenges/SC-0002.yaml"
+    sc2 = "research-review/challenges/source-challenge-0002.yaml"
     run(kb, source_repo, ["put", staged],
-        {sc2, REVIEW, IDS, ".kblam/review-staging/SC-0002.yaml"},
-        out=f"kblam put: SC-0002 -> {sc2}\n",
-        err="kblam put SC-0002: findings/ or research-review/ was changed outside kblam since kblam "
+        {sc2, REVIEW, IDS, ".kblam/review-staging/source-challenge-0002.yaml"},
+        out=f"kblam put: source-challenge-0002 -> {sc2}\n",
+        err="kblam put source-challenge-0002: findings/ or research-review/ was changed outside kblam since kblam "
             "last wrote it; tree.hash not advanced. Run kblam validate --record once the change is "
             "validated.\n")
     assert (kb.root / HASH).read_bytes() == recorded
-    assert data(m.record_path(kb, "SC-0001"))["proposition"] == "An out-of-band revised proposition"
+    assert data(m.record_path(kb, "source-challenge-0001"))["proposition"] == "An out-of-band revised proposition"
     assert not (kb.root / JOURNAL).exists()
     validate(kb, source_repo)
     assert (kb.root / HASH).read_bytes() == recorded
@@ -535,17 +535,17 @@ def race(kb, source_repo, tmp_path, left, right, left_changes, right_changes):
 
 
 def test_two_process_record_puts_serialize_without_losing_registry(kb, source_repo, tmp_path):
-    """Start no records, clean source; stage separate open SC-0001 and SC-0002.
+    """Start no records, clean source; stage separate open source-challenge-0001 and source-challenge-0002.
 
-    Acceptance 6. Each challenge new --by reviewer-a exits 0, path; SC-0001 new changes
-    {.kblam/review-staging/SC-0001.yaml, .kblam/review-receipts/SC-0001.json}; SC-0002
-    new changes {.kblam/review-staging/SC-0002.yaml, .kblam/review-receipts/SC-0002.json}.
+    Acceptance 6. Each challenge new --by reviewer-a exits 0, path; source-challenge-0001 new changes
+    {.kblam/review-staging/source-challenge-0001.yaml, .kblam/review-receipts/source-challenge-0001.json}; source-challenge-0002
+    new changes {.kblam/review-staging/source-challenge-0002.yaml, .kblam/review-receipts/source-challenge-0002.json}.
     Two real processes invoke put while the first holds the real lock; second cannot
     acquire until first releases. Each put exits 0, canonical record path, stderr empty.
-    SC-0001 put changes {research-review/challenges/SC-0001.yaml,
-    .kblam/review-staging/SC-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
-    .kblam/tree.hash}; SC-0002 put changes {research-review/challenges/SC-0002.yaml,
-    .kblam/review-staging/SC-0002.yaml, research-review/INDEX.md, .kblam/review-ids,
+    source-challenge-0001 put changes {research-review/challenges/source-challenge-0001.yaml,
+    .kblam/review-staging/source-challenge-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
+    .kblam/tree.hash}; source-challenge-0002 put changes {research-review/challenges/source-challenge-0002.yaml,
+    .kblam/review-staging/source-challenge-0002.yaml, research-review/INDEX.md, .kblam/review-ids,
     .kblam/tree.hash}. Each staged file is removed. Exclusive mutation windows
     exclude only the transient lock, whose pid/ownership and final removal are asserted
     separately; parent snapshots verify each completion before allowing the next write.
@@ -556,34 +556,34 @@ def test_two_process_record_puts_serialize_without_losing_registry(kb, source_re
     """
     left = stage_challenge(kb, source_repo)
     right = stage_challenge(kb, source_repo, 2)
-    sc2 = "research-review/challenges/SC-0002.yaml"
+    sc2 = "research-review/challenges/source-challenge-0002.yaml"
     results = race(kb, source_repo, tmp_path, left, right,
                    {SC, REVIEW, IDS, HASH, STAGED},
-                   {sc2, REVIEW, IDS, HASH, ".kblam/review-staging/SC-0002.yaml"})
-    assert results == [m.Run(0, f"kblam put: SC-0001 -> {SC}\n", ""),
-                       m.Run(0, f"kblam put: SC-0002 -> {sc2}\n", "")]
-    assert m.registry(kb) == ["SC-0001", "SC-0002"]
-    assert "SC-0001" in (kb.root / REVIEW).read_text(encoding="utf-8")
-    assert "SC-0002" in (kb.root / REVIEW).read_text(encoding="utf-8")
+                   {sc2, REVIEW, IDS, HASH, ".kblam/review-staging/source-challenge-0002.yaml"})
+    assert results == [m.Run(0, f"kblam put: source-challenge-0001 -> {SC}\n", ""),
+                       m.Run(0, f"kblam put: source-challenge-0002 -> {sc2}\n", "")]
+    assert m.registry(kb) == ["source-challenge-0001", "source-challenge-0002"]
+    assert "source-challenge-0001" in (kb.root / REVIEW).read_text(encoding="utf-8")
+    assert "source-challenge-0002" in (kb.root / REVIEW).read_text(encoding="utf-8")
     assert not (kb.root / JOURNAL).exists()
     validate(kb, source_repo)
 
 
 def test_two_process_edits_refuse_second_stale_edit_base(kb, source_repo, tmp_path):
-    """Start SC-0001 open, clean committed source; two staged copies share its edit base.
+    """Start source-challenge-0001 open, clean committed source; two staged copies share its edit base.
 
     Acceptance 6. challenge new --by reviewer-a exits 0, path; changes
-    {.kblam/review-staging/SC-0001.yaml, .kblam/review-receipts/SC-0001.json}.
-    First put exits 0; changes {research-review/challenges/SC-0001.yaml,
-    .kblam/review-staging/SC-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
+    {.kblam/review-staging/source-challenge-0001.yaml, .kblam/review-receipts/source-challenge-0001.json}.
+    First put exits 0; changes {research-review/challenges/source-challenge-0001.yaml,
+    .kblam/review-staging/source-challenge-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
     .kblam/tree.hash}. challenge edit exits 0, path; changes
-    {.kblam/review-staging/SC-0001.yaml, .kblam/review-receipts/SC-0001.edit-base.json}.
+    {.kblam/review-staging/source-challenge-0001.yaml, .kblam/review-receipts/source-challenge-0001.edit-base.json}.
     Fixture copies its bytes
-    into .kblam/review-staging/left/SC-0001.yaml and right/SC-0001.yaml outside windows.
+    into .kblam/review-staging/left/source-challenge-0001.yaml and right/source-challenge-0001.yaml outside windows.
     Concurrent process puts: left exits 0, canonical path, stderr empty; changes
-    {research-review/challenges/SC-0001.yaml, .kblam/tree.hash,
-    .kblam/review-staging/left/SC-0001.yaml, .kblam/review-receipts/SC-0001.edit-base.json}
-    (staged copy and receipt removed). Right exits 1, 'changed since your edit; run kblam challenge edit SC-0001
+    {research-review/challenges/source-challenge-0001.yaml, .kblam/tree.hash,
+    .kblam/review-staging/left/source-challenge-0001.yaml, .kblam/review-receipts/source-challenge-0001.edit-base.json}
+    (staged copy and receipt removed). Right exits 1, 'changed since your edit; run kblam challenge edit source-challenge-0001
     again', stdout empty; changes none and retains its draft. Per-writer windows exclude
     only the transient lock; its ownership/removal and each parent completion are checked.
     The pre-start-to-final snapshot changes exactly the left put's set (right writes nothing).
@@ -591,20 +591,20 @@ def test_two_process_edits_refuse_second_stale_edit_base(kb, source_repo, tmp_pa
     """
     put_challenge(kb, source_repo)
     staged = kb.root / STAGED
-    receipt = ".kblam/review-receipts/SC-0001.edit-base.json"
-    run(kb, source_repo, ["challenge", "edit", "SC-0001"], {STAGED, receipt}, out=f"{staged}\n")
-    left = kb.write(".kblam/review-staging/left/SC-0001.yaml", staged.read_bytes())
-    right = kb.write(".kblam/review-staging/right/SC-0001.yaml", staged.read_bytes())
+    receipt = ".kblam/review-receipts/source-challenge-0001.edit-base.json"
+    run(kb, source_repo, ["challenge", "edit", "source-challenge-0001"], {STAGED, receipt}, out=f"{staged}\n")
+    left = kb.write(".kblam/review-staging/left/source-challenge-0001.yaml", staged.read_bytes())
+    right = kb.write(".kblam/review-staging/right/source-challenge-0001.yaml", staged.read_bytes())
     staged.unlink()
     fill(left, proposition="The left reviewer narrowed the proposition")
     fill(right, proposition="The right reviewer independently narrowed the proposition")
     right_bytes = right.read_bytes()
     results = race(kb, source_repo, tmp_path, left, right,
-                   {SC, HASH, receipt, ".kblam/review-staging/left/SC-0001.yaml"}, set())
-    assert results == [m.Run(0, f"kblam put: SC-0001 -> {SC}\n", ""),
-                       m.Run(1, "", "kblam put: SC-0001 changed since your edit; run kblam challenge "
-                                    "edit SC-0001 again. Load the kblam-write skill for how to fix this.\n")]
+                   {SC, HASH, receipt, ".kblam/review-staging/left/source-challenge-0001.yaml"}, set())
+    assert results == [m.Run(0, f"kblam put: source-challenge-0001 -> {SC}\n", ""),
+                       m.Run(1, "", "kblam put: source-challenge-0001 changed since your edit; run kblam challenge "
+                                    "edit source-challenge-0001 again. Load the kblam-write skill for how to fix this.\n")]
     assert right.read_bytes() == right_bytes
-    assert data(m.record_path(kb, "SC-0001"))["proposition"] == "The left reviewer narrowed the proposition"
+    assert data(m.record_path(kb, "source-challenge-0001"))["proposition"] == "The left reviewer narrowed the proposition"
     assert not (kb.root / JOURNAL).exists()
     validate(kb, source_repo)

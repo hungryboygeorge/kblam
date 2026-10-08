@@ -30,9 +30,9 @@ def test_review_files_hold_every_file_under_the_review_root(kb):
     expected = {
         "research-review/INDEX.md": b"# Review index\n",
         "research-review/README": b"no extension, still a file\n",
-        "research-review/challenges/SC-0001.yaml": record_text("SC").encode("utf-8"),
-        "research-review/tasks/CT-0001.yaml": record_text("CT").encode("utf-8"),
-        "research-review/uses/CU-0001.yaml": record_text("CU").encode("utf-8"),
+        "research-review/challenges/source-challenge-0001.yaml": record_text("source-challenge").encode("utf-8"),
+        "research-review/tasks/claim-task-0001.yaml": record_text("claim-task").encode("utf-8"),
+        "research-review/uses/checked-use-0001.yaml": record_text("checked-use").encode("utf-8"),
         "research-review/notes/deep/scratch.bin": b"\x00\x01binary\xff",
     }
     for path, data in expected.items():
@@ -55,18 +55,18 @@ def test_each_root_loads_without_the_other(kb):
 
 
 def test_records_are_the_kind_folder_yamls_in_path_order(kb):
-    for kind, folder in (("SC", "challenges"), ("CT", "tasks"), ("CU", "uses")):
+    for kind, folder in (("source-challenge", "challenges"), ("claim-task", "tasks"), ("checked-use", "uses")):
         kb.write(f"research-review/{folder}/{kind}-0001.yaml", record_text(kind))
     kb.write("research-review/challenges/notes.txt", "not a record\n")
-    kb.write("research-review/challenges/nested/SC-0002.yaml", record_text("SC", "SC-0002"))
-    kb.write("research-review/other/SC-0003.yaml", record_text("SC", "SC-0003"))
-    kb.write("research-review/SC-0004.yaml", record_text("SC", "SC-0004"))
+    kb.write("research-review/challenges/nested/source-challenge-0002.yaml", record_text("source-challenge", "source-challenge-0002"))
+    kb.write("research-review/other/source-challenge-0003.yaml", record_text("source-challenge", "source-challenge-0003"))
+    kb.write("research-review/source-challenge-0004.yaml", record_text("source-challenge", "source-challenge-0004"))
 
     view = load_view(kb.cfg)
     assert [(r.path, r.id, r.kind) for r in view.records] == [
-        ("research-review/challenges/SC-0001.yaml", "SC-0001", "SC"),
-        ("research-review/tasks/CT-0001.yaml", "CT-0001", "CT"),
-        ("research-review/uses/CU-0001.yaml", "CU-0001", "CU"),
+        ("research-review/challenges/source-challenge-0001.yaml", "source-challenge-0001", "source-challenge"),
+        ("research-review/tasks/claim-task-0001.yaml", "claim-task-0001", "claim-task"),
+        ("research-review/uses/checked-use-0001.yaml", "checked-use-0001", "checked-use"),
     ]
     for rec in view.records:
         assert rec.error is None
@@ -76,25 +76,25 @@ def test_records_are_the_kind_folder_yamls_in_path_order(kb):
 
 
 def test_symlinks_under_the_review_root_are_flagged(kb):
-    real = kb.write("research-review/challenges/SC-0001.yaml", record_text("SC"))
-    kb.write("research-review/uses/CU-0001.yaml", record_text("CU"))
+    real = kb.write("research-review/challenges/source-challenge-0001.yaml", record_text("source-challenge"))
+    kb.write("research-review/uses/checked-use-0001.yaml", record_text("checked-use"))
     kb.write("outside/loose.txt", "outside the review root\n")
     review = kb.root / "research-review"
-    _symlink("SC-0001.yaml", review / "challenges" / "SC-0002.yaml")
-    _symlink("nowhere.yaml", review / "uses" / "CU-0002.yaml")
+    _symlink("source-challenge-0001.yaml", review / "challenges" / "source-challenge-0002.yaml")
+    _symlink("nowhere.yaml", review / "uses" / "checked-use-0002.yaml")
     _symlink("../outside", review / "extra", directory=True)
 
     view = load_view(kb.cfg)
     assert view.review_symlinks == {
-        "research-review/challenges/SC-0002.yaml",
-        "research-review/uses/CU-0002.yaml",
+        "research-review/challenges/source-challenge-0002.yaml",
+        "research-review/uses/checked-use-0002.yaml",
         "research-review/extra",
     }
     # a link to a readable record still contributes its bytes; a dangling or directory link does not
-    assert view.review_files["research-review/challenges/SC-0002.yaml"] == real.read_bytes()
-    assert "research-review/uses/CU-0002.yaml" not in view.review_files
+    assert view.review_files["research-review/challenges/source-challenge-0002.yaml"] == real.read_bytes()
+    assert "research-review/uses/checked-use-0002.yaml" not in view.review_files
     assert not [p for p in view.review_files if p.startswith("research-review/extra")]
-    assert [r.id for r in view.records] == ["SC-0001", "SC-0002", "CU-0001"]
+    assert [r.id for r in view.records] == ["source-challenge-0001", "source-challenge-0002", "checked-use-0001"]
 
 
 def test_a_stray_review_file_is_no_k8_issue_and_leaves_digest_v1_alone(kb):
@@ -112,7 +112,7 @@ def test_a_stray_review_file_is_no_k8_issue_and_leaves_digest_v1_alone(kb):
 
 def test_load_view_reads_no_state(kb):
     kb.write(".kblam/staging/F-0001-x.md", "# staged\n")
-    kb.write(".kblam/review-staging/SC-0001.yaml", record_text("SC"))
+    kb.write(".kblam/review-staging/source-challenge-0001.yaml", record_text("source-challenge"))
     kb.write("research-review/INDEX.md", "# Review index\n")
 
     state = kb.root / ".kblam"

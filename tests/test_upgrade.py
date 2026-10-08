@@ -190,9 +190,9 @@ def test_upgrade_keeps_format_1_marker_when_the_bridge_cannot_vouch_for_the_tree
     digest = tree_digest(load_view(kb.cfg)) if reason != "mismatch" else "a" * 64
     marker = kb.write(".kblam/tree.hash", digest + "\n")
     if reason == "records":
-        kb.write("research-review/challenges/SC-0001.yaml", record_text("SC"))
+        kb.write("research-review/challenges/source-challenge-0001.yaml", record_text("source-challenge"))
     elif reason == "registry":
-        kb.write(".kblam/review-ids", '["SC-0001"]\n')
+        kb.write(".kblam/review-ids", '["source-challenge-0001"]\n')
     elif reason == "malformed-registry":
         kb.write(".kblam/review-ids", "not JSON\n")
     elif reason == "wrong-shape-registry":
@@ -250,8 +250,8 @@ def test_upgrade_on_a_clone_with_records_records_nothing_and_says_what_to_do(kb,
     current = v1_of(kb, "F-0001")
     kb.add("F-0002", "motor", CLAIM_B, topic="motor", extra=f"depends_on:\n  F-0001: {current}\n")
     sensor = kb.root / "findings/calibration/F-0001-sensor.md"
-    kb.write("research-review/tasks/CT-0001.yaml", record_text(
-        "CT", "CT-0001", finding="F-0001", claim_fingerprint=v2_of(kb, "F-0001"),
+    kb.write("research-review/tasks/claim-task-0001.yaml", record_text(
+        "claim-task", "claim-task-0001", finding="F-0001", claim_fingerprint=v2_of(kb, "F-0001"),
         base_file_sha256=hashlib.sha256(sensor.read_bytes()).hexdigest()))
     m.accept_tree(kb)
     shutil.rmtree(kb.root / ".kblam")                       # a clone: no tree.hash, registry or Jev state
@@ -267,8 +267,8 @@ def test_upgrade_on_a_clone_with_records_records_nothing_and_says_what_to_do(kb,
         f"kblam upgrade: commit the re-stamped findings, so every clone has them; each other machine runs kblam "
         f"upgrade once for its own .kblam/\n"), unrecorded("upgrade"))
     assert unbootstrapped(kb) and m.registry(kb) is None
-    bootstraps_as_named(kb, f"CT-0001 open replication of F-0001: {QUESTION}", 2)
-    assert m.registry(kb) == ["CT-0001"]
+    bootstraps_as_named(kb, f"claim-task-0001 open replication of F-0001: {QUESTION}", 2)
+    assert m.registry(kb) == ["claim-task-0001"]
 
 
 def test_upgrade_on_a_clone_without_records_records_nothing_and_says_what_to_do(kb, no_jev_check):

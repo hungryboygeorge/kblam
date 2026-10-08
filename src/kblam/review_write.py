@@ -1,5 +1,5 @@
 """Installing and changing review records (SPEC §5.2.4 "Where each rule blocks", §5.2.5, §5.2.6):
-`kblam put` of an SC-/CT-/CU- file, `review decide`, `review rebind`, `challenge pin` and
+`kblam put` of a record file, `review decide`, `review rebind`, `challenge pin` and
 `review index`. Library functions only; cli.py dispatches `kblam put` on the file name (records.
 FILENAME_RE to put_record, anything else to store.put) and maps results to exit codes.
 
@@ -83,8 +83,8 @@ class WriteResult:
 def match_expect(rec_id: str, digest: str, expect: str) -> None:
     """--expect (SPEC §5.2.5): `expect` must be lowercase hex of at least EXPECT_MIN digits (else a
     StoreError saying so) and a prefix of `digest`; otherwise StoreError("<ID> changed since you inspected
-    it; show it again"), with "show" naming the command: kblam challenge show / task show for SC / CT,
-    kblam review list for CU."""
+    it; show it again"), with "show" naming the command: kblam challenge show / task show for a source
+    challenge / claim task, kblam review list for a checked use."""
     shown = _show_command(rec_id)
     if not (isinstance(expect, str) and len(expect) >= EXPECT_MIN and HEX_RE.fullmatch(expect)):
         raise StoreError(f"--expect takes the subject digest {shown} printed, or a prefix of at least "
@@ -147,18 +147,20 @@ def parse_evidence(cfg: Config, spec: str) -> dict:
 
 
 def put_record(cfg: Config, staged: Path) -> WriteResult:
-    """`kblam put <staged SC-/CT-/CU- file>` (SPEC §5.2.5 "What put accepts").
+    """`kblam put <staged record file>` (SPEC §5.2.5 "What put accepts").
 
     The staged name must match records.FILENAME_RE; it parses (records.parse_record) or is refused
     with the parse error. The ID comes from the name, and the data's `id` must equal it: a mismatch is
     refused with the step that unblocks the author (_id_refusal), which the installed record chooses.
 
     First put (no installed record): the allocation receipt (receipts.read_allocation) must exist; the
-    staged `id`, `created`, `creator`, `proponent` and bindings must equal the receipt's (for an SC: the
-    source reference's six keys; for a CT: kind, finding, claim_fingerprint, base_file_sha256; for a
-    CU: challenge, challenge_bind, finding, finding_fingerprint, finding_file_sha256, citation);
+    staged `id`, `created`, `creator`, `proponent` and bindings must equal the receipt's (for a source
+    challenge: the source reference's six keys; for a claim task: kind, finding, claim_fingerprint,
+    base_file_sha256; for a checked use: challenge, challenge_bind, finding, finding_fingerprint,
+    finding_file_sha256, citation);
     `status` must be open and `decisions` []. Then by kind:
-    - SC: the source must still be available with the receipt's sha256, else "the source changed since
+    - source challenge: the source must still be available with the receipt's sha256, else "the source
+      changed since
       kblam challenge new; run it again". The assertion may be narrowed: `lines` within the receipt's
       captured lines and `text` a non-empty substring of the captured text. assertion.sha256 and
       occurrence, when null, are computed (matching.assertion_match on the source's LF text within
@@ -167,13 +169,15 @@ def put_record(cfg: Config, staged: Path) -> WriteResult:
       and, when all three pin keys are null, gitpin.auto_pin's pin; a basis entry whose canonical key
       is the source's gets source.sha256 and no pin (§5.2.3 Basis); a given sha256 or pin is verified
       (sources resolve), never replaced.
-    - CT: if the finding's fingerprint or file sha256 now differs from the receipt: "<F> changed since
-      kblam task new bound <CT> to it; reread it and run kblam task new again".
-    - CU: nothing beyond the receipt (a broken binding is a K13 warning; K14 blocks the finding).
+    - claim task: if the finding's fingerprint or file sha256 now differs from the receipt: "<F> changed
+      since kblam task new bound <claim task> to it; reread it and run kblam task new again".
+    - checked use: nothing beyond the receipt (a broken binding is a K13 warning; K14 blocks the
+      finding).
     Put over an installed record: an edit-base receipt must exist and equal the sha256 of the installed
     bytes, else "<ID> changed since your edit; run kblam <challenge|task> edit <ID> again"; the
     installed status must be open; every field except the kind's free fields (FREE_FIELDS) must equal
-    the installed record's. For an SC, the basis is filled and verified as on a first put (SPEC
+    the installed record's. For a source challenge, the basis is filled and verified as on a first put
+    (SPEC
     §5.2.5: a staged basis entry may leave sha256 and the pin null), except that an entry equal to an
     installed one is not read again.
     On either put, a basis entry that is new or changed and has a given sha256 must resolve available
@@ -187,7 +191,8 @@ def put_record(cfg: Config, staged: Path) -> WriteResult:
     staged = Path(staged)
     match = records.FILENAME_RE.match(staged.name)
     if match is None:
-        raise StoreError(f"{staged.name} must be named SC-NNNN.yaml, CT-NNNN.yaml or CU-NNNN.yaml")
+        raise StoreError(f"{staged.name} must be named source-challenge-NNNN.yaml, claim-task-NNNN.yaml "
+                         f"or checked-use-NNNN.yaml")
     rec_id, kind = match.group(1), match.group(2)
     if not staged.is_file():
         raise StoreError(f"{display_path(cfg, staged)} is not a file")
@@ -250,9 +255,9 @@ def _at_staged(result: WriteResult, staged: Record, written: Record, path: str,
 
 
 FREE_FIELDS = {
-    "SC": ("proposition", "scope", "classification", "basis", "usable", "limits", "linked_findings"),
-    "CT": ("question", "method", "outcomes", "controls", "stop", "expected_evidence"),
-    "CU": ("disposition", "reason"),
+    "source-challenge": ("proposition", "scope", "classification", "basis", "usable", "limits", "linked_findings"),
+    "claim-task": ("question", "method", "outcomes", "controls", "stop", "expected_evidence"),
+    "checked-use": ("disposition", "reason"),
 }
 
 
@@ -271,9 +276,9 @@ def _first_put(cfg: Config, rec: Record, rec_id: str, kind: str, view: KBView,
         raise StoreError(
             f"{rec_id} is a first put, so its status must be open and its decisions empty. Its status and "
             f"decisions change only through kblam review decide: put it open, then decide")
-    if kind == "SC":
+    if kind == "source-challenge":
         _fill_challenge(cfg, rec, rec_id, reader, receipt)
-    elif kind == "CT":
+    elif kind == "claim-task":
         _check_task_fresh(cfg, rec, rec_id, view, receipt)
 
 
@@ -301,7 +306,7 @@ def _over_put(cfg: Config, rec: Record, rec_id: str, kind: str, installed: Recor
             raise StoreError(
                 f"{rec_id}: {key} is not a free field, so it must be put as installed. Only "
                 f"{', '.join(FREE_FIELDS[kind])} change through an edit; {_edit_hint(rec_id, kind)}")
-    if kind == "SC":
+    if kind == "source-challenge":
         source = rec.meta.get("source") if isinstance(rec.meta.get("source"), dict) else None
         if source is not None:
             _fill_basis(cfg, rec_id, rec.meta, source, reader, installed.data.get("basis") or [])
@@ -311,9 +316,9 @@ def _edit_hint(rec_id: str, kind: str) -> str:
     """How an author changes a record that is already installed (SPEC §5.2.5): an edit command for a
     challenge or a task, and a new record for a use, which has no edit command. Written to follow a
     semicolon or "then" in the messages above."""
-    if kind == "CU":
-        return ("a use has no edit command, so a changed use needs a new kblam use review SC-… F-… "
-                "<excerpt-ordinal> --by NAME --proponent NAME")
+    if kind == "checked-use":
+        return ("a use has no edit command, so a changed use needs a new kblam use review "
+                "source-challenge-… F-… <excerpt-ordinal> --by NAME --proponent NAME")
     return f"run kblam {decisions.KIND_WORDS[kind]} edit {rec_id} again"
 
 
@@ -321,14 +326,14 @@ def _match_receipt(rec_id: str, kind: str, data: dict, receipt: dict) -> None:
     """The staged record against its allocation receipt: id, created, creator, proponent and bindings."""
     for key in ("id", "created", "creator"):
         _same_as_receipt(rec_id, key, data.get(key), receipt.get(key))
-    if kind in ("CT", "CU"):
+    if kind in ("claim-task", "checked-use"):
         _same_as_receipt(rec_id, "proponent", data.get("proponent"), receipt.get("proponent"))
-    if kind == "SC":
+    if kind == "source-challenge":
         source = data.get("source") if isinstance(data.get("source"), dict) else {}
         recorded = receipt.get("source") if isinstance(receipt.get("source"), dict) else {}
         for key in records.REF_KEYS:
             _same_as_receipt(rec_id, f"source.{key}", source.get(key), recorded.get(key))
-    elif kind == "CT":
+    elif kind == "claim-task":
         for key in ("kind", "finding", "claim_fingerprint", "base_file_sha256"):
             _same_as_receipt(rec_id, key, data.get(key), receipt.get(key))
     else:
@@ -351,7 +356,8 @@ def _same_as_receipt(rec_id: str, key: str, value, expected) -> None:
 
 
 def _fill_challenge(cfg: Config, rec: Record, rec_id: str, reader: SourceReader, receipt: dict) -> None:
-    """A first put of an SC: the source is still there, the assertion may be narrowed, and the computed
+    """A first put of a source challenge: the source is still there, the assertion may be narrowed, and
+    the computed
     assertion values and the basis' null hashes and pins are filled in (SPEC §5.2.3, §5.2.5). The
     computed values go into the round-trip mapping, which is what records.dump writes."""
     meta = rec.meta
@@ -492,7 +498,7 @@ def _verify_basis(cfg: Config, rec_id: str, index: int, entry: dict, reader: Sou
 
 
 def _check_task_fresh(cfg: Config, rec: Record, rec_id: str, view: KBView, receipt: dict) -> None:
-    """A first put of a CT whose finding changed since task new is refused (SPEC §5.2.5)."""
+    """A first put of a claim task whose finding changed since task new is refused (SPEC §5.2.5)."""
     finding_id = rec.data.get("finding")
     found = [f for f in view.findings if f.file_id == finding_id]
     if len(found) != 1 or not found[0].ok:
@@ -526,9 +532,10 @@ def decide(cfg: Config, rec_id: str, status: str, by: str, reason: str, expect: 
     decisions.transition_problem(kind, old status, status) is None; when decisions.needs_independence,
     decisions.independence_problem is None. Appends {date, by, status, reason, evidence: [parse_evidence
     of each], bind} and sets `status`. The kind's closing requirements are then the candidate
-    validation's errors owned by the record (K13 SC confirmation, K15 primary evidence). Approving a CU
-    is refused unless k13.use_current holds for it on the candidate (list use_binding_problems).
-    For `--status confirmed` of an SC, newly_affected is the finding IDs having a triple with this
+    validation's errors owned by the record (K13 source challenge confirmation, K15 primary evidence).
+    Approving a checked use is refused unless k13.use_current holds for it on the candidate (list
+    use_binding_problems). For `--status confirmed` of a source challenge, newly_affected is the
+    finding IDs having a triple with this
     challenge's ID in k14.affected_triples on the candidate but not on the current view.
     """
     _check_record_id(rec_id)
@@ -542,7 +549,7 @@ def decide(cfg: Config, rec_id: str, status: str, by: str, reason: str, expect: 
         kind = rec.kind
         match_expect(rec_id, decisions.subject_digest(kind, rec.data), expect)
         old = rec.status
-        if status == old and kind != "SC" and old != records.RETIRED:
+        if status == old and kind != "source-challenge" and old != records.RETIRED:
             raise StoreError(f"{rec_id} is already {status}; a decision that keeps the status belongs to "
                              f"kblam review rebind {rec_id} --by NAME --reason TEXT --expect D")
         problem = _transition(kind, old, status)
@@ -559,7 +566,7 @@ def decide(cfg: Config, rec_id: str, status: str, by: str, reason: str, expect: 
         if status == "approved":
             _check_approved_cu(cfg, candidate, records.parse_record(path, new_bytes), rec_id)
         result = _land(cfg, f"review decide {rec_id}", kind, rec_id, view, candidate, path, new_bytes)
-        if result.ok and kind == "SC" and status == "confirmed":
+        if result.ok and kind == "source-challenge" and status == "confirmed":
             result.newly_affected = _newly_affected(cfg, view, candidate, rec)
     return result
 
@@ -644,16 +651,19 @@ def rebind(cfg: Config, rec_id: str, by: str, reason: str, expect: str, evidence
            reopen: bool = False) -> WriteResult:
     """`kblam review rebind <ID> --by NAME --reason TEXT --expect D [--evidence ...]... [--reopen]`.
 
-    Only a CT or CU whose status is not stale (an SC is refused: "a challenge has no rebind; a changed
-    assertion or judgement is a new challenge"). match_expect on the digest before the rebind. The
-    finding must be installed once and parse. New bindings: CT claim_fingerprint and base_file_sha256
-    from the installed finding; CU finding_fingerprint and finding_file_sha256, challenge_bind = the
+    Only a claim task or checked use whose status is not stale (a source challenge is refused: "a
+    challenge has no rebind; a changed assertion or judgement is a new challenge"). match_expect on the
+    digest before the rebind. The finding must be installed once and parse. New bindings: a claim
+    task's claim_fingerprint and base_file_sha256 from the installed finding; a checked use's
+    finding_fingerprint and finding_file_sha256, challenge_bind = the
     challenge's current subject digest (refused unless the challenge is confirmed with an available
     source), and the citation: the excerpt at `ordinal` if its tag_sha256 still equals citation's,
     else the only excerpt with that tag_sha256 (ordinal, path, range updated); none or several: refuse
     and say to stage a new use (kblam use review ...). Then a decision with status open (reopen) or the
-    current status, checked as decide checks it (transition, independence; for a CU kept approved,
-    current once approved; for a closed CT, its primary evidence given again with --evidence and judged
+    current status, checked as decide checks it (transition, independence; for a checked use kept
+    approved,
+    current once approved; for a closed claim task, its primary evidence given again with --evidence and
+    judged
     by K15 on the candidate).
     """
     _check_record_id(rec_id)
@@ -666,7 +676,7 @@ def rebind(cfg: Config, rec_id: str, by: str, reason: str, expect: str, evidence
         reader = SourceReader(cfg, view)
         rec = _existing(view, cfg, rec_id)
         kind = rec.kind
-        if kind == "SC":
+        if kind == "source-challenge":
             raise StoreError(MESSAGE_NO_REBIND)
         if kind not in decisions.REBINDS:
             raise StoreError(f"{rec_id} is not a task or a use; only they rebind ({decisions.KIND_WORDS})")
@@ -677,7 +687,7 @@ def rebind(cfg: Config, rec_id: str, by: str, reason: str, expect: str, evidence
         match_expect(rec_id, decisions.subject_digest(kind, rec.data), expect)
         rebound = dict(rec.data)
         status = "open" if reopen else rec.status
-        if kind == "CT":
+        if kind == "claim-task":
             _rebind_task(cfg, view, rebound, rec_id, rec.status, reopen)
         else:
             _rebind_use(cfg, view, reader, rebound, rec_id, rec.status, reopen)
@@ -712,7 +722,7 @@ def _rebind_use(cfg: Config, view: KBView, reader: SourceReader, new_data: dict,
     fingerprint and file sha256, and the excerpt that still carries the cited tag_sha256."""
     challenge_id = new_data.get("challenge")
     challenge = _installed(view, challenge_id) if isinstance(challenge_id, str) else None
-    if challenge is None or challenge.kind != "SC":
+    if challenge is None or challenge.kind != "source-challenge":
         raise StoreError(f"the challenge {challenge_id} is not a record in {cfg.review_dir}/; restore it "
                          f"from git, then run {_rebind_hint(rec_id, status, reopen)}")
     info = k13.challenge_info(view, reader, challenge)
@@ -722,7 +732,8 @@ def _rebind_use(cfg: Config, view: KBView, reader: SourceReader, new_data: dict,
     if not info.available or info.digest is None:
         raise StoreError(f"the challenge {challenge_id}'s source is not available; restore the pinned "
                          f"version or the working file, then run {_rebind_hint(rec_id, status, reopen)}, "
-                         f"or stage a new use (kblam use review SC-… F-… <excerpt-ordinal> --by NAME "
+                         f"or stage a new use (kblam use review source-challenge-… F-… <excerpt-ordinal> "
+                         f"--by NAME "
                          f"--proponent NAME)")
     finding = _one_finding(cfg, view, new_data.get("finding"), rec_id, status, reopen)
     new_data["challenge_bind"] = info.digest
@@ -762,17 +773,18 @@ def _one_finding(cfg: Config, view: KBView, finding_id, rec_id: str, status: str
 
 
 def challenge_pin(cfg: Config, rec_id: str, expect: str, snapshot: str | None = None) -> WriteResult:
-    """`kblam challenge pin SC-… --expect D [--snapshot PATH]`: only for an open challenge whose source is
+    """`kblam challenge pin source-challenge-… --expect D [--snapshot PATH]`: only for an open challenge
+    whose source is
     available; match_expect first. Without --snapshot: gitpin.auto_pin(cfg, source.path,
     source.sha256) sets repo, commit and blob, and None is refused (say the HEAD blob does not hold
     exactly these bytes, and that --snapshot pins a copy). With --snapshot: the path must pass
     paths.syntax_problem and resolve to a file whose raw bytes hash to source.sha256, outside every
     source repository (its owning worktree, if any, is the repository root), not under a protected root
-    (paths.protected), and not the source itself; it is written to source.snapshot. An already pinned source (Git pin or snapshot) is refused. Only the pin fields
-    change; no decision is appended."""
+    (paths.protected), and not the source itself; it is written to source.snapshot. An already pinned
+    source (Git pin or snapshot) is refused. Only the pin fields change; no decision is appended."""
     _check_record_id(rec_id)
-    if not records.SC_ID_RE.fullmatch(rec_id):
-        raise StoreError(f"{rec_id} is not a challenge ID like SC-0001; only a challenge is pinned")
+    if not records.CHALLENGE_ID_RE.fullmatch(rec_id):
+        raise StoreError(f"{rec_id} is not a challenge ID like source-challenge-0001; only a challenge is pinned")
     if snapshot is not None:
         problem = paths.syntax_problem(snapshot)
         if problem:
@@ -782,7 +794,7 @@ def challenge_pin(cfg: Config, rec_id: str, expect: str, snapshot: str | None = 
         view = load_view(cfg)
         reader = SourceReader(cfg, view)
         rec = _existing(view, cfg, rec_id)
-        if rec.kind != "SC":
+        if rec.kind != "source-challenge":
             raise StoreError(f"{rec_id} is not a challenge; only a challenge is pinned")
         match_expect(rec_id, decisions.subject_digest(rec.kind, rec.data), expect)
         if rec.status != "open":
@@ -811,9 +823,9 @@ def challenge_pin(cfg: Config, rec_id: str, expect: str, snapshot: str | None = 
             _check_snapshot(cfg, rec_id, values["snapshot"], digest, _key(cfg, source_path))
         _set_pin(rec, values)
         new_bytes = records.dump(rec.meta)
-        path = _record_path(cfg, "SC", rec_id)
+        path = _record_path(cfg, "source-challenge", rec_id)
         candidate = _candidate(cfg, view, path, new_bytes)
-        result = _land(cfg, f"challenge pin {rec_id}", "SC", rec_id, view, candidate, path, new_bytes)
+        result = _land(cfg, f"challenge pin {rec_id}", "source-challenge", rec_id, view, candidate, path, new_bytes)
     return result
 
 
@@ -1012,7 +1024,7 @@ def _key(cfg: Config, raw) -> str | None:
 
 def _show_command(rec_id: str) -> str:
     """"show" for --expect's message: the command that prints the record's subject digest."""
-    word = decisions.KIND_WORDS.get(rec_id.split("-")[0], "")
+    word = decisions.KIND_WORDS.get(rec_id.rsplit("-", 1)[0], "")
     return f"kblam {word} show {rec_id}" if word in ("challenge", "task") else "kblam review list"
 
 
@@ -1031,7 +1043,8 @@ def _transition(kind: str, old: str, new: str) -> str | None:
 
 def _check_record_id(rec_id: str) -> None:
     if not (isinstance(rec_id, str) and records.ID_RE.fullmatch(rec_id)):
-        raise StoreError(f"{rec_id!r} is not a record ID like SC-0001, CT-0001 or CU-0001")
+        raise StoreError(f"{rec_id!r} is not a record ID like source-challenge-0001, claim-task-0001 or "
+                         f"checked-use-0001")
 
 
 def _check_name(by: str) -> None:

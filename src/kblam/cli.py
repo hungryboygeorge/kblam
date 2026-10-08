@@ -1,5 +1,5 @@
 """Command-line entry point: `kblam <command>` (SPEC §7; M1-M3, M5, M6 and M6.5 commands, and the
-§5.2.5 source challenge, claim task and reviewed use commands). Exit codes: EXIT_HELP."""
+§5.2.5 source challenge, claim task and checked use commands). Exit codes: EXIT_HELP."""
 
 from __future__ import annotations
 
@@ -219,14 +219,15 @@ def _rebind_command(rec_id: str, view) -> str:
 
 
 def _stale_line(command: str, rec_id: str, finding_id: str, view) -> str:
-    """The line a finding write prints for a CT or CU it made stale by changing `finding_id` (SPEC §5.2.4;
-    `put`, and `renumber` for a dependent it re-keyed), with the rebind command for it."""
+    """The line a finding write prints for a claim task or checked use it made stale by changing
+    `finding_id` (SPEC §5.2.4; `put`, and `renumber` for a dependent it re-keyed), with the rebind
+    command for it."""
     return (f"kblam {command}: {rec_id} is now stale (this {command} changed {finding_id}, which it is bound "
             f"to); a reviewer rechecks it and runs {_rebind_command(rec_id, view)}. kblam validate fails until then")
 
 
 def _cmd_put(cfg, args) -> int:
-    if records.FILENAME_RE.match(Path(args.file).name):  # an SC-/CT-/CU- file: a record put (§5.2.5)
+    if records.FILENAME_RE.match(Path(args.file).name):  # a source-challenge-/claim-task-/checked-use- file
         return _write_result(cfg, "put", review_write.put_record(cfg, Path(args.file)))
     result = put(cfg, Path(args.file), client_factory=JevClient)
     # Errors that were in findings/ before this put do not block it (SPEC §7 put, Validation); they are printed as
@@ -287,7 +288,7 @@ def _cmd_put(cfg, args) -> int:
     return EXIT_OK
 
 
-# --- source challenges, claim tasks, reviewed uses and decisions (SPEC §5.2.5) -------------------
+# --- source challenges, claim tasks, checked uses and decisions (SPEC §5.2.5) ---------------------
 
 
 def _print_text(text: str) -> None:
@@ -999,8 +1000,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("edit", help="stage a copy of an existing finding for rewriting and print its path")
     p.add_argument("id")
     p.set_defaults(func=_cmd_edit)
-    p = sub.add_parser("put", help="validate and move a staged finding into findings/, or a staged SC-/CT-/"
-                                   "CU- record into the review root")
+    p = sub.add_parser("put", help="validate and move a staged finding into findings/, or a staged review "
+                                   "record (source-challenge, claim-task or checked-use) into the review root")
     p.add_argument("file")
     p.set_defaults(func=_cmd_put)
     p = sub.add_parser("ack", help="after re-reading the target, record its current fingerprint in the "
@@ -1088,11 +1089,11 @@ def build_parser() -> argparse.ArgumentParser:
     _add_by(s)
     s.set_defaults(func=_cmd_challenge_new, command_name="challenge new")
     s = ch.add_parser("edit", help="stage a copy of an open challenge for rewriting and print its path")
-    s.add_argument("id", metavar="SC-NNNN")
+    s.add_argument("id", metavar="source-challenge-NNNN")
     s.set_defaults(func=_cmd_challenge_edit, command_name="challenge edit")
     s = ch.add_parser("pin", help="pin an open challenge's source to its owner's HEAD commit, or to a "
                                   "snapshot whose bytes hash to it")
-    s.add_argument("id", metavar="SC-NNNN")
+    s.add_argument("id", metavar="source-challenge-NNNN")
     _add_expect(s)
     s.add_argument("--snapshot", metavar="PATH",
                    help="a project-owned copy of the source's bytes, outside every source repository")
@@ -1100,11 +1101,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = ch.add_parser("show", help="print a challenge: subject digest, source version and state, the "
                                    "assertion, the basis, the usable remainder, the limits, its findings "
                                    "and its decisions")
-    s.add_argument("id", metavar="SC-NNNN")
+    s.add_argument("id", metavar="source-challenge-NNNN")
     s.set_defaults(func=_cmd_challenge_show, command_name="challenge show")
     s = ch.add_parser("uses", help="print every finding excerpt K14 relates to a confirmed challenge, and "
                                    "the command that fixes each")
-    s.add_argument("id", metavar="SC-NNNN")
+    s.add_argument("id", metavar="source-challenge-NNNN")
     s.set_defaults(func=_cmd_challenge_uses, command_name="challenge uses")
 
     p = sub.add_parser("task", help="claim tasks (§5.2.5): new or edit stages one, put installs it, decide "
@@ -1118,19 +1119,19 @@ def build_parser() -> argparse.ArgumentParser:
     _add_proponent(s)
     s.set_defaults(func=_cmd_task_new, command_name="task new")
     s = ta.add_parser("edit", help="stage a copy of an open task for rewriting and print its path")
-    s.add_argument("id", metavar="CT-NNNN")
+    s.add_argument("id", metavar="claim-task-NNNN")
     s.set_defaults(func=_cmd_task_edit, command_name="task edit")
     s = ta.add_parser("show", help="print a task: subject digest, kind, finding, proponent, its binding, "
                                    "the plan and the decisions")
-    s.add_argument("id", metavar="CT-NNNN")
+    s.add_argument("id", metavar="claim-task-NNNN")
     s.set_defaults(func=_cmd_task_show, command_name="task show")
 
-    p = sub.add_parser("use", help="reviewed uses (§5.2.5): review stages one for a confirmed challenge's "
+    p = sub.add_parser("use", help="checked uses (§5.2.5): review stages one for a confirmed challenge's "
                                    "affected excerpt")
     us = p.add_subparsers(dest="use_command", required=True, metavar="COMMAND")
     s = us.add_parser("review", help="stage a use of an affected excerpt of an installed finding and print "
                                      "the staged path")
-    s.add_argument("challenge", metavar="SC-NNNN")
+    s.add_argument("challenge", metavar="source-challenge-NNNN")
     s.add_argument("finding", metavar="F-NNNN")
     s.add_argument("ordinal", type=int, metavar="ORDINAL",
                    help="the finding's verbatim excerpt, 1-based among its tags")

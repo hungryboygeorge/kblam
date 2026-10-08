@@ -73,10 +73,10 @@ def test_review_root_containing_kb_root_refused(kb):
 def test_issue_level_owner_and_format(kb):
     view = KBView(cfg=kb.cfg, files={})
     error = Issue("findings/a/F-0001-x.md", 3, "K1", "bad")
-    warning = Issue("research-review/challenges/SC-0001.yaml", 0, "K13", "stale source", "warning", "SC-0001")
+    warning = Issue("research-review/challenges/source-challenge-0001.yaml", 0, "K13", "stale source", "warning", "source-challenge-0001")
     assert (error.level, error.owner) == ("error", "")
     assert error.format(view) == "K1 findings/a/F-0001-x.md:3: bad"
-    assert warning.format(view) == "K13 warning research-review/challenges/SC-0001.yaml: stale source"
+    assert warning.format(view) == "K13 warning research-review/challenges/source-challenge-0001.yaml: stale source"
     assert errors([error, warning]) == [error]
 
 
@@ -87,7 +87,7 @@ def test_source_repo_fixture(source_repo):
     assert source_repo.snapshot() == before
 
 
-@pytest.mark.parametrize("kind", ["SC", "CT", "CU"])
+@pytest.mark.parametrize("kind", ["source-challenge", "claim-task", "checked-use"])
 def test_record_text_parses(kind):
     data = plain_data(yaml_rt().load(record_text(kind)))
     assert data["id"] == f"{kind}-0001" and data["status"] == "open" and data["decisions"] == []
