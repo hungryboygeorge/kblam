@@ -243,14 +243,15 @@ class SourceRepo:
 
     def own_git_dir(self) -> Path | None:
         """<root>/.git where it is the directory `git -C <root>` uses: HEAD naming a ref or an object
-        ID, objects/ and refs/, no commondir, and no variable sending git elsewhere. None otherwise (a
-        gitfile, a linked worktree, a directory git would pass over)."""
+        ID, objects/ and refs/, no commondir, no reftable/ (git 2.45 and later keep the refs in that
+        directory, which the fast snapshot would miss), and no variable sending git elsewhere. None
+        otherwise (a gitfile, a linked worktree, a directory git would pass over)."""
         dot = self.root / ".git"
         if any(name in os.environ for name in GIT_LOCATION_VARIABLES) or not dot.is_dir():
             return None
         head = dot / "HEAD"
         if not (head.is_file() and (dot / "objects").is_dir() and (dot / "refs").is_dir()) \
-                or os.path.lexists(dot / "commondir"):
+                or os.path.lexists(dot / "commondir") or os.path.lexists(dot / "reftable"):
             return None
         return dot if re.fullmatch(rb"ref: refs/[^\n]+\n|[0-9a-f]{40}\n|[0-9a-f]{64}\n",
                                    head.read_bytes()) else None

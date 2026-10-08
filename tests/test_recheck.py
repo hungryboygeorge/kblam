@@ -679,8 +679,88 @@ def test_a_check_past_the_timeout_is_killed_with_every_process_it_started(kb, ca
     assert "raise [kb] recheck_timeout_seconds" in out
     assert log_lines(kb)[-1]["outcome"] == "timed_out"
     kb.write("go", "")
-    time.sleep(1.5)  # a surviving grandchild looks for `go` every 10 ms
-    assert not (kb.root / "survived").exists()
+    # A surviving grandchild looks for `go` every 10 ms, but a loaded machine may not schedule it for a
+    # while: wait up to 3 s for the file it would write, and fail as soon as it appears.
+    survived, deadline = kb.root / "survived", time.monotonic() + 3
+    while not survived.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not survived.exists()
+
+
+# A check that starts a grandchild inheriting its output and exits at once: the grandchild holds the file
+# kblam writes the log to open, which on Windows stops that file from being replaced.
+HOLDING_GRANDCHILD = """\
+import time
+open('grandchild', 'w').close()
+time.sleep(4)
+open('grandchild-gone', 'w').close()
+"""
+HOLDING_CHECK = f"""\
+import os, subprocess, sys, time
+subprocess.Popen([sys.executable, "-c", {HOLDING_GRANDCHILD!r}])
+while not os.path.exists('grandchild'):
+    time.sleep(0.01)
+print("check output", flush=True)
+"""
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="only Windows refuses to replace a file a process holds open")
+def test_a_check_that_leaves_a_process_holding_its_output_still_writes_its_log(kb, capsys, monkeypatch):
+    """A process the check starts inherits its output and outlives it, so Windows refuses to replace the
+    log's file (Python opens it without FILE_SHARE_DELETE): kblam copies the bytes into place instead, and
+    the result line says what the log then holds. Once that process has exited, the next run finds and
+    removes the temporary file it left and runs clean."""
+    kb.write(f"{EVIDENCE}/hold.py", HOLDING_CHECK)
+    add_check(kb, "F-0001", f"{PY} {EVIDENCE}/hold.py")
+    code, out, err = run(kb, capsys, monkeypatch, answers=["y"])
+    assert code == 0 and "Traceback" not in out + err
+    assert ("kblam recheck: F-0001 passed (exit 0; a process it started was still running and holding its "
+            "output, so the log holds only what the check wrote before it exited after ") in out
+    logs = kb.root / ".kblam/recheck"
+    assert (logs / "F-0001.log").read_text(encoding="utf-8").strip() == "check output"
+    assert log_lines(kb)[-1]["outcome"] == "passed"
+    assert list(logs.glob(".F-0001.*.tmp"))                # the grandchild still held the temporary file
+
+    deadline = time.monotonic() + 30                       # the grandchild exits by itself, four seconds on
+    while not (kb.root / "grandchild-gone").exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert (kb.root / "grandchild-gone").exists()          # no process is left behind
+
+    kb.write(MARK, MARK_SCRIPT)                            # a check that leaves nothing running
+    add_check(kb, "F-0001", mark("F-0001"))
+    code, out, _ = run(kb, capsys, monkeypatch, answers=["y"])
+    assert code == 0 and "F-0001 passed (exit 0 after " in out
+    assert list(logs.glob(".F-0001.*.tmp")) == []          # the run removed the leftover it found
+
+
+def test_a_log_that_cannot_be_saved_names_the_command_to_run_again(mkb, capsys, monkeypatch):
+    """Where the log cannot be replaced and the copy into place fails too -- a process the check started
+    still holds the file open -- kblam prints what it could not save, why and what to run once that
+    process has exited, as a refusal with no traceback, and leaves no temporary file behind."""
+    add_check(mkb, "F-0001", mark("F-0001"))
+    assert run(mkb, capsys, monkeypatch, answers=["y"])[0] == 0
+
+    real_replace = os.replace
+
+    def refuses_the_log(source, target, *args, **kwargs):
+        if str(target).endswith("F-0001.log"):
+            raise PermissionError(13, "Permission denied")
+        return real_replace(source, target, *args, **kwargs)
+
+    def copy_fails(*args):
+        raise OSError(13, "Permission denied")
+
+    monkeypatch.setattr(os, "replace", refuses_the_log)
+    monkeypatch.setattr(recheck, "REPLACE_RETRY_SECONDS", 0)
+    monkeypatch.setattr(recheck, "_copy_output", copy_fails)
+
+    code, out, err = run(mkb, capsys, monkeypatch)
+    assert code == 1 and "Traceback" not in err
+    assert err == ("kblam recheck: could not save F-0001's output to .kblam/recheck/F-0001.log (Permission "
+                   "denied), because a process the check started still holds it open; run kblam recheck "
+                   "F-0001 again once that process has exited; if it fails again, leave it as it is and "
+                   "tell the user\n")
+    assert list((mkb.root / ".kblam/recheck").glob(".F-0001.*.tmp")) == []
 
 
 def test_a_command_that_cannot_run_is_a_failure(kb, capsys, monkeypatch):

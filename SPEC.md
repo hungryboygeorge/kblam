@@ -1914,18 +1914,20 @@ third party puts into the knowledge base, not an agent on this machine set on ru
   passes when it exits 0. It fails on any other exit or a signal, and on running past `[kb]
   recheck_timeout_seconds` (§9, default 600), when it and every process it started are killed
   (`killpg`; on Windows the check starts suspended in a job object of its own, which is terminated,
-  and `taskkill /T` by full path where no job can be made). A string that cannot be split, or a program
-  that is not found, is reported without asking and counts as a failure, as does a program that
-  cannot be started.
-- *Output.* A line as each approved check starts, and one with its result. For a failure, the last
-  20 lines of output follow, with control characters escaped, then what to do. Last comes a summary
-  line, which ends with the skill pointer when the exit status is 1. The exit status is 0 when every
-  selected check passed, or when no finding has a check, and 1 otherwise, including when a finding
-  cannot be read, its `check:` is not a string, or a selected check was not approved (so a run that
-  only printed blocks to approve exits 1); with no IDs given, such a finding is reported and
-  the rest still run. An ID that is malformed, not in the KB, unreadable, or without a `check:`
-  refuses the whole run before anything runs. `--list` runs nothing: it prints each command with its
-  state (approved; not approved, and why; or cannot run, and why) and exits 0.
+  and `taskkill /T` by full path where no job can be made or terminated). A string that cannot be
+  split, or a program that is not found, is reported without asking and counts as a failure, as does
+  a program that cannot be started.
+- *Output.* A line as each approved check starts, and one with its result. When a process the check
+  started still holds its output when the log is saved (Windows cannot replace a file a process holds
+  open), the log holds what was written until the check exited, and the result line says so. For a
+  failure, the last 20 lines of output follow, with control characters escaped, then what to do. Last
+  comes a summary line, which ends with the skill pointer when the exit status is 1. The exit status
+  is 0 when every selected check passed, or when no finding has a check, and 1 otherwise, including
+  when a finding cannot be read, its `check:` is not a string, or a selected check was not approved
+  (so a run that only printed blocks to approve exits 1); with no IDs given, such a finding is
+  reported and the rest still run. An ID that is malformed, not in the KB, unreadable, or without a
+  `check:` refuses the whole run before anything runs. `--list` runs nothing: it prints each command
+  with its state (approved; not approved, and why; or cannot run, and why) and exits 0.
 - *Logs.* `.kblam/recheck.jsonl` gets one line for each check a run considered: time, ID,
   fingerprint, command sha256, the pinned files with their digests, outcome (`passed`, `failed`,
   `timed_out`, `not_started`, `not_approved` or `declined`), exit code, seconds, whether a terminal
@@ -2056,10 +2058,11 @@ Research agents write code and scratch files freely; nothing below touches paths
 write under it is denied with "kblam: <what> under research-review/ denied. Review records are
 written only by kblam: stage one with kblam challenge new, kblam task new or kblam use review (or
 kblam challenge/task edit), edit it under .kblam/review-staging/, then kblam put it." plus the skill
-pointer. Removal of a record file (`source-challenge-*.yaml`, `claim-task-*.yaml`,
-`checked-use-*.yaml`), a kind folder or the root itself is denied too, as under `.kblam/`; removing
-any other stray file is allowed (it is how a K13 stray-file error is fixed). The hook is only a
-first line: the record-ID registry (§5.2.6) makes `validate` report a record removed by any means.
+pointer. Removal of a record file (`source-challenge-NNNN.yaml`, `claim-task-NNNN.yaml` or
+`checked-use-NNNN.yaml`, four or more digits), of a glob that could name one, of a kind folder or of
+the root itself is denied too, as under `.kblam/`; removing any other stray file is allowed (it is
+how a K13 stray-file error is fixed). The hook is only a first line: the record-ID registry (§5.2.6)
+makes `validate` report a record removed by any means.
 `.kblam/review-staging/` is exempt from the `.kblam/` rule, as `.kblam/staging/` is;
 `.kblam/review-receipts/` is not, since receipts are kblam's state. The Stop hook's digest (format
 2, §5.2.6) covers both roots, so an out-of-band change to either is validated. Stop does not

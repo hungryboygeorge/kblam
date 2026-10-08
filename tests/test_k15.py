@@ -35,7 +35,7 @@ def finding_of(view, finding_id: str = "F-0001"):
 
 
 def task_data(view, rec_id: str = CT, **fields) -> dict:
-    """A CT bound to F-0001 as `view` now holds it; `fields` replace top-level keys."""
+    """A claim task bound to F-0001 as `view` now holds it; `fields` replace top-level keys."""
     finding = finding_of(view)
     data = record_data("claim-task", rec_id)
     data["claim_fingerprint"] = fingerprint(finding, view.cfg.scope_separator)

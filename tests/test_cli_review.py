@@ -9,6 +9,7 @@ import datetime
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -118,6 +119,17 @@ def registry_ids(kb):
     """The registry's contents, or None when the file does not exist."""
     path = kb.root / ".kblam/review-ids"
     return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+
+
+def git(kb, *args: str) -> str:
+    """git in the fixture repository, with a fixture identity, no signing and no line-ending conversion,
+    so a committed record file comes back byte-identical; GIT_* from a surrounding hook cannot redirect
+    it."""
+    env = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
+    done = subprocess.run(["git", "-c", "user.name=kblam test", "-c", "user.email=test@example.com",
+                           "-c", "commit.gpgsign=false", "-c", "core.autocrlf=false", *args],
+                          cwd=kb.root, check=True, capture_output=True, text=True, env=env)
+    return done.stdout.strip()
 
 
 def staged_sc(kb, capsys, source_repo, *, lines: str = "3-3") -> Path:
@@ -585,6 +597,35 @@ def test_forgetting_stands_when_the_validation_after_it_fails(kb, source_repo, c
     assert any(line.startswith("K4 findings/calibration/F-0002-history.md:") for line in lines)
     assert lines[-1] == "kblam validate: 1 error(s) in findings/; tree.hash not recorded"
     assert registry_ids(kb) == []
+
+
+def test_a_missing_record_git_still_holds_names_a_restore_an_agent_can_run(kb, capsys):
+    """D49 for the K13 line a registered ID with no record gets: where git's last commit holds the record's
+    file, the line names the git restore that puts the recorded bytes back, and running exactly that
+    command leaves validate clean."""
+    path = f"{CHALLENGES}/source-challenge-0001.yaml"
+    text = record_text("source-challenge", "source-challenge-0001")
+    kb.write(path, text)
+    accept_tree(kb, capsys)
+    assert run(kb, "review", "index") == 0                    # the registry holds the ID
+    capsys.readouterr()
+    kb.write(".gitignore", ".kblam/\n")                       # as kblam init leaves it: no commit holds kblam's state
+    git(kb, "init", "-q")
+    git(kb, "add", "-A")
+    git(kb, "commit", "-q", "-m", "the record as it was")
+
+    (kb.root / path).unlink()                                 # the record removed outside the hook
+
+    assert run(kb, "validate", "--record") == 1
+    lines = capsys.readouterr().out.splitlines()
+    assert (f"K13 {path}: source-challenge-0001 is missing from {REVIEW}/; records are never deleted or "
+            f"renamed; restore the record's file from git (git restore --source=HEAD --staged --worktree "
+            f"{path}), which puts back the file as git's last commit holds it and undoes any kblam put or "
+            f"decision made to it since; if one was, leave it as it is and tell the user instead") in lines
+
+    git(kb, "restore", "--source=HEAD", "--staged", "--worktree", path)   # the command the line names
+    assert (kb.root / path).read_text(encoding="utf-8") == text
+    assert run(kb, "validate", "--record") == 0
 
 
 def test_the_error_count_names_each_root_that_holds_an_error(kb, source_repo, capsys):

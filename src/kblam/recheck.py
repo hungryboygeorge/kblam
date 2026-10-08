@@ -39,6 +39,7 @@ import hashlib
 import json
 import os
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -63,6 +64,16 @@ LOG_NAME = "recheck.jsonl"                 # .kblam/: one line per check a run c
 OUTPUT_DIR = "recheck"                     # .kblam/recheck/F-NNNN.log: the output of that check's last run
 TAIL_LINES = 20                            # output lines printed for a check that failed
 TAIL_WIDTH = 300                           # characters printed of one such line
+# How long the output file is tried again, and how often, when the operating system refuses to replace it
+# because a process the check started still holds it open (Windows: Python opens files without
+# FILE_SHARE_DELETE, so the rename fails while such a process lives). Bounded, so a process that never
+# exits cannot hang the run.
+REPLACE_RETRY_SECONDS = 2.0
+REPLACE_RETRY_INTERVAL = 0.1
+# What the result line adds when the log could only be copied into place that way: it holds what the check
+# wrote until it exited, and nothing a process it started wrote afterwards.
+HELD_OUTPUT_DETAIL = ("; a process it started was still running and holding its output, so the log holds "
+                      "only what the check wrote before it exited")
 BATCH_SUFFIXES = (".bat", ".cmd")          # Windows runs these through cmd.exe, which re-parses arguments
 # The two check problems that name no step the reader can take, so cli._approve adds one when it refuses
 # to approve such a check (SPEC §7).
@@ -466,15 +477,15 @@ def run_check(cfg: Config, check: Check) -> Outcome:
     target = output_path(cfg, check.finding_id)
     check_state_paths(cfg)
     target.parent.mkdir(parents=True, exist_ok=True)
+    _remove_leftovers(target.parent, check.finding_id)
     fd, temporary = tempfile.mkstemp(dir=target.parent, prefix=f".{check.finding_id}.", suffix=".tmp")
     start = time.monotonic()
     try:
         with os.fdopen(fd, "wb") as output:
             code, problem = _run(cfg, check, output)
-        os.replace(temporary, target)
+        moved = _move_output(cfg, check, temporary, target)
     except BaseException:
-        if os.path.exists(temporary):
-            os.remove(temporary)
+        _remove(temporary)
         raise
     if problem is not None:
         return Outcome("not_started", detail=problem)
@@ -483,9 +494,68 @@ def run_check(cfg: Config, check: Check) -> Outcome:
     if code is None:
         return Outcome("timed_out", None, seconds, f"timed out after {cfg.recheck_timeout_seconds:g} s; it "
                                                    f"and every process it started were killed", tail)
+    held = "" if moved else HELD_OUTPUT_DETAIL
     if code == 0:
-        return Outcome("passed", 0, seconds, "exit 0", tail)
-    return Outcome("failed", code, seconds, f"killed by signal {-code}" if code < 0 else f"exit {code}", tail)
+        return Outcome("passed", 0, seconds, f"exit 0{held}", tail)
+    return Outcome("failed", code, seconds, (f"killed by signal {-code}" if code < 0 else f"exit {code}") + held, tail)
+
+
+def _remove_leftovers(directory: Path, finding_id: str) -> None:
+    """Best-effort removal of the temporary output files earlier runs left behind: a process a check
+    started may have held one open past the end of its run, and nothing else removes it (agents may not
+    delete anything under .kblam/)."""
+    for leftover in directory.glob(f".{finding_id}.*.tmp"):
+        _remove(str(leftover))
+
+
+def _remove(path: str) -> None:
+    """Remove a file, ignoring a refusal: a process the check started may still hold it open, in which case
+    the next run's sweep removes it, and a run must not fail over a file it no longer needs."""
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _move_output(cfg: Config, check: Check, temporary: str, target: Path) -> bool:
+    """Put the check's output at `target`: os.replace, tried again for REPLACE_RETRY_SECONDS while the
+    operating system refuses the rename because a process the check started still holds the file open
+    (Windows: Python opens a file without FILE_SHARE_DELETE, so the rename fails while such a process
+    lives). False when it never became possible: the bytes (readable while shared) are then copied into
+    `target` from a second temporary file, so the log, and the tail printed from it, still exist.
+    RecheckError when even that copy failed."""
+    deadline = time.monotonic() + REPLACE_RETRY_SECONDS
+    while True:
+        try:
+            os.replace(temporary, target)
+            return True
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(REPLACE_RETRY_INTERVAL)
+    try:
+        _copy_output(temporary, target, check.finding_id)
+    except OSError as exc:
+        raise RecheckError(f"could not save {check.finding_id}'s output to {shown_path(cfg, target)} "
+                           f"({exc.strerror or exc}), because a process the check started still holds it "
+                           f"open; run kblam recheck {check.finding_id} again once that process has exited; "
+                           f"if it fails again, leave it as it is and tell the user") from None
+    _remove(temporary)
+    return False
+
+
+def _copy_output(source: str, target: Path, finding_id: str) -> None:
+    """Copy `source`'s bytes into a new file beside `target`, which then replaces `target`: the one way to
+    put the log in place while a process still holds `source` open, since the bytes can be read but the
+    file itself cannot be replaced."""
+    fd, copied = tempfile.mkstemp(dir=target.parent, prefix=f".{finding_id}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as destination, open(source, "rb") as origin:
+            shutil.copyfileobj(origin, destination)
+        os.replace(copied, target)
+    except OSError:
+        _remove(copied)
+        raise
 
 
 def _run(cfg: Config, check: Check, output) -> tuple[int | None, str | None]:
@@ -535,24 +605,25 @@ class _Job:
     """A Windows job object holding a check and every process it starts. A process tree walk (taskkill
     /T) misses a process the check starts while the walk is under way; a job also holds that one, so
     TerminateJobObject kills them all. The check is resumed only once it is in the job, so nothing it
-    starts is outside it. Where no job can be made (handle None), _stop falls back to taskkill /T.
-    Closing the handle kills nothing: what a check leaves running after it exits keeps running, as on
-    POSIX."""
+    starts is outside it. Where no job can be made or none can be terminated, _stop falls back to
+    taskkill /T. Closing the handle kills nothing: what a check leaves running after it exits keeps
+    running, as on POSIX."""
 
     def __init__(self, process: subprocess.Popen):
         self.win32 = _win32()
-        self.handle = self.win32.kernel32.CreateJobObjectW(None, None)
-        if self.handle:
-            access = 0x0001 | 0x0100  # PROCESS_TERMINATE | PROCESS_SET_QUOTA, as AssignProcessToJobObject needs
-            target = self.win32.kernel32.OpenProcess(access, False, process.pid)
-            assigned = bool(target) and bool(self.win32.kernel32.AssignProcessToJobObject(self.handle, target))
-            if target:
-                self.win32.kernel32.CloseHandle(target)
-            if not assigned:
-                self.close()
+        self.handle = None
         try:
+            self.handle = self.win32.kernel32.CreateJobObjectW(None, None)
+            if self.handle:
+                access = 0x0001 | 0x0100  # PROCESS_TERMINATE | PROCESS_SET_QUOTA, as AssignProcessToJobObject needs
+                target = self.win32.kernel32.OpenProcess(access, False, process.pid)
+                assigned = bool(target) and bool(self.win32.kernel32.AssignProcessToJobObject(self.handle, target))
+                if target:
+                    self.win32.kernel32.CloseHandle(target)
+                if not assigned:
+                    self.close()
             _resume(process.pid)
-        except OSError:
+        except BaseException:  # including KeyboardInterrupt: the job's handle is closed before it goes on
             self.close()
             raise
 
@@ -560,20 +631,24 @@ class _Job:
         """Kill every process in the job, then wait up to STOP_WAIT_SECONDS for each to have exited, so
         that none still holds the check's output file open; False when there is no job or it could not
         be terminated. TerminateJobObject returns before its processes are gone, and a process leaves the
-        job's list before its handles are closed, so the processes are opened before they are killed."""
+        job's list before its handles are closed, so the processes are opened before they are killed; a
+        process the check starts between that query and the kill is killed too, and a second query, within
+        the same deadline, waits for it as well. Every handle is closed on every path."""
         if not self.handle:
             return False
         kernel32 = self.win32.kernel32
         members = self._members()
+        started = []
         try:
             if not kernel32.TerminateJobObject(self.handle, 1):
                 return False
+            started = self._members()  # one started after the query above: killed by the call, not yet waited for
             deadline = time.monotonic() + STOP_WAIT_SECONDS
-            for member in members:
+            for member in members + started:
                 kernel32.WaitForSingleObject(member, max(0, int((deadline - time.monotonic()) * 1000)))
             return True
         finally:
-            for member in members:
+            for member in members + started:
                 kernel32.CloseHandle(member)
 
     def _members(self) -> list:
