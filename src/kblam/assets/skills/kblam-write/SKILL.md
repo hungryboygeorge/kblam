@@ -107,16 +107,16 @@ Jev and quantity rejects (exit 4) report every verdict that fired, review ones i
 
 ## Source challenges and claim tasks
 
-`{{review_root}}/` holds three kinds of record: **source challenges** (`SC-…`, under `challenges/`),
-**claim tasks** (`CT-…`, under `tasks/`) and **reviewed uses** (`CU-…`, under `uses/`). A challenge
-says a quoted passage of a source is contradicted, unsupported or from the wrong model; a task asks
-for work that would confirm or refute a finding's claim; a use records that an excerpt quotes a
-confirmed challenge's assertion but draws only on bytes the challenge leaves alone. They are written
-like findings: draft one with the kblam command below, edit it under `.kblam/review-staging/`, then
-`kblam put` it. A write under `{{review_root}}/` or `.kblam/review-receipts/` is denied, and so is
-removing a record file, a kind folder or the review root itself, because the records and the receipts
-are kblam's to write; removing a stray file there is yours to do, and it is how a K13 stray-file error
-is fixed.
+`{{review_root}}/` holds three kinds of record: **source challenges** (`source-challenge-…`, under
+`challenges/`), **claim tasks** (`claim-task-…`, under `tasks/`) and **checked uses**
+(`checked-use-…`, under `uses/`). A challenge says a quoted passage of a source is contradicted,
+unsupported or from the wrong model; a task asks for work that would confirm or refute a finding's
+claim; a use records that an excerpt quotes a confirmed challenge's assertion but draws only on
+bytes the challenge leaves alone. They are written like findings: draft one with the kblam command
+below, edit it under `.kblam/review-staging/`, then `kblam put` it. A write under `{{review_root}}/`
+or `.kblam/review-receipts/` is denied, and so is removing a record file, a kind folder or the
+review root itself, because the records and the receipts are kblam's to write; removing a stray file
+there is yours to do, and it is how a K13 stray-file error is fixed.
 
 **Challenging a source.** `kblam challenge new <source-path> --lines A-B --by NAME` captures lines A-B
 exactly as the assertion and stages the record, already pinned when the source's committed bytes are
@@ -130,50 +130,54 @@ An independent reviewer reads the record, fixes the source version and decides -
 because pinning changes the subject digest that `--expect D` takes:
 
 ```
-kblam challenge show SC-0001
-kblam challenge pin SC-0001 --expect D
-kblam challenge show SC-0001
-kblam review decide SC-0001 --status confirmed --by NAME --reason TEXT --expect D --evidence PROVENANCE:PATH:LOCATOR
+kblam challenge show source-challenge-0001
+kblam challenge pin source-challenge-0001 --expect D
+kblam challenge show source-challenge-0001
+kblam review decide source-challenge-0001 --status confirmed --by NAME --reason TEXT --expect D --evidence PROVENANCE:PATH:LOCATOR
 ```
 
 Each `show` prints the digest for the next command's `--expect D`, or at least its first 12 hex
-digits; a command refuses with "SC-0001 changed since you inspected it; show it again" when the record
-changed since. Pin only what is still provisional: a challenge on a source whose committed bytes are
-the working ones is pinned already and `pin` refuses it ("a pin is never replaced"), while a
-successful pin changes the digest, so `show` again before deciding. A dirty working file is pinned by
-committing the exact bytes it holds; a CRLF checkout is not, because the commit holds the LF bytes
-while the working bytes differ, so a project with a normalizing checkout (`core.autocrlf`) pins it
-with `--snapshot PATH`, a project-owned copy of those bytes. "only an open challenge can be pinned".
+digits; a command refuses with "source-challenge-0001 changed since you inspected it; show it again"
+when the record changed since. Pin only what is still provisional: a challenge on a source whose
+committed bytes are the working ones is pinned already and `pin` refuses it ("a pin is never
+replaced"), while a successful pin changes the digest, so `show` again before deciding. A dirty
+working file is pinned by committing the exact bytes it holds; a CRLF checkout is not, because the
+commit holds the LF bytes while the working bytes differ, so a project with a normalizing checkout
+(`core.autocrlf`) pins it with `--snapshot PATH`, a project-owned copy of those bytes. "only an open
+challenge can be pinned".
 
 **What a confirmation needs.** The source must be available and pinned, every `basis` entry must be
 available, and at least one must be primary support: a provenance in `[review] primary_provenance`
-whose path is outside the knowledge base, the review root and the history folders. A paraphrase in the
-knowledge base is not primary support, and `--evidence` on `decide` does not stand in for one:
+whose path is outside the knowledge base, the review root and the history folders. A paraphrase in
+the knowledge base is not primary support, and `--evidence` on `decide` does not stand in for one:
 confirming without it is refused with "with no primary support; a confirmation needs a basis entry
 whose provenance is one of observed, decoded". A `contradicted` challenge also needs a basis entry
 with role `counterevidence` or `internal-inconsistency`, and a `wrong_model` one a `model-mismatch`
 entry ("no basis entry has role counterevidence or internal-inconsistency", "no basis entry has role
-model-mismatch"). The challenge is still open while that is fixed: `kblam challenge edit SC-0001`,
-amend the basis, put it, `show` it again and decide. A challenge is confirmed or rejected by someone
-other than its creator; a confirmed challenge is never reopened, only retired (`--status stale`), and
-that retirement needs someone other than its creator too.
+model-mismatch"). The challenge is still open while that is fixed:
+`kblam challenge edit source-challenge-0001`, amend the basis, put it, `show` it again and decide. A
+challenge is confirmed or rejected by someone other than its creator; a confirmed challenge is never
+reopened, only retired (`--status stale`), and that retirement needs someone other than its creator
+too.
 
-**After a confirmation.** `kblam challenge uses SC-0001` lists every finding excerpt the challenge
-affects, each with the command that fixes it. Edit the finding: narrow the claim to what the usable
-remainder supports, or remove the excerpt. Where the finding draws only on the raw bytes, anyone may
-draft a use: `kblam use review SC-0001 F-0012 2 --by NAME --proponent NAME` (the proponent is the
+**After a confirmation.** `kblam challenge uses source-challenge-0001` lists every finding excerpt
+the challenge affects, each with the command that fixes it. Edit the finding: narrow the claim to
+what the usable remainder supports, or remove the excerpt. Where the finding draws only on the raw
+bytes, anyone may draft a use:
+`kblam use review source-challenge-0001 F-0012 2 --by NAME --proponent NAME` (the proponent is the
 finding's author), then fill its `disposition` and `reason` and put it. `unaffected_raw_bytes` names
 the subset of bytes the excerpt is still used for; `rewritten_claim` says the finding's claim no
-longer relies on the challenged interpretation. Both need the `reason`, and a use never turns a false
-interpretation into a fact. A reviewer other than the proponent approves it with
-`kblam review decide CU-0001 --status approved --by NAME --reason TEXT --expect D`.
+longer relies on the challenged interpretation. Both need the `reason`, and a use never turns a
+false interpretation into a fact. A reviewer other than the proponent approves it with
+`kblam review decide checked-use-0001 --status approved --by NAME --reason TEXT --expect D`.
 
 Approving is refused unless the use is current once approved: its challenge confirmed with an
 available source, its finding's fingerprint and bytes the bound ones, and the excerpt at its ordinal
 still a verified K10 match. Editing that finding makes the use stale - the excerpt is a K14 error
-again and the use's binding a K13 warning - and approving it again is refused ("a decision that keeps
-the status belongs to kblam review rebind"). A reviewer rechecks the excerpt in the new revision and
-rebinds it with `kblam review rebind CU-0001 --by NAME --reason TEXT --expect D`. A rebind keeps the
+again and the use's binding a K13 warning - and approving it again is refused ("a decision that
+keeps the status belongs to kblam review rebind"). A reviewer rechecks the excerpt in the new
+revision and rebinds it with
+`kblam review rebind checked-use-0001 --by NAME --reason TEXT --expect D`. A rebind keeps the
 excerpt at the cited ordinal, or the only excerpt that still carries its `tag_sha256`; when none or
 several do - "no longer has the excerpt it cites" - stage a new use with `kblam use review`.
 
@@ -184,19 +188,20 @@ then put it. Do the work into an `evidence/` package, and a reviewer who is neit
 the proponent decides with that evidence:
 
 ```
-kblam review decide CT-0001 --status confirmed --by NAME --reason TEXT --expect D --evidence PROVENANCE:PATH:LOCATOR
+kblam review decide claim-task-0001 --status confirmed --by NAME --reason TEXT --expect D --evidence PROVENANCE:PATH:LOCATOR
 ```
 
 `confirmed` (`outcomes.supports`) and `not_reproduced` (`outcomes.refutes`) need a primary evidence
 entry; `inconclusive` does not, and says only why no further work would decide the question. A pending
 task - open, well formed, its binding current - is listed by `kblam validate` and fails nothing.
 
-**Editing a record.** `kblam challenge edit SC-0001` and `kblam task edit CT-0001` stage a copy of an
-open record; the free fields above are yours to change and every other field must be put as installed
-("SC-0001 changed since your edit; run kblam challenge edit SC-0001 again" means another write
-replaced it). A use has no edit command: a changed use needs a new `kblam use review`, or
-`kblam review rebind` when only its bindings moved. `kblam review list` shows each record's status and
-whether its binding is still current; `kblam review list --open` shows the open ones.
+**Editing a record.** `kblam challenge edit source-challenge-0001` and
+`kblam task edit claim-task-0001` stage a copy of an open record; the free fields above are yours to
+change and every other field must be put as installed ("source-challenge-0001 changed since your
+edit; run kblam challenge edit source-challenge-0001 again" means another write replaced it). A use
+has no edit command: a changed use needs a new `kblam use review`, or `kblam review rebind` when
+only its bindings moved. `kblam review list` shows each record's status and whether its binding is
+still current; `kblam review list --open` shows the open ones.
 
 **K13 to K15 refusals.** K13 is record integrity, K14 is an affected use, K15 is a task binding. A
 record put that refuses one writes nothing. A finding put is refused only when it adds an affected
@@ -205,21 +210,21 @@ the excerpt stays a K14 error until a use is reviewed or rebound, or the excerpt
 
 | Rule | Trigger | Fix |
 |---|---|---|
-| K13 | a file under `{{review_root}}/` that is not a record or the generated `INDEX.md` ("`{{review_root}}/` holds only SC-, CT- and CU- records in their kind's folder"), or a record or `INDEX.md` that is a symlink | remove the stray file, or replace the link with the file itself |
+| K13 | a file under `{{review_root}}/` that is not a record or the generated `INDEX.md` ("`{{review_root}}/` holds only source-challenge, claim-task and checked-use records in their kind's folder"), or a record or `INDEX.md` that is a symlink | remove the stray file, or replace the link with the file itself |
 | K13 | "INDEX.md is missing; run kblam review index", or "INDEX.md differs from the generated review index", because a hand edit or a new record left it behind | `kblam review index` |
 | K13 | a schema error: an unknown or missing key, a wrong type, a bad path or hash, a blank required field, an assertion that no longer matches its source | the diagnostic names the field or the file: fix the staged record and put it again; where the line for an installed record ends with a step (restore it from git, or leave it and tell the user), do that instead |
 | K13 | an ID claimed by two files, or a record whose `id` differs from its file name | do what the line says: the restore from git (`git restore --source=HEAD --staged --worktree <path>`) where it names one, unless a kblam put or decision was made to the record since git's last commit, which the restore would undo (then leave it and tell the user); otherwise leave the files as they are and tell the user |
 | K13 | a registered record missing from `{{review_root}}/`: `records are never deleted or renamed` | do what the line says: `git restore --source=HEAD --staged --worktree <path>` where git's last commit holds a copy of the record, and leave it and tell the user where it does not |
 | K13 | a decided record was changed by hand: the last decision's `bind` no longer matches the record's subject digest | restore the record from git; a decided record cannot be edited |
 | K13 | `the source changed since kblam challenge new; run it again`: the staged record's source no longer holds the bytes `challenge new` captured | start that record again against the bytes you now mean to challenge (`kblam challenge new`) |
-| K13 | a source, basis or decision-evidence reference of an installed record is stale or unavailable: "the source changed since SC-0001 was written", "the working file <path> is missing", "the pinned version is not present" | a warning while the record is open and an error once it is effective: restore the file the reference reads to the bytes the record was written against ("restore <path> to the bytes SC-0001 was written against", "restore it" where the line already names it, "restore the pinned bytes of <path>"), or retire the record and file a new one |
+| K13 | a source, basis or decision-evidence reference of an installed record is stale or unavailable: "the source changed since source-challenge-0001 was written", "the working file <path> is missing", "the pinned version is not present" | a warning while the record is open and an error once it is effective: restore the file the reference reads to the bytes the record was written against ("restore <path> to the bytes source-challenge-0001 was written against", "restore it" where the line already names it, "restore the pinned bytes of <path>"), or retire the record and file a new one |
 | K13 | a decision the transition table refuses, or one that is not independent: `a closing decision needs someone else` | `--by` must differ from a challenge's `creator`, a task's `creator` and `proponent`, or a use's `proponent` |
-| K14 | `SC-0001 challenges this quoted assertion at` ...: the excerpt quotes an assertion a confirmed challenge covers | edit the finding, or have its use reviewed (`kblam use review SC-0001 F-0012 2 --by NAME --proponent NAME`) |
+| K14 | `source-challenge-0001 challenges this quoted assertion at` ...: the excerpt quotes an assertion a confirmed challenge covers | edit the finding, or have its use reviewed (`kblam use review source-challenge-0001 F-0012 2 --by NAME --proponent NAME`) |
 | K14 | the excerpt quotes the assertion text of another version: `was judged on` one version `and this excerpt quotes its assertion text from another version of that file` | challenge that version too (`kblam challenge new`), or have this use reviewed |
 | K14 | a warning: a line tag's cited range overlaps the assertion's lines, or the finding lists or names the challenged source | read what the finding takes from it; a warning never fails `kblam validate` |
-| K15 | an `open` task's binding no longer matches: the finding's fingerprint or file bytes changed since `kblam task new` bound the task to it | reread the finding, then `kblam review rebind CT-0001 --by NAME --reason TEXT --expect D`, with `--reopen` when the task should be left open again |
-| K15 | a `confirmed` or `not_reproduced` task's binding no longer matches, or its effective evidence is gone, or it was never primary | rebind, citing the primary evidence again whatever the old decision cited: `kblam review rebind CT-0001 --by NAME --reason TEXT --expect D --evidence PROVENANCE:PATH:LOCATOR` (`--reopen` too, to leave the task open). A `stale` task is never rebound: draft a new one |
-| K15 | an `inconclusive` task's binding no longer matches, or an evidence entry of its decision is unavailable | rebind, and recheck what it cited: `kblam review rebind CT-0001 --by NAME --reason TEXT --expect D` (restore those bytes, or cite the replacement with `--evidence PROVENANCE:PATH:LOCATOR`). `inconclusive` needs no primary evidence entry, but it is an effective status all the same: the rebind needs someone independent of the task, unlike an `open` task, which its own creator or proponent may rebind |
+| K15 | an `open` task's binding no longer matches: the finding's fingerprint or file bytes changed since `kblam task new` bound the task to it | reread the finding, then `kblam review rebind claim-task-0001 --by NAME --reason TEXT --expect D`, with `--reopen` when the task should be left open again |
+| K15 | a `confirmed` or `not_reproduced` task's binding no longer matches, or its effective evidence is gone, or it was never primary | rebind, citing the primary evidence again whatever the old decision cited: `kblam review rebind claim-task-0001 --by NAME --reason TEXT --expect D --evidence PROVENANCE:PATH:LOCATOR` (`--reopen` too, to leave the task open). A `stale` task is never rebound: draft a new one |
+| K15 | an `inconclusive` task's binding no longer matches, or an evidence entry of its decision is unavailable | rebind, and recheck what it cited: `kblam review rebind claim-task-0001 --by NAME --reason TEXT --expect D` (restore those bytes, or cite the replacement with `--evidence PROVENANCE:PATH:LOCATOR`). `inconclusive` needs no primary evidence entry, but it is an effective status all the same: the rebind needs someone independent of the task, unlike an `open` task, which its own creator or proponent may rebind |
 
 Only errors fail `kblam validate`: a warning (exit 0) is not a failure, and a pending task is not a
 failure either. `kblam validate --record --forget-missing` is different from all of the above: it is

@@ -47,7 +47,7 @@ recheck_timeout_seconds = 600  # kblam recheck: a check: command running longer 
 recheck_person_approval = false
 
 # The [review] section (SPEC §5.2) names the folder that holds the source challenges, claim tasks and
-# reviewed uses of the knowledge base, and the provenance vocabulary a challenge's basis and a
+# checked uses of the knowledge base, and the provenance vocabulary a challenge's basis and a
 # decision's evidence draw on. It is optional: every key below shows its default, and a key left out
 # takes that default. `root` is fixed once kblam records it (SPEC §5.2.6), so choose it before the
 # first record.

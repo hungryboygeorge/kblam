@@ -21,11 +21,11 @@ paths:
   against it: re-read that finding before relying on this one. An **old** one was recorded in kblam's
   earlier fingerprint format: `kblam upgrade` settles it, or, when that finding changed since, the
   same re-reading does.
-- `{{review_root}}/` holds the source challenges, claim tasks and reviewed uses that bear on these
+- `{{review_root}}/` holds the source challenges, claim tasks and checked uses that bear on these
   findings. A confirmed challenge means a quoted passage of a source was found contradicted,
-  unsupported or from the wrong model: run `kblam challenge uses SC-NNNN` before relying on an excerpt
-  it covers. A pending task means a claim still awaits replication or confirmation: it is neither
-  refuted nor confirmed, so do not promote it.
+  unsupported or from the wrong model: run `kblam challenge uses source-challenge-NNNN` before
+  relying on an excerpt it covers. A pending task means a claim still awaits replication or
+  confirmation: it is neither refuted nor confirmed, so do not promote it.
 - Cite findings by ID (`F-0137`). Do not cite files in `.kblam/staging/` or desk answer files.
 - A finding's `check:` command runs only through `kblam recheck`, and only once approved on this
   machine: approve a new or changed one only as the block it prints says, and never run it directly.
