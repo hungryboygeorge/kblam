@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import copy
+import ctypes
 import datetime
 import io
+import os
+import re
+import shutil
+import stat
 import subprocess
+import sys
 import textwrap
 import tomllib
 from pathlib import Path
@@ -172,6 +178,10 @@ Row 103: bytes 0x40 0x41
 """
 ZERO64 = "0" * 64
 DROP = object()  # record_text(..., key=DROP) leaves the key out
+# Variables that send git to another repository, index or object store: under one of them neither a
+# copied template nor <root>/.git can stand for what git would make or find, so the helpers ask git.
+GIT_LOCATION_VARIABLES = ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE",
+                          "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES")
 
 
 class SourceRepo:
@@ -190,6 +200,17 @@ class SourceRepo:
         return done.stdout.strip()
 
     def init(self, *extra: str) -> "SourceRepo":
+        """`git init` plus the fixture identity and settings; a copy of the "empty" template where
+        there is one and <root> holds no .git yet."""
+        self.root.mkdir(parents=True, exist_ok=True)
+        template = None if extra or os.path.lexists(self.root / ".git") else git_template("empty")
+        if template is not None:
+            copy_repository(template, self.root)
+            return self
+        return self.init_by_git(*extra)
+
+    def init_by_git(self, *extra: str) -> "SourceRepo":
+        """init() as git does it: `git init` and four `git config` calls."""
         self.root.mkdir(parents=True, exist_ok=True)
         subprocess.run(["git", "init", "-q", *extra, str(self.root)], check=True, capture_output=True)
         for key, value in (("user.name", "fixture"), ("user.email", "fixture@example.invalid"),
@@ -220,35 +241,114 @@ class SourceRepo:
         """The file's path relative to the KB root, as records and verbatim tags write it."""
         return f"{self.rel}/{path}"
 
+    def own_git_dir(self) -> Path | None:
+        """<root>/.git where it is the directory `git -C <root>` uses: HEAD naming a ref or an object
+        ID, objects/ and refs/, no commondir, and no variable sending git elsewhere. None otherwise (a
+        gitfile, a linked worktree, a directory git would pass over)."""
+        dot = self.root / ".git"
+        if any(name in os.environ for name in GIT_LOCATION_VARIABLES) or not dot.is_dir():
+            return None
+        head = dot / "HEAD"
+        if not (head.is_file() and (dot / "objects").is_dir() and (dot / "refs").is_dir()) \
+                or os.path.lexists(dot / "commondir"):
+            return None
+        return dot if re.fullmatch(rb"ref: refs/[^\n]+\n|[0-9a-f]{40}\n|[0-9a-f]{64}\n",
+                                   head.read_bytes()) else None
+
     def snapshot(self) -> dict:
-        """Working bytes, HEAD, index and refs: equal before and after means "the source is unchanged"."""
+        """Working bytes, HEAD, index and refs: equal before and after means "the source is unchanged".
+        In a repository whose own .git directory is <root>/.git, the refs are its files (every loose ref
+        under refs/, and packed-refs), which with symbolic_head decide what `rev-parse HEAD` and
+        `for-each-ref` would print, so only `git status` runs; elsewhere git prints them."""
         files = {p.relative_to(self.root).as_posix(): p.read_bytes()
                  for p in sorted(self.root.rglob("*")) if p.is_file() and ".git" not in p.relative_to(self.root).parts}
-        git_dir = Path(self.git("rev-parse", "--absolute-git-dir"))
+        git_dir = self.own_git_dir()
+        if git_dir is None:
+            git_dir = Path(self.git("rev-parse", "--absolute-git-dir"))
+            head = self.git("rev-parse", "HEAD", check=False)
+            refs = self.git("for-each-ref", "--format=%(refname) %(objectname)")
+        else:
+            head = None
+            refs = {p.relative_to(git_dir).as_posix(): p.read_bytes()
+                    for p in sorted((git_dir / "refs").rglob("*")) if p.is_file()}
         index = git_dir / "index"
         packed = git_dir / "packed-refs"
         return {
             "files": files,
-            "head": self.git("rev-parse", "HEAD", check=False),
+            "head": head,
             "symbolic_head": (git_dir / "HEAD").read_bytes(),
             "index": index.read_bytes() if index.is_file() else None,
-            "refs": self.git("for-each-ref", "--format=%(refname) %(objectname)"),
+            "refs": refs,
             "packed_refs": packed.read_bytes() if packed.is_file() else None,
-            "status": self.git("status", "--porcelain", "--ignored"),
+            "status": self.git("status", "--porcelain", "--ignored"),      # last: it may rewrite the index
         }
+
+
+GIT_TEMPLATES: dict[tuple, Path] = {}     # (kind, GIT_ variables) -> a repository made in this process
+TEMPLATE_FACTORY: list = []               # the session's tmp_path_factory, where they are made
+
+
+@pytest.fixture(scope="session", autouse=True)
+def git_template_factory(tmp_path_factory):
+    """Lets git_template make its repositories under this session's temporary root: once per test
+    process, so once per xdist worker."""
+    TEMPLATE_FACTORY.append(tmp_path_factory)
+    yield
+    TEMPLATE_FACTORY.clear()
+    GIT_TEMPLATES.clear()
+
+
+def git_template(kind: str) -> Path | None:
+    """A repository made once in this process by git and copied into tests from then on: "empty" is
+    what SourceRepo.init() makes, "trace" what the source_repo fixture makes. None unless git reads no
+    configuration file and no variable sends it elsewhere (the state source_repo sets), where a copy
+    stands for what git would make; kept per value of the other GIT_ variables."""
+    env = os.environ
+    if not (TEMPLATE_FACTORY and env.get("GIT_CONFIG_NOSYSTEM") == "1" and env.get("GIT_CONFIG_GLOBAL")
+            and not os.path.lexists(env["GIT_CONFIG_GLOBAL"])
+            and not any(name in env for name in GIT_LOCATION_VARIABLES)):
+        return None
+    key = (kind, tuple(sorted((name, value) for name, value in env.items()
+                              if name.startswith("GIT_") and name != "GIT_CONFIG_GLOBAL")))
+    if key not in GIT_TEMPLATES:
+        repo = SourceRepo(TEMPLATE_FACTORY[0].mktemp(f"git-template-{kind}"), "repo").init_by_git()
+        if kind == "trace":
+            repo.commit(TRACE_PATH, TRACE_TEXT, "trace")
+        GIT_TEMPLATES[key] = repo.root
+    return GIT_TEMPLATES[key]
+
+
+def copy_repository(template: Path, root: Path) -> None:
+    """Copy a template's tree into `root`, as git made it there. Git for Windows hides .git, which
+    copytree does not carry over. File times are kept; the index's stat data still describes the
+    template's files, so a caller copying a worktree refreshes the index."""
+    shutil.copytree(template, root, dirs_exist_ok=True)
+    if sys.platform == "win32":
+        hidden = os.stat(template / ".git").st_file_attributes & stat.FILE_ATTRIBUTE_HIDDEN
+        if hidden:
+            attributes = os.stat(root / ".git").st_file_attributes & ~stat.FILE_ATTRIBUTE_DIRECTORY
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            if not kernel32.SetFileAttributesW(str(root / ".git"), attributes | hidden):
+                raise ctypes.WinError(ctypes.get_last_error())
 
 
 @pytest.fixture
 def source_repo(kb, monkeypatch) -> SourceRepo:
     """A nested Git repository at <KB>/resources/mx-docs with TRACE_TEXT committed at notes/full-scan-trace.md
-    (LF). System and global Git config are ignored, for the fixture and for kblam's own git calls."""
+    (LF). System and global Git config are ignored, for the fixture and for kblam's own git calls. A copy
+    of the "trace" template, its index refreshed for the copied file, where there is one."""
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(kb.root.parent / "no-global-gitconfig"))
     config = kb.root / "kblam.toml"
     kb.write("kblam.toml", config.read_text(encoding="utf-8").replace(
         '[kb]\n', '[kb]\nevidence_roots = ["evidence", "resources"]\n', 1))
-    repo = SourceRepo(kb.root).init()
-    repo.commit(TRACE_PATH, TRACE_TEXT, "trace")
+    repo = SourceRepo(kb.root)
+    template = None if os.path.lexists(repo.root) else git_template("trace")
+    if template is None:
+        repo.init().commit(TRACE_PATH, TRACE_TEXT, "trace")
+    else:
+        copy_repository(template, repo.root)
+        repo.git("update-index", "-q", "--refresh")
     return repo
 
 
