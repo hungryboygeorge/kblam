@@ -712,14 +712,23 @@ def test_a_check_that_leaves_a_process_holding_its_output_still_writes_its_log(k
     removes the temporary file it left and runs clean."""
     kb.write(f"{EVIDENCE}/hold.py", HOLDING_CHECK)
     add_check(kb, "F-0001", f"{PY} {EVIDENCE}/hold.py")
+    start = time.monotonic()
     code, out, err = run(kb, capsys, monkeypatch, answers=["y"])
+    wall = time.monotonic() - start
     assert code == 0 and "Traceback" not in out + err
     assert ("kblam recheck: F-0001 passed (exit 0; a process it started was still running and holding its "
-            "output, so the log holds only what the check wrote before it exited after ") in out
+            "output, so anything that process wrote after kblam copied the log is not in it after ") in out
     logs = kb.root / ".kblam/recheck"
     assert (logs / "F-0001.log").read_text(encoding="utf-8").strip() == "check output"
     assert log_lines(kb)[-1]["outcome"] == "passed"
     assert list(logs.glob(".F-0001.*.tmp"))                # the grandchild still held the temporary file
+    # The seconds reported are the check's own, not the wait for the held file to be let go of. The run
+    # always takes that wait -- it is REPLACE_RETRY_SECONDS, and the grandchild holds the file open for
+    # four seconds, twice as long -- so the figure reported cannot be within 1.5 s of the whole run.
+    # Stated against this run's own wall clock, so a loaded machine moves both figures together.
+    assert log_lines(kb)[-1]["seconds"] <= wall - 1.5
+    reported = re.search(r"passed \(exit 0; [^)]*after ([\d.]+) s\)", out)
+    assert reported and float(reported.group(1)) <= wall - 1.5 + 0.05  # the printed figure is rounded
 
     deadline = time.monotonic() + 30                       # the grandchild exits by itself, four seconds on
     while not (kb.root / "grandchild-gone").exists() and time.monotonic() < deadline:
@@ -733,18 +742,37 @@ def test_a_check_that_leaves_a_process_holding_its_output_still_writes_its_log(k
     assert list(logs.glob(".F-0001.*.tmp")) == []          # the run removed the leftover it found
 
 
+def sharing_violation() -> PermissionError:
+    """The refusal Windows gives when a rename cannot touch a file another process holds open."""
+    exc = PermissionError(13, "Permission denied")
+    exc.winerror = 32
+    return exc
+
+
+def named_command(err: str) -> list[str]:
+    """The `kblam recheck` command a refusal names, as the arguments an agent reading it would run (run()
+    supplies the program name and --root)."""
+    command = re.search(r"run (kblam recheck[^;]*) again", err).group(1).split()
+    assert command[:2] == ["kblam", "recheck"], command
+    return command[2:]
+
+
 def test_a_log_that_cannot_be_saved_names_the_command_to_run_again(mkb, capsys, monkeypatch):
-    """Where the log cannot be replaced and the copy into place fails too -- a process the check started
-    still holds the file open -- kblam prints what it could not save, why and what to run once that
-    process has exited, as a refusal with no traceback, and leaves no temporary file behind."""
+    """Where the log cannot be replaced -- Windows refuses the rename while a process the check started
+    still holds it open -- and the copy into place fails too, kblam prints what it could not save, why and
+    what to run next, as a refusal with no traceback, and leaves no temporary file behind. The run that
+    stopped gets no line in the log and the previous log stands, and the command the refusal names runs it
+    again once the cause is gone."""
     add_check(mkb, "F-0001", mark("F-0001"))
     assert run(mkb, capsys, monkeypatch, answers=["y"])[0] == 0
+    before = log_lines(mkb)
+    previous = (mkb.root / ".kblam/recheck/F-0001.log").read_text(encoding="utf-8")
 
     real_replace = os.replace
 
     def refuses_the_log(source, target, *args, **kwargs):
         if str(target).endswith("F-0001.log"):
-            raise PermissionError(13, "Permission denied")
+            raise sharing_violation()
         return real_replace(source, target, *args, **kwargs)
 
     def copy_fails(*args):
@@ -757,10 +785,92 @@ def test_a_log_that_cannot_be_saved_names_the_command_to_run_again(mkb, capsys, 
     code, out, err = run(mkb, capsys, monkeypatch)
     assert code == 1 and "Traceback" not in err
     assert err == ("kblam recheck: could not save F-0001's output to .kblam/recheck/F-0001.log (Permission "
-                   "denied), because a process the check started still holds it open; run kblam recheck "
-                   "F-0001 again once that process has exited; if it fails again, leave it as it is and "
-                   "tell the user\n")
+                   "denied) after a process the check started kept its output open; this run stopped there, "
+                   "so any check after it did not run: wait a minute, then run kblam recheck again; if it "
+                   "fails again, leave it as it is and tell the user\n")
     assert list((mkb.root / ".kblam/recheck").glob(".F-0001.*.tmp")) == []
+    assert log_lines(mkb) == before                                    # the run that stopped got no line
+    assert (mkb.root / ".kblam/recheck/F-0001.log").read_text(encoding="utf-8") == previous
+
+    monkeypatch.undo()
+    code, out, _ = run(mkb, capsys, monkeypatch, *named_command(err), answers=["y"])
+    assert code == 0 and "F-0001 passed (exit 0 after " in out
+
+
+def test_an_output_file_removed_by_another_run_names_the_command_to_run_again(mkb, capsys, monkeypatch):
+    """Another kblam recheck of the same finding removes this run's temporary output file (an unlink always
+    succeeds on POSIX), so this run's os.replace finds no file to move: kblam prints what happened and the
+    command to run once the other run has finished, as a refusal with no traceback, and that command runs
+    the check once the cause is gone."""
+    add_check(mkb, "F-0001", mark("F-0001"))
+    assert run(mkb, capsys, monkeypatch, "F-0001", answers=["y"])[0] == 0
+    before = log_lines(mkb)
+
+    real_replace = os.replace
+
+    def loses_the_output(source, target, *args, **kwargs):
+        if str(target).endswith("F-0001.log"):
+            raise FileNotFoundError(2, "No such file or directory")
+        return real_replace(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(os, "replace", loses_the_output)
+    code, out, err = run(mkb, capsys, monkeypatch, "F-0001", answers=["y"])
+    assert code == 1 and "Traceback" not in err
+    assert err == ("kblam recheck: F-0001's output file was removed while its check ran, most likely by "
+                   "another kblam recheck of F-0001 running at the same time; this run stopped there, so any "
+                   "check after it did not run: run kblam recheck F-0001 again once that one has finished; "
+                   "if it fails again, leave it as it is and tell the user\n")
+    assert list((mkb.root / ".kblam/recheck").glob(".F-0001.*.tmp")) == []
+    assert log_lines(mkb) == before
+
+    monkeypatch.undo()
+    code, out, _ = run(mkb, capsys, monkeypatch, *named_command(err), answers=["y"])
+    assert code == 0 and "F-0001 passed (exit 0 after " in out
+
+
+@pytest.mark.parametrize("winerror", [5, None])
+def test_a_rename_refused_for_another_reason_is_not_retried_or_copied_around(mkb, capsys, monkeypatch, winerror):
+    """Only the sharing violation Windows gives is waited for and copied around. Any other refusal -- the
+    one Windows gives when the log's name is a directory, or the one POSIX gives for a permission it will
+    never grant -- goes on as it did before: the run fails at once with that error, and the temporary
+    output file is removed."""
+    add_check(mkb, "F-0001", mark("F-0001"))
+    assert run(mkb, capsys, monkeypatch, answers=["y"])[0] == 0
+
+    real_replace = os.replace
+
+    def refuses_for_another_reason(source, target, *args, **kwargs):
+        if str(target).endswith("F-0001.log"):
+            exc = PermissionError(13, "Permission denied")
+            exc.winerror = winerror
+            raise exc
+        return real_replace(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(os, "replace", refuses_for_another_reason)
+    monkeypatch.setattr(recheck, "REPLACE_RETRY_SECONDS", 10)  # a retry would show up as that wait
+    start = time.monotonic()
+    with pytest.raises(PermissionError):
+        run(mkb, capsys, monkeypatch, answers=["y"])
+    assert time.monotonic() - start < 5
+    assert list((mkb.root / ".kblam/recheck").glob(".F-0001.*.tmp")) == []
+
+
+def test_the_leftover_sweep_runs_only_on_windows(tmp_path, monkeypatch):
+    """A temporary output file can only be left behind where a process the check started can hold it open
+    past the end of its run, which is Windows: POSIX unlinks it at once. Sweeping on POSIX would delete
+    the live output file of another kblam recheck of the same finding, so the sweep is Windows-only. The
+    test drives both ways, so it means the same on every platform."""
+    assert recheck._sweeps_leftovers() == (sys.platform == "win32")
+    directory = tmp_path / "recheck"
+    directory.mkdir()
+    leftover = directory / ".F-0001.abc.tmp"
+    leftover.write_text("held", encoding="utf-8")
+    monkeypatch.setattr(recheck, "_sweeps_leftovers", lambda: False)
+    recheck._remove_leftovers(directory, "F-0001")
+    assert leftover.exists()
+    monkeypatch.setattr(recheck, "_sweeps_leftovers", lambda: True)
+    recheck._remove_leftovers(directory, "F-0001")
+    assert not leftover.exists()
 
 
 def test_a_command_that_cannot_run_is_a_failure(kb, capsys, monkeypatch):

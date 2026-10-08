@@ -70,10 +70,11 @@ TAIL_WIDTH = 300                           # characters printed of one such line
 # exits cannot hang the run.
 REPLACE_RETRY_SECONDS = 2.0
 REPLACE_RETRY_INTERVAL = 0.1
-# What the result line adds when the log could only be copied into place that way: it holds what the check
-# wrote until it exited, and nothing a process it started wrote afterwards.
-HELD_OUTPUT_DETAIL = ("; a process it started was still running and holding its output, so the log holds "
-                      "only what the check wrote before it exited")
+# What the result line adds when the log could only be copied into place that way: the copy is taken a
+# little after the check exits, so it holds everything written until then, and nothing a process it
+# started wrote after that.
+HELD_OUTPUT_DETAIL = ("; a process it started was still running and holding its output, so anything that "
+                      "process wrote after kblam copied the log is not in it")
 BATCH_SUFFIXES = (".bat", ".cmd")          # Windows runs these through cmd.exe, which re-parses arguments
 # The two check problems that name no step the reader can take, so cli._approve adds one when it refuses
 # to approve such a check (SPEC §7).
@@ -469,11 +470,12 @@ def check_state_paths(cfg: Config) -> None:
                                f"to files of its own; delete the link, then run kblam recheck again")
 
 
-def run_check(cfg: Config, check: Check) -> Outcome:
+def run_check(cfg: Config, check: Check, *, rerun: str) -> Outcome:
     """Run an approved check from the repository root, with stdin closed and without the Jev key's
     variable. Its stdout and stderr go to a new file that then replaces .kblam/recheck/<ID>.log, so a link
     at that name is replaced, never written through. Past recheck_timeout_seconds it is killed with every
-    process it started."""
+    process it started. `rerun` is the command this run is -- the same selection -- for a refusal that
+    stops it here to name."""
     target = output_path(cfg, check.finding_id)
     check_state_paths(cfg)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -481,15 +483,22 @@ def run_check(cfg: Config, check: Check) -> Outcome:
     fd, temporary = tempfile.mkstemp(dir=target.parent, prefix=f".{check.finding_id}.", suffix=".tmp")
     start = time.monotonic()
     try:
-        with os.fdopen(fd, "wb") as output:
+        try:
+            output = os.fdopen(fd, "wb")
+        except BaseException:  # an interrupt between mkstemp and here must not leak the descriptor
+            os.close(fd)
+            raise
+        with output:
             code, problem = _run(cfg, check, output)
-        moved = _move_output(cfg, check, temporary, target)
+        # Measured before the log is put in place: waiting for a process the check started to let go of
+        # its output is not part of how long the check took.
+        seconds = time.monotonic() - start
+        moved = _move_output(cfg, check, temporary, target, rerun)
     except BaseException:
         _remove(temporary)
         raise
     if problem is not None:
         return Outcome("not_started", detail=problem)
-    seconds = time.monotonic() - start
     tail = _tail(target)
     if code is None:
         return Outcome("timed_out", None, seconds, f"timed out after {cfg.recheck_timeout_seconds:g} s; it "
@@ -500,10 +509,21 @@ def run_check(cfg: Config, check: Check) -> Outcome:
     return Outcome("failed", code, seconds, (f"killed by signal {-code}" if code < 0 else f"exit {code}") + held, tail)
 
 
+def _sweeps_leftovers() -> bool:
+    """Whether an earlier run can have left a temporary output file behind: only on Windows, where a
+    process a check started may hold the file open past the end of its run, so its removal fails and the
+    file stays. POSIX unlinks it at once, so none is ever left there -- and sweeping there would delete
+    the live output file of another kblam recheck of the same finding, which that run's os.replace is
+    about to move into place."""
+    return sys.platform == "win32"
+
+
 def _remove_leftovers(directory: Path, finding_id: str) -> None:
     """Best-effort removal of the temporary output files earlier runs left behind: a process a check
     started may have held one open past the end of its run, and nothing else removes it (agents may not
     delete anything under .kblam/)."""
+    if not _sweeps_leftovers():
+        return
     for leftover in directory.glob(f".{finding_id}.*.tmp"):
         _remove(str(leftover))
 
@@ -517,19 +537,32 @@ def _remove(path: str) -> None:
         pass
 
 
-def _move_output(cfg: Config, check: Check, temporary: str, target: Path) -> bool:
-    """Put the check's output at `target`: os.replace, tried again for REPLACE_RETRY_SECONDS while the
-    operating system refuses the rename because a process the check started still holds the file open
-    (Windows: Python opens a file without FILE_SHARE_DELETE, so the rename fails while such a process
-    lives). False when it never became possible: the bytes (readable while shared) are then copied into
-    `target` from a second temporary file, so the log, and the tail printed from it, still exist.
-    RecheckError when even that copy failed."""
+def _move_output(cfg: Config, check: Check, temporary: str, target: Path, rerun: str) -> bool:
+    """Put the check's output at `target`: os.replace, tried again for REPLACE_RETRY_SECONDS while Windows
+    refuses the rename because a process the check started still holds the file open (Python opens a file
+    without FILE_SHARE_DELETE, so the rename fails while such a process lives). False when it never became
+    possible: the bytes (readable while shared) are then copied into `target` from a second temporary
+    file, so the log, and the tail printed from it, still exist. RecheckError when the file to move is
+    gone -- another kblam recheck of the same finding removed it -- or when even that copy failed."""
     deadline = time.monotonic() + REPLACE_RETRY_SECONDS
     while True:
         try:
             os.replace(temporary, target)
             return True
-        except PermissionError:
+        except FileNotFoundError:
+            # Nothing else removes that file: mkstemp made it in a directory that is still there, so the
+            # one way it is gone is another recheck of the same finding, which unlinks it at once on POSIX
+            # and may do so on Windows too.
+            raise RecheckError(f"{check.finding_id}'s output file was removed while its check ran, most likely "
+                               f"by another kblam recheck of {check.finding_id} running at the same time; this "
+                               f"run stopped there, so any check after it did not run: run {rerun} again once "
+                               f"that one has finished; if it fails again, leave it as it is and tell the "
+                               f"user") from None
+        except PermissionError as exc:
+            # Only the sharing violation Windows gives is worth waiting for, and only the copy that follows
+            # can get past it: any other refusal is the operating system's to report, as before.
+            if sys.platform != "win32" or getattr(exc, "winerror", None) != 32:
+                raise
             if time.monotonic() >= deadline:
                 break
             time.sleep(REPLACE_RETRY_INTERVAL)
@@ -537,9 +570,9 @@ def _move_output(cfg: Config, check: Check, temporary: str, target: Path) -> boo
         _copy_output(temporary, target, check.finding_id)
     except OSError as exc:
         raise RecheckError(f"could not save {check.finding_id}'s output to {shown_path(cfg, target)} "
-                           f"({exc.strerror or exc}), because a process the check started still holds it "
-                           f"open; run kblam recheck {check.finding_id} again once that process has exited; "
-                           f"if it fails again, leave it as it is and tell the user") from None
+                           f"({exc.strerror or exc}) after a process the check started kept its output open; "
+                           f"this run stopped there, so any check after it did not run: wait a minute, then "
+                           f"run {rerun} again; if it fails again, leave it as it is and tell the user") from None
     _remove(temporary)
     return False
 
@@ -547,13 +580,18 @@ def _move_output(cfg: Config, check: Check, temporary: str, target: Path) -> boo
 def _copy_output(source: str, target: Path, finding_id: str) -> None:
     """Copy `source`'s bytes into a new file beside `target`, which then replaces `target`: the one way to
     put the log in place while a process still holds `source` open, since the bytes can be read but the
-    file itself cannot be replaced."""
+    file itself cannot be replaced. Nothing it creates is left behind, whatever interrupts it."""
     fd, copied = tempfile.mkstemp(dir=target.parent, prefix=f".{finding_id}.", suffix=".tmp")
     try:
-        with os.fdopen(fd, "wb") as destination, open(source, "rb") as origin:
+        try:
+            destination = os.fdopen(fd, "wb")
+        except BaseException:  # an interrupt between mkstemp and here must not leak the descriptor
+            os.close(fd)
+            raise
+        with destination, open(source, "rb") as origin:
             shutil.copyfileobj(origin, destination)
         os.replace(copied, target)
-    except OSError:
+    except BaseException:
         _remove(copied)
         raise
 

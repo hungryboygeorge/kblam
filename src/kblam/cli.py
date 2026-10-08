@@ -779,7 +779,9 @@ def _cmd_recheck(cfg, args) -> int:
                 else:
                     declined.add(c.finding_id)
                     states[c.finding_id] = recheck.State(False, "you did not approve it")
-    counts = Counter(_recheck_one(cfg, c, states[c.finding_id], terminal, c.finding_id in declined, person_only)
+    rerun = _recheck_command(args)
+    counts = Counter(_recheck_one(cfg, c, states[c.finding_id], terminal, c.finding_id in declined, person_only,
+                                  rerun)
                      for c in checks)
     for problem in problems:
         print(f"kblam recheck: {problem}")
@@ -833,8 +835,15 @@ def _approve(cfg, args) -> int:
         print(recheck.approval_block(cfg, check, state))
         return EXIT_INVALID
     recheck.record_approval(cfg, check, approver=recheck.AGENT)
-    outcome = _recheck_one(cfg, check, recheck.State(True, approver=recheck.AGENT), False, False, False)
+    outcome = _recheck_one(cfg, check, recheck.State(True, approver=recheck.AGENT), False, False, False,
+                           _recheck_command(args))
     return _recheck_summary(1, Counter([outcome]), 0)
+
+
+def _recheck_command(args) -> str:
+    """The command this run is, as its reader would type it again: the same selection of findings, which a
+    refusal that stops the run midway names so that running it finishes what the run did not reach."""
+    return "kblam recheck" + "".join(f" {shown(i)}" for i in args.ids)
 
 
 def _recheck_summary(total: int, counts: Counter, problems: int) -> int:
@@ -849,7 +858,7 @@ def _recheck_summary(total: int, counts: Counter, problems: int) -> int:
 
 
 def _recheck_one(cfg, c: recheck.Check, state: recheck.State, terminal: bool, declined: bool,
-                 person_only: bool) -> str:
+                 person_only: bool, rerun: str) -> str:
     """Run or report one check; the summary's category for it."""
     if c.problem:
         print(f"kblam recheck: {c.finding_id} could not run: {c.problem}")
@@ -873,7 +882,7 @@ def _recheck_one(cfg, c: recheck.Check, state: recheck.State, terminal: bool, de
         recheck.log(cfg, c, "declined" if declined else "not_approved", terminal=terminal)
         return "not approved"
     print(f"kblam recheck: {c.finding_id} running: {shown(c.command)}", flush=True)
-    result = recheck.run_check(cfg, c)
+    result = recheck.run_check(cfg, c, rerun=rerun)
     recheck.log(cfg, c, result.status, terminal=terminal, approver=state.approver, result=result)
     if result.status == "passed":
         print(f"kblam recheck: {c.finding_id} passed ({result.detail} after {result.seconds:.1f} s)")

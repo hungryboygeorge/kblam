@@ -1919,8 +1919,9 @@ third party puts into the knowledge base, not an agent on this machine set on ru
   a program that cannot be started.
 - *Output.* A line as each approved check starts, and one with its result. When a process the check
   started still holds its output when the log is saved (Windows cannot replace a file a process holds
-  open), the log holds what was written until the check exited, and the result line says so. For a
-  failure, the last 20 lines of output follow, with control characters escaped, then what to do. Last
+  open), kblam copies the bytes into the log a little after the check exits: it holds what was written
+  until then, and the result line says so. For a failure, the last 20 lines of output follow, with
+  control characters escaped, then what to do. Last
   comes a summary line, which ends with the skill pointer when the exit status is 1. The exit status
   is 0 when every selected check passed, or when no finding has a check, and 1 otherwise, including
   when a finding cannot be read, its `check:` is not a string, or a selected check was not approved
@@ -1932,10 +1933,15 @@ third party puts into the knowledge base, not an agent on this machine set on ru
   fingerprint, command sha256, the pinned files with their digests, outcome (`passed`, `failed`,
   `timed_out`, `not_started`, `not_approved` or `declined`), exit code, seconds, whether a terminal
   was present, and the approver (`person` or `agent`, null when nothing ran). It never holds the
-  command text or its output. `.kblam/recheck/F-NNNN.log`
-  holds the combined stdout and stderr of that finding's last run (empty when it could not start).
+  command text or its output. A check whose log could not be saved stops the run and gets no line:
+  the run's result is the refusal, and the previous line and the log before it stand.
+  `.kblam/recheck/F-NNNN.log` holds the combined stdout and stderr of that finding's last run (empty
+  when it could not start).
   It is written to a new file that then replaces it, so a link at that name is replaced, never
-  written through, and a link at `.kblam/recheck.jsonl` or `.kblam/recheck/` refuses the run.
+  written through, and a link at `.kblam/recheck.jsonl` or `.kblam/recheck/` refuses the run. On
+  Windows the replacement is tried again for up to 2 s while a process the check started still holds
+  the file open, and a run removes any temporary output file of its finding that an earlier run left
+  behind (POSIX unlinks such a file at once, so none is ever left there).
 
 ### 7.1 `kblam init`
 
@@ -2059,8 +2065,9 @@ write under it is denied with "kblam: <what> under research-review/ denied. Revi
 written only by kblam: stage one with kblam challenge new, kblam task new or kblam use review (or
 kblam challenge/task edit), edit it under .kblam/review-staging/, then kblam put it." plus the skill
 pointer. Removal of a record file (`source-challenge-NNNN.yaml`, `claim-task-NNNN.yaml` or
-`checked-use-NNNN.yaml`, four or more digits), of a glob that could name one, of a kind folder or of
-the root itself is denied too, as under `.kblam/`; removing any other stray file is allowed (it is
+`checked-use-NNNN.yaml`, four or more digits), of a glob that could name one, of a kind folder, of a
+glob directly under the root (which could name a kind folder), or of the root itself is denied too, as
+under `.kblam/`; removing any other stray file is allowed (it is
 how a K13 stray-file error is fixed). The hook is only a first line: the record-ID registry (§5.2.6)
 makes `validate` report a record removed by any means.
 `.kblam/review-staging/` is exempt from the `.kblam/` rule, as `.kblam/staging/` is;
