@@ -45,7 +45,7 @@ F2 = "findings/calibration/F-0002-ratio.md"
 FINDINGS_INDEX = "findings/INDEX.md"
 A_FINDING = {FINDINGS_INDEX, TREE_HASH}                 # what a fixture kb.add adds beside the finding
 
-# The SC fields m611_helpers fills on a staged challenge, as `challenge show` prints them after the
+# The source-challenge fields m611_helpers fills on a staged challenge, as `challenge show` prints them after the
 # standard filling; every test spells out the line its own record gives.
 SHOW_TAIL = (
     "proposition: The printed byte equality follows from the printed byte values\n"

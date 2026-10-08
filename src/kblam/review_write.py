@@ -160,15 +160,14 @@ def put_record(cfg: Config, staged: Path) -> WriteResult:
     finding_file_sha256, citation);
     `status` must be open and `decisions` []. Then by kind:
     - source challenge: the source must still be available with the receipt's sha256, else "the source
-      changed since
-      kblam challenge new; run it again". The assertion may be narrowed: `lines` within the receipt's
-      captured lines and `text` a non-empty substring of the captured text. assertion.sha256 and
-      occurrence, when null, are computed (matching.assertion_match on the source's LF text within
-      lines) and written; a non-null wrong value is refused, as is an assertion that does not match
-      exactly once within its lines. Each basis entry with null sha256 gets the working file's sha256
-      and, when all three pin keys are null, gitpin.auto_pin's pin; a basis entry whose canonical key
-      is the source's gets source.sha256 and no pin (§5.2.3 Basis); a given sha256 or pin is verified
-      (sources resolve), never replaced.
+      changed since kblam challenge new; run it again". The assertion may be narrowed: `lines` within
+      the receipt's captured lines and `text` a non-empty substring of the captured text.
+      assertion.sha256 and occurrence, when null, are computed (matching.assertion_match on the
+      source's LF text within lines) and written; a non-null wrong value is refused, as is an assertion
+      that does not match exactly once within its lines. Each basis entry with null sha256 gets the
+      working file's sha256 and, when all three pin keys are null, gitpin.auto_pin's pin; a basis entry
+      whose canonical key is the source's gets source.sha256 and no pin (§5.2.3 Basis); a given sha256
+      or pin is verified (sources resolve), never replaced.
     - claim task: if the finding's fingerprint or file sha256 now differs from the receipt: "<F> changed
       since kblam task new bound <claim task> to it; reread it and run kblam task new again".
     - checked use: nothing beyond the receipt (a broken binding is a K13 warning; K14 blocks the
@@ -177,9 +176,8 @@ def put_record(cfg: Config, staged: Path) -> WriteResult:
     bytes, else "<ID> changed since your edit; run kblam <challenge|task> edit <ID> again"; the
     installed status must be open; every field except the kind's free fields (FREE_FIELDS) must equal
     the installed record's. For a source challenge, the basis is filled and verified as on a first put
-    (SPEC
-    §5.2.5: a staged basis entry may leave sha256 and the pin null), except that an entry equal to an
-    installed one is not read again.
+    (SPEC §5.2.5: a staged basis entry may leave sha256 and the pin null), except that an entry equal to
+    an installed one is not read again.
     On either put, a basis entry that is new or changed and has a given sha256 must resolve available
     (sources resolve, an on-source entry read at the source's pin), or the put is refused.
     In both cases records.schema_issues(staged=False) errors refuse (blank required fields), returned
@@ -661,10 +659,8 @@ def rebind(cfg: Config, rec_id: str, by: str, reason: str, expect: str, evidence
     else the only excerpt with that tag_sha256 (ordinal, path, range updated); none or several: refuse
     and say to stage a new use (kblam use review ...). Then a decision with status open (reopen) or the
     current status, checked as decide checks it (transition, independence; for a checked use kept
-    approved,
-    current once approved; for a closed claim task, its primary evidence given again with --evidence and
-    judged
-    by K15 on the candidate).
+    approved, current once approved; for a closed claim task, its primary evidence given again with
+    --evidence and judged by K15 on the candidate).
     """
     _check_record_id(rec_id)
     _check_name(by)
@@ -774,8 +770,7 @@ def _one_finding(cfg: Config, view: KBView, finding_id, rec_id: str, status: str
 
 def challenge_pin(cfg: Config, rec_id: str, expect: str, snapshot: str | None = None) -> WriteResult:
     """`kblam challenge pin source-challenge-… --expect D [--snapshot PATH]`: only for an open challenge
-    whose source is
-    available; match_expect first. Without --snapshot: gitpin.auto_pin(cfg, source.path,
+    whose source is available; match_expect first. Without --snapshot: gitpin.auto_pin(cfg, source.path,
     source.sha256) sets repo, commit and blob, and None is refused (say the HEAD blob does not hold
     exactly these bytes, and that --snapshot pins a copy). With --snapshot: the path must pass
     paths.syntax_problem and resolve to a file whose raw bytes hash to source.sha256, outside every

@@ -109,7 +109,7 @@ def trace_version(source_repo) -> str:
 
 
 def sc_fields(kb, path: str) -> dict:
-    """The blank SC fields the author fills before the first put (SPEC §5.2.5): a proposition, a
+    """The blank source-challenge fields the author fills before the first put (SPEC §5.2.5): a proposition, a
     scope, a classification and one basis entry on the source itself, which `put` hashes and pins."""
     return {
         "proposition": "The printed byte equality follows from the printed byte values",
@@ -124,7 +124,7 @@ def sc_fields(kb, path: str) -> dict:
 
 
 def cu_fields() -> dict:
-    """The blank CU fields the reviewer fills before the put."""
+    """The blank checked-use fields the reviewer fills before the put."""
     return {"disposition": "unaffected_raw_bytes",
             "reason": "The excerpt is cited only for the printed byte values."}
 

@@ -79,7 +79,7 @@ INDEX_WRITTEN = f"kblam review index: wrote {INDEX}\n"
 
 NOTHING: set[str] = set()
 
-# The SC free fields the author fills (SPEC §5.2.3): a claim, a scope, `contradicted`, one basis entry
+# The source-challenge free fields the author fills (SPEC §5.2.3): a claim, a scope, `contradicted`, one basis entry
 # on the source itself, a usable remainder and limits. The basis entry's `sha256` and pin are left null
 # for `put` to fill in.
 SC_FIELDS = {

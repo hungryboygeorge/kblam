@@ -1189,8 +1189,9 @@ def _links(view: KBView, finding_id: str) -> dict[str, list]:
 
 
 def _review_records(ids: list[str], verb: str = "") -> str:
-    """"review record claim-task-0003 links" for one and "review records claim-task-0003, checked-use-0001 link" for several; with
-    no verb, "review record claim-task-0003" and "review records claim-task-0003, checked-use-0001"."""
+    """"review record claim-task-0003 links" for one and "review records claim-task-0003,
+    checked-use-0001 link" for several; with no verb, "review record claim-task-0003" and
+    "review records claim-task-0003, checked-use-0001"."""
     words = ("review record " if len(ids) == 1 else "review records ") + ", ".join(ids)
     return words + (f" {verb}s" if len(ids) == 1 else f" {verb}") if verb else words
 
@@ -1294,13 +1295,11 @@ def _refile_steps(target: str, phrase: str) -> str:
     return (f" For each retired record whose question still applies to {phrase}, file a new record against "
             f"{phrase}: kblam challenge new SOURCE-PATH --lines A-B --by NAME, whose free linked_findings "
             f"entry then names {target}; kblam task new {target} --kind KIND --by NAME --proponent NAME; and, "
-            f"for a use, kblam use review source-challenge-NNNN {target} ORDINAL --by NAME --proponent "
-            f"NAME, which stages "
-            f"one only for a confirmed challenge's affected excerpt of {target}. Fill the staged record and "
-            f"put it (kblam put STAGED-PATH); a use covers its excerpt only once it is approved (K14), so an "
-            f"agent who is not its proponent runs kblam review decide checked-use-NNNN --status approved "
-            f"--by NAME "
-            f"--reason TEXT --expect D on it")
+            f"for a use, kblam use review source-challenge-NNNN {target} ORDINAL --by NAME --proponent NAME, "
+            f"which stages one only for a confirmed challenge's affected excerpt of {target}. Fill the staged "
+            f"record and put it (kblam put STAGED-PATH); a use covers its excerpt only once it is approved "
+            f"(K14), so an agent who is not its proponent runs kblam review decide checked-use-NNNN --status "
+            f"approved --by NAME --reason TEXT --expect D on it")
 
 
 def _selected_file_route(finding: Finding, problem: str) -> str:
@@ -1323,7 +1322,7 @@ def _repair_log_step(paths: list[str]) -> str:
     blocks every file's renumber, so no record is retired for nothing — once the user repairs the log, the
     files the log alone blocked renumber with no retirement at all. `paths` are those files, which are the
     ones whose only problem is the damaged log."""
-    return ("Once it is repaired, run " + _and([f"kblam renumber {path}" for path in paths]) + " again")
+    return ("Once it is repaired, run " + _and([f"kblam renumber {path}" for path in paths]))
 
 
 def _retire_then_renumber(finding: Finding, files: list[Finding], mine: list, sent: list[str],

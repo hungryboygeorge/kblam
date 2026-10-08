@@ -139,7 +139,7 @@ def fill(path: Path, **fields) -> dict:
 
 
 def sc_fields() -> dict:
-    """The blank SC fields the author fills before the first put (SPEC §5.2.5): a proposition, a
+    """The blank source-challenge fields the author fills before the first put (SPEC §5.2.5): a proposition, a
     scope, `contradicted`, one basis entry on the source itself, a usable remainder and limits."""
     return {"proposition": "The printed byte equality follows from the printed byte values",
             "scope": ["MX-100 capture transcription"],
@@ -152,7 +152,7 @@ def sc_fields() -> dict:
 
 
 def ct_fields() -> dict:
-    """The blank CT fields the author fills before the first put."""
+    """The blank claim-task fields the author fills before the first put."""
     return {"question": "Does an independent measurement establish the claim?",
             "method": "Repeat the capture with the documented settings.",
             "outcomes": {"supports": "The ratio is within 0.1%.",
@@ -164,7 +164,7 @@ def ct_fields() -> dict:
 
 
 def cu_fields() -> dict:
-    """The blank CU fields the reviewer fills before the first put."""
+    """The blank checked-use fields the reviewer fills before the first put."""
     return {"disposition": "unaffected_raw_bytes",
             "reason": "The excerpt is cited only for the printed byte values."}
 

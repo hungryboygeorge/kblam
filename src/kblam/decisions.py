@@ -9,30 +9,30 @@ from kblam.records import RETIRED, STATUSES, Record
 from kblam.rules import Issue
 
 SUBJECT_FIELDS = {
-    "source-challenge": ("id", "source", "proposition", "scope", "classification", "basis", "usable", "limits"),
+    "source-challenge": ("id", "source", "proposition", "scope", "classification", "basis", "usable",
+                         "limits"),
     "claim-task": ("id", "kind", "finding", "claim_fingerprint", "base_file_sha256", "question", "method",
-           "outcomes", "controls", "stop", "expected_evidence", "proponent"),
-    "checked-use": ("id", "challenge", "challenge_bind", "finding", "finding_fingerprint", "finding_file_sha256",
-           "citation", "disposition", "reason", "proponent"),
+                   "outcomes", "controls", "stop", "expected_evidence", "proponent"),
+    "checked-use": ("id", "challenge", "challenge_bind", "finding", "finding_fingerprint",
+                    "finding_file_sha256", "citation", "disposition", "reason", "proponent"),
 }
 
 KIND_WORDS = {"source-challenge": "challenge", "claim-task": "task", "checked-use": "use"}
 
 # The §5.2.2 table (SPEC lines 371-384) as data: kind -> from -> the statuses that kind's own rows
 # allow. The two rows that hold for every kind -- any status except `open` (and a source challenge's
-# `confirmed`) to
-# `open`, and `open` to `stale` -- name no kind, so `_allowed` adds them.
+# `confirmed`) to `open`, and `open` to `stale` -- name no kind, so `_allowed` adds them.
 TRANSITIONS = {
     "source-challenge": {"open": ("confirmed", "rejected"),
-           "confirmed": ("stale",),
-           "rejected": ("stale",)},
+                         "confirmed": ("stale",),
+                         "rejected": ("stale",)},
     "claim-task": {"open": ("confirmed", "not_reproduced", "inconclusive"),
-           "confirmed": ("stale",),
-           "not_reproduced": ("stale",),
-           "inconclusive": ("stale",)},
+                   "confirmed": ("stale",),
+                   "not_reproduced": ("stale",),
+                   "inconclusive": ("stale",)},
     "checked-use": {"open": ("approved", "withdrawn"),
-           "approved": ("stale",),
-           "withdrawn": ("stale",)},
+                    "approved": ("stale",),
+                    "withdrawn": ("stale",)},
 }
 
 REBINDS = ("claim-task", "checked-use")   # `rebind` keeps a task's and a use's status; a challenge is never re-decided
@@ -42,8 +42,7 @@ REOPEN_REFUSED = ("a confirmed challenge is never reopened; retire it with --sta
 
 # The fields `decide` and `rebind` compare `--by` against, in the order a message names them (SPEC
 # §5.2.2 "Independent means": a source challenge's creator; a claim task's creator and proponent; a
-# checked use's proponent, whose
-# creator may approve it).
+# checked use's proponent, whose creator may approve it).
 SELF_ROLES = {"source-challenge": ("creator",), "claim-task": ("creator", "proponent"), "checked-use": ("proponent",)}
 
 
@@ -79,8 +78,7 @@ def transition_problem(kind: str, old: str, new: str) -> str | None:
 
     The §5.2.2 table, plus `rebind` keeping the status (old == new, for a claim task and a checked
     use, old not stale). A confirmed source challenge never goes back to open ("a confirmed challenge
-    is never reopened; retire it with
-    --status stale and file a new challenge").
+    is never reopened; retire it with --status stale and file a new challenge").
     """
     word = KIND_WORDS.get(kind, kind)
     allowed = _allowed(kind, old)
@@ -110,8 +108,8 @@ def needs_independence(kind: str, old: str, new: str) -> bool:
 def independence_problem(kind: str, data: dict, by: str) -> str | None:
     """None if `by` is independent for this record (SPEC §5.2.2): for a source challenge, by != creator;
     for a claim task, by differs from creator and proponent; for a checked use, by != proponent (the
-    creator may approve). Else a message naming
-    the role, e.g. "reviewer-b is source-challenge-0001's creator; a closing decision needs someone else"."""
+    creator may approve). Else a message naming the role, e.g. "reviewer-b is source-challenge-0001's
+    creator; a closing decision needs someone else"."""
     rid = data.get("id")
     rid = rid if isinstance(rid, str) and rid else "the record"
     for role in SELF_ROLES.get(kind, ()):

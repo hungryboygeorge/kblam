@@ -68,13 +68,12 @@ def challenge_info(view, reader, rec: Record) -> ChallengeInfo:
 
 def use_binding_problems(view, reader, rec: Record) -> list[str]:
     """Why a checked use's bindings no longer hold, [] when they all do (SPEC §5.2.3 "A use is current",
-    less the
-    status): its challenge exists, is confirmed with an available source and its subject digest equals
-    challenge_bind; the finding exists and its fingerprint and file sha256 equal the binding; the excerpt
-    at citation.ordinal exists, matches citation (path, range, tag_sha256) and is a verified text match
-    (matching.ExcerptMatch.verified; a binary-exempt excerpt never qualifies). Each message names what
-    changed and ends with the same prerequisite-aware recovery for the use: `rebind` only when all its
-    prerequisites hold, otherwise fix the first prerequisite and validate again (§5.2.5)."""
+    less the status): its challenge exists, is confirmed with an available source and its subject digest
+    equals challenge_bind; the finding exists and its fingerprint and file sha256 equal the binding; the
+    excerpt at citation.ordinal exists, matches citation (path, range, tag_sha256) and is a verified text
+    match (matching.ExcerptMatch.verified; a binary-exempt excerpt never qualifies). Each message names
+    what changed and ends with the same prerequisite-aware recovery for the use: `rebind` only when all
+    its prerequisites hold, otherwise fix the first prerequisite and validate again (§5.2.5)."""
     data = rec.data if isinstance(rec.data, dict) else None
     rid = rec.id or "this use"
     if rec.kind != "checked-use" or data is None:
@@ -620,8 +619,8 @@ def _task_issues(view, reader, rec: Record, status: str) -> list[Issue]:
 
 def _use_issues(view, reader, rec: Record, status: str) -> list[Issue]:
     """A use's dangling links, its citation, and its bindings (SPEC §5.2.4 K13, checked use). A broken
-    binding is
-    a warning while the use is open or approved: K14 reports the excerpt it no longer covers."""
+    binding is a warning while the use is open or approved: K14 reports the excerpt it no longer
+    covers."""
     issues = _finding_links(view, rec, "finding", rec.data.get("finding"), plural=False)
     challenge_id = rec.data.get("challenge")
     if isinstance(challenge_id, str) and _record(view, challenge_id, "source-challenge") is None:
@@ -710,11 +709,10 @@ def _schema_unsupported(rec: Record) -> bool:
 
 def _citation_malformed(rec: Record, issues: list[Issue]) -> bool:
     """Whether this use's citation is no excerpt reference (SPEC §5.2.3 checked use citation, §5.2.2
-    Values): not
-    a mapping, missing a required key, or flagged by records' own checks (a wrong type or range, an
-    unknown key), every one of them reported at the `citation` key's line. The mapping guard stands
-    before any read of the citation: it holds whatever the schema is, and a supported schema is what
-    vouches for the keys' types."""
+    Values): not a mapping, missing a required key, or flagged by records' own checks (a wrong type or
+    range, an unknown key), every one of them reported at the `citation` key's line. The mapping guard
+    stands before any read of the citation: it holds whatever the schema is, and a supported schema is
+    what vouches for the keys' types."""
     data = rec.data if isinstance(rec.data, dict) else {}
     citation = data.get("citation")
     if not isinstance(citation, dict) or any(key not in citation for key in records.CITATION_KEYS):
@@ -731,8 +729,8 @@ def _use_blocking_issues(view, reader, rec: Record, *, status: str | None = None
     and bind errors, but the shared validators still see historical transitions, independence, evidence
     structure and duplicate IDs. The writer's candidate factory installs it at the canonical path,
     leaving any misplaced copy in the view: the write itself can create a duplicate. Evidence
-    availability is not structure: the command's empty evidence
-    makes the old effective decision historical. Broken bindings are warnings, and dangling links are
+    availability is not structure: the command's empty evidence makes the old effective decision
+    historical. Broken bindings are warnings, and dangling links are
     restored before rebind or become warnings at stale. No binding/recovery checks recurse here.
     """
     from kblam.review_write import _candidate         # review_write imports k13; use it only at runtime

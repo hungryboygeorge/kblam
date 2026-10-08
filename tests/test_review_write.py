@@ -50,7 +50,7 @@ def frozen_today(monkeypatch) -> datetime.date:
 
 
 def captured_lines(first: int, last: int) -> dict:
-    """An SC receipt's `captured`: the lines `challenge new --lines A-B` copied out of the source."""
+    """A source-challenge receipt's `captured`: the lines `challenge new --lines A-B` copied out of the source."""
     return {"lines": [first, last], "text": "\n".join(TRACE_LINES[first - 1:last])}
 
 

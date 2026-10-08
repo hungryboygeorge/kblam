@@ -78,15 +78,21 @@ def _trailing_parts(word: str) -> str:
 
 # A record file's name is <kind>-<4+ digits>.yaml, for the three kinds above. A glob names a record
 # when the literal text before its first glob character could begin such a name and the literal text
-# after its last could end one: REVIEW_RECORD_HEAD_RE matches every prefix (a partial kind word, and
-# an incomplete dot and extension included), REVIEW_RECORD_TAIL_RE every suffix.
+# after its last could end one: REVIEW_RECORD_HEAD_RE matches every prefix (a partial kind word, the
+# digits cut short, an incomplete dot and extension), REVIEW_RECORD_TAIL_RE every suffix.
 _KINDS_PATTERN = "|".join(REVIEW_RECORD_KINDS)
 REVIEW_RECORD_HEAD_RE = re.compile(
     rf"(?:{'|'.join(_leading_parts(kind) for kind in REVIEW_RECORD_KINDS)}"
-    rf"|(?:{_KINDS_PATTERN})-[0-9]*\.(?:y|ya|yam)?|(?:{_KINDS_PATTERN})-[0-9]{{4,}}\.yaml)?", _CASE)
+    rf"|(?:{_KINDS_PATTERN})-[0-9]*(?:\.(?:y|ya|yam)?)?"
+    rf"|(?:{_KINDS_PATTERN})-[0-9]{{4,}}\.yaml)?", _CASE)
 REVIEW_RECORD_TAIL_RE = re.compile(
     rf"(?:l|ml|aml|yaml|(?:{'|'.join(_trailing_parts(kind) for kind in REVIEW_RECORD_KINDS)})?"
     rf"[0-9]*\.yaml)?", _CASE)
+# A record's file name, as kblam.records.FILENAME_RE has it (that module imports ruamel, too slow to
+# load here), case-folded as fnmatch folds it. A name with no glob character is a record only when it
+# matches this, so a stray file in a kind folder (`source-challenge-draft.yaml`) can be removed (a
+# K13 stray-file error is fixed that way); a glob is judged by the two regexes above instead.
+RECORD_NAME_RE = re.compile(rf"^(({_KINDS_PATTERN})-(\d{{4,}}))\.yaml$", _CASE)
 GLOB_CHARS = "*?["
 
 FILE_TOOLS = {"Write": "file_path", "Edit": "file_path", "NotebookEdit": "notebook_path"}  # no MultiEdit tool
@@ -217,7 +223,11 @@ def _glob_tokens(name: str) -> list[tuple[int, int]]:
 
 def _names_a_record(name: str) -> bool:
     """`name` is a review record file's name, or a glob that could name one (SPEC §8: source-challenge-*,
-    claim-task-* and checked-use-*.yaml)."""
+    claim-task-* and checked-use-*.yaml). A name with no glob character is a record only when it is one
+    (RECORD_NAME_RE), so a stray file in a kind folder can be removed."""
+    spans = _glob_tokens(name)
+    if not spans:
+        return bool(RECORD_NAME_RE.fullmatch(name))
     if any(fnmatch.fnmatch(name, pattern) for pattern in REVIEW_RECORD_GLOBS):
         return True
     if any(fnmatch.fnmatch(sample, name) for sample in REVIEW_RECORD_SAMPLES):
@@ -227,9 +237,6 @@ def _names_a_record(name: str) -> bool:
     # record name and the literal text after its last could end one (the registry backstop is SPEC
     # 1155-1156). Deliberately over-broad: it ignores the text between the tokens, and so denies some
     # globs that name no record.
-    spans = _glob_tokens(name)
-    if not spans:
-        return False
     head, tail = name[:spans[0][0]], name[spans[-1][1]:]
     return bool(REVIEW_RECORD_HEAD_RE.fullmatch(head) and REVIEW_RECORD_TAIL_RE.fullmatch(tail))
 

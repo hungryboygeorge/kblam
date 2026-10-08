@@ -78,9 +78,10 @@ class Relation:
     level: str               # "error" for an uncovered "same"/"other" excerpt, else "warning"; a covered
                              # excerpt is "current" (a current use covers it)
     use: str | None          # the ID of the current use that covers it, when level is "current"
-    command: str             # the command that addresses it: USE_REVIEW for an error, CHALLENGE_NEW
-                             # (as in MESSAGE_UNPROVED) beside it for "other"; "" for a covered excerpt;
-                             # for a warning, the edit to check (kblam edit <finding>)
+    command: str             # the command that addresses it: _review_step for an error (USE_REVIEW, or the
+                             # decision that approves an open use), CHALLENGE_NEW (as in MESSAGE_UNPROVED)
+                             # beside it for "other"; "" for a covered excerpt; for a warning, the edit to
+                             # check (kblam edit <finding>)
 
 
 EDIT = "kblam edit {finding}"
@@ -108,7 +109,7 @@ def challenge_relations(view, reader, challenge_id: str) -> list[Relation]:
                                   line=hit.finding.body_start_line + hit.match.start,
                                   ordinal=hit.match.ordinal, relation=hit.kind, level=level,
                                   use=use.id if use is not None else None,
-                                  command="" if use is not None else _hit_command(reader, hit)))
+                                  command="" if use is not None else _hit_command(reader, hit, covering)))
     relations += [Relation(finding=ref.finding.file_id or "", path=ref.finding.path, line=ref.line,
                            ordinal=None, relation=ref.kind, level="warning", use=None,
                            command=EDIT.format(finding=ref.finding.file_id or ""))
@@ -117,13 +118,13 @@ def challenge_relations(view, reader, challenge_id: str) -> list[Relation]:
                                                    relation.ordinal or 0))
 
 
-def _hit_command(reader, hit: _Hit) -> str:
+def _hit_command(reader, hit: _Hit, covering: _CurrentUses) -> str:
     """What addresses an uncovered excerpt: `use review` for the same-bytes rule, and beside it the new
-    challenge that a "version unproved" excerpt needs (as MESSAGE_UNPROVED names it); a range hit is a
-    candidate overlap to read, so the finding is what an author edits."""
-    challenge = hit.info.rec.id or ""
-    review = USE_REVIEW.format(challenge=challenge, finding=hit.finding.file_id,
-                               ordinal=hit.match.ordinal)
+    challenge that a "version unproved" excerpt needs (as MESSAGE_UNPROVED names it); where an open use
+    already names the excerpt, both lines name that use's approving decision instead (the same step K14
+    gives, `_review_step`); a range hit is a candidate overlap to read, so the finding is what an author
+    edits."""
+    review = _review_step(hit, covering)
     if hit.kind == "same":
         return review
     if hit.kind == "other":

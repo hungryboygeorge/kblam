@@ -5,6 +5,7 @@ message names is run in the state the message names and succeeds (D49)."""
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import re
@@ -52,7 +53,8 @@ def install(kb, kind: str, rec_id: str, **fields) -> None:
 
 
 def ct(kb, rec_id: str, path: str, finding_id: str = "F-0012", **fields) -> None:
-    """A CT naming `finding_id`, bound to the file at `path` (a path that is not a finding: a stale binding)."""
+    """A claim task naming `finding_id`, bound to the file at `path` (a path that is not a finding: a
+    stale binding)."""
     fp, sha = binding(kb, path) if (kb.root / path).is_file() else ("0badf00d0000", "0" * 64)
     install(kb, "claim-task", rec_id, finding=finding_id, claim_fingerprint=fp, base_file_sha256=sha, **fields)
 
@@ -227,9 +229,9 @@ def test_rm_names_every_record_and_each_one_the_edit_makes_stale(kb):
     (lambda kb: ct(kb, "claim-task-0003", "findings/nowhere.md"), "review record claim-task-0003 links"),  # a stale binding
 ])
 def test_rm_leaves_the_stale_sentence_out_when_the_edit_makes_no_record_stale(kb, setup, records):
-    """Only SC links, only a withdrawn record, or a binding that no longer matches the file: the put of
-    the edited finding lists nothing as made stale, so the refusal says nothing about it. A retired record
-    does not link at all (R3e), so it cannot reach this refusal."""
+    """Only source challenges link, only a withdrawn record, or a binding that no longer matches the
+    file: the put of the edited finding lists nothing as made stale, so the refusal says nothing about
+    it. A retired record does not link at all (R3e), so it cannot reach this refusal."""
     merge_pair(kb)
     setup(kb)
     assert refused(kb, "rm", "F-0012", "--merged-into", "F-0020") == message(
@@ -519,7 +521,7 @@ def own_problem_clause(path: str, problem: str) -> str:
 def repair_log_text(path: str) -> str:
     """The step out of the dead end a damaged kblam.resolutions.jsonl leaves: the log blocks every file's
     renumber, so no record is retired for nothing, and repairing it frees every file it alone blocked."""
-    return f"Once it is repaired, run kblam renumber {path} again."
+    return f"Once it is repaired, run kblam renumber {path}."
 
 
 def case_c_text(kb, reason: str, own: str = "", retire: tuple[str, ...] = ("claim-task-0003",),
@@ -986,6 +988,37 @@ def test_renumber_dead_end_names_the_selected_files_own_problem(kb, at_root):
         "both paths, claim-task-0003 and checked-use-0001", MINE, "two", ("claim-task-0003",), own=own))
 
 
+def test_renumber_dead_end_names_an_unreadable_log_as_the_selected_files_own_problem(
+        kb, at_root, monkeypatch):
+    """D49 for N3: where kblam cannot even read kblam.resolutions.jsonl, the selected file's own clause
+    ends by telling the user to repair it rather than printing a renumber that would refuse, and the
+    printed route runs once the log is back."""
+    same_id(kb)
+    ct(kb, "claim-task-0003", MINE)                      # links the selected file
+    cu(kb, "checked-use-0001", THEIRS)                    # links the other one, so every file is linked
+    m.accept_tree(kb)
+    log = kb.cfg.resolutions_path
+    real = Path.read_bytes
+
+    def unreadable(self):
+        if self == log:
+            raise PermissionError(errno.EACCES, "Permission denied")
+        return real(self)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "read_bytes", unreadable)
+        own = own_problem_clause(MINE, "cannot read kblam.resolutions.jsonl: Permission denied; leave it "
+                                       "as it is and tell the user")
+        text = refused(kb, "renumber", MINE)
+    assert text == message("renumber", renumber_dead_end_text(
+        kb, "both findings", f"{MINE}, {THEIRS}", "review records claim-task-0003, checked-use-0001",
+        "both paths, claim-task-0003 and checked-use-0001", MINE, "two", ("claim-task-0003",), own=own))
+    assert "Once it is repaired, run kblam renumber" in text
+
+    assert retire_as_printed(kb, text) == ["claim-task-0003"]
+    assert renumber_as_printed(kb, text, MINE) == "F-0013"
+
+
 def test_renumber_dead_end_names_the_rekey_route_for_the_selected_file(kb, at_root):
     """Case B with a dependent whose `depends_on` entry kblam cannot re-key: the selected file's own
     problem names kblam's route (stage the dependent, put the entry on its key's own line, put the copy),
@@ -1059,7 +1092,8 @@ def test_the_renumber_dead_end_routes_a_status_kblam_cannot_decide_through_valid
 
 
 def test_renumber_dead_end_is_handed_to_the_adjudicator_in_full(kb, at_root):
-    """Case B with two files and one SC: the whole text, byte for byte, including the bare-ID note."""
+    """Case B with two files and one source challenge: the whole text, byte for byte, including the
+    bare-ID note."""
     same_id(kb)
     sc(kb, "source-challenge-0004", "F-0012")
     assert refused(kb, "renumber", MINE) == message("renumber", renumber_dead_end_text(

@@ -4,10 +4,10 @@ The review root (`research-review/` by default) is guarded like `findings/`: eve
 denied, and a removal only for the root itself, a kind folder (`challenges`, `tasks`, `uses`), a
 record file (`source-challenge-*.yaml`, `claim-task-*.yaml`, `checked-use-*.yaml`) or a glob that
 could name one of those, so a stray file there can still be deleted (that is how a K13 stray-file
-error is fixed); a name in the old `SC-`/`CT-`/`CU-` style is no record, so removing one is allowed. Under `.kblam/`,
-`.kblam/review-staging/` is exempt as `.kblam/staging/` is, and `.kblam/review-receipts/` is not. The
-Stop hook's format-2 digest covers findings/ and the review root. Offline and deterministic: the
-hook is driven exactly as tests/test_hook.py drives it.
+error is fixed); a name in the old `SC-`/`CT-`/`CU-` style is no record, so removing one is allowed.
+Under `.kblam/`, `.kblam/review-staging/` is exempt as `.kblam/staging/` is, and
+`.kblam/review-receipts/` is not. The Stop hook's format-2 digest covers findings/ and the review
+root. Offline and deterministic: the hook is driven exactly as tests/test_hook.py drives it.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ import pytest
 
 import m611_helpers as m
 from conftest import DROP, KBLAM_TOML, NO_EMBEDDINGS, PROMPT_TOML, finding_text, record_text
+from kblam import hook
 from kblam import records
 from kblam.finding import yaml_rt
 from test_check import E1, jkb  # noqa: F401 (jkb is a fixture, and hkb is built on it)
@@ -158,6 +159,10 @@ def test_a_removal_of_a_record_kind_folder_or_the_root_is_denied(kb, monkeypatch
     "rm research-review/challenges/check*",
     "rm research-review/challenges/*-0001.yaml",
     "rm research-review/challenges/*",
+    "rm research-review/uses/checked-use-0002*",            # the literal head ends in digits, and the
+    "rm research-review/challenges/source-challenge-0002?yaml",   # tail may hold the extension
+    "rm research-review/tasks/claim-task-12[3]4.y*",
+    "rm research-review/challenges/source-challenge-1*",
 ])
 def test_a_removal_glob_that_could_name_a_record_is_denied(kb, monkeypatch, capsys, command):
     reason = denied(call("PreToolUse", tool(kb, "Bash", command=command), monkeypatch, capsys)[1])
@@ -171,10 +176,13 @@ def test_a_removal_glob_that_could_name_a_record_is_denied(kb, monkeypatch, caps
     "rm research-review/challenges/*.bak",
     "rm research-review/challenges/INDEX.*",
     "rm research-review/challenges/t*",                     # no record name begins with `t` or `u`
-    "rm research-review/challenges/u*",                     # (only `s`, `c` and `claim-task-` do)
+    "rm research-review/challenges/u*",                     # (a record name begins with `s` or `c`)
     "rm research-review/challenges/SC-*.yaml",              # an old-style name is no record (D: the ID
     "rm research-review/challenges/SC-0001.yaml",           # rename), so a stray one can be deleted
     "rm research-review/challenges/T*-0010.yaml",
+    "rm research-review/challenges/source-challenge-draft.yaml",  # a stray in a kind folder: no digits
+    "rm research-review/uses/checked-use-1.yaml",           # fewer than four digits: no record
+    "rm research-review/tasks/claim-task-0002.txt",
 ])
 def test_a_removal_glob_that_cannot_name_a_record_passes(kb, monkeypatch, capsys, command):
     assert call("PreToolUse", tool(kb, "Bash", command=command), monkeypatch, capsys) == (0, None, "")
@@ -220,6 +228,17 @@ def test_the_bash_removal_deny_reads_as_under_kblam_it_does(kb, monkeypatch, cap
 ])
 def test_removing_a_stray_file_under_the_review_root_passes(kb, monkeypatch, capsys, command):
     assert call("PreToolUse", tool(kb, "Bash", command=command), monkeypatch, capsys) == (0, None, "")
+
+
+def test_the_hooks_record_name_regex_mirrors_records_filename_re():
+    """N6: hook.py mirrors records.FILENAME_RE, because that module imports ruamel and the hook may not.
+    The two agree, so a name with no glob character is a record only when it is one."""
+    assert hook.RECORD_NAME_RE.pattern == records.FILENAME_RE.pattern
+    names = ["source-challenge-0001.yaml", "claim-task-0002.yaml", "checked-use-0003.yaml",
+             "source-challenge-draft.yaml", "checked-use-1.yaml", "source-challenge-0001.txt",
+             "claim-task-0002.yaml.bak", "notes.yaml", "INDEX.md"]
+    for name in names:
+        assert bool(hook.RECORD_NAME_RE.match(name)) == bool(records.FILENAME_RE.match(name)), name
 
 
 def test_an_absolute_target_is_compared_as_a_path(kb, monkeypatch, capsys):
@@ -411,9 +430,9 @@ def test_stop_blocks_on_a_record_changed_out_of_band(review_kb, monkeypatch, cap
 
 
 def test_the_free_field_route_the_fix_sentence_names_clears_the_block(review_kb, monkeypatch, capsys):
-    """D49 for the fix sentence's free-field route: a free field of an installed SC changed by hand fails
-    K13, Stop blocks, and kblam challenge edit, the fix in the staged copy, kblam put and kblam validate
-    --record clear it: the next Stop is silent."""
+    """D49 for the fix sentence's free-field route: a free field of an installed source challenge changed
+    by hand fails K13, Stop blocks, and kblam challenge edit, the fix in the staged copy, kblam put and
+    kblam validate --record clear it: the next Stop is silent."""
     review_kb.add("F-0001", "motor", E1)
     review_kb.write(f"{REVIEW}/challenges/source-challenge-0001.yaml", record_text("source-challenge", proposition=""))
 
@@ -1150,6 +1169,21 @@ def test_a_committed_stray_file_names_no_restore(git_review_kb, monkeypatch, cap
     assert "git restore" not in parse and "leave it as it is" not in parse
     assert layout.endswith("then delete this file")
     assert (kb.root / path).read_bytes() == before
+
+
+def test_a_stray_that_names_a_kind_names_the_delete_the_hook_allows(review_kb, monkeypatch, capsys):
+    """D49 for N6: a file whose name begins with a kind but is no record (no 4+ digit ID) is a stray, so
+    K13's layout line says to delete it, and the hook allows that very removal: only a name that is a
+    record (or a glob that could name one) is denied."""
+    path = f"{REVIEW}/challenges/source-challenge-draft.yaml"
+    review_kb.write(path, "draft: not a record\n")
+
+    failures, _fix, _pointer = blocked_parts(review_kb, monkeypatch, capsys)
+    layout = next(line for line in failures if line.startswith(f"K13 {path}:"))
+    assert layout.endswith("or kblam use review, then delete this file")
+    assert call("PreToolUse", tool(review_kb, "Bash", command=f"rm {path}"), monkeypatch, capsys) == (0, None, "")
+    record = f"{REVIEW}/challenges/source-challenge-0001.yaml"
+    assert denied(call("PreToolUse", tool(review_kb, "Bash", command=f"rm {record}"), monkeypatch, capsys)[1])
 
 
 def test_a_misfiled_record_keeps_its_parse_error_bare(git_review_kb, monkeypatch, capsys):

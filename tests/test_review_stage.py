@@ -12,9 +12,10 @@ import pytest
 
 from conftest import (KBLAM_TOML, NO_EMBEDDINGS, PROMPT_TOML, SOURCE_REPO, TRACE_PATH, TRACE_TEXT,
                       dump_record, record_data)
-from kblam import journal, k13, k14, matching, records, review_stage, writes
+from kblam import cli, journal, k13, k14, matching, records, review_stage, writes
 from kblam.decisions import subject_digest
 from kblam.finding import fingerprint
+from kblam.review_index import generate_review_index
 from kblam.sources import sha256_hex
 from kblam.store import StoreError
 from kblam.view import load_view
@@ -576,6 +577,42 @@ def test_a_covering_use_is_named_instead_of_an_error(kb, source_repo):
     add_finding(kb, "3", LINE3)
     installed(kb, "checked-use", use(kb))
     assert relation_lines(kb) == [f"{excerpt_line(kb)} same: covered by checked-use-0001"]
+
+
+def open_decide(use_id: str = "checked-use-0001", proponent: str = "researcher-a") -> str:
+    """The step `challenge uses` names where an open use already covers the excerpt: the decision that
+    approves it, with a `--by` of its own (k14._review_step)."""
+    return (f"kblam review decide {use_id} --status approved --by NAME --reason TEXT --expect D; its --by "
+            f"must not be its proponent ({use_id}'s proponent is {proponent})")
+
+
+def test_an_open_use_makes_the_line_name_the_decide_that_clears_k14(kb, source_repo):
+    """D49 for N1: where an open use already names the excerpt, `challenge uses` names that use's approving
+    decision rather than a second `kblam use review`, and running the decision it prints approves the use
+    and leaves K14 clean."""
+    installed(kb, "source-challenge", sc(source_repo))
+    add_finding(kb, "3", LINE3)
+    data = use(kb, status="open")
+    installed(kb, "checked-use", data)
+    assert relation_lines(kb) == [f"{excerpt_line(kb)} same: error; {open_decide()}"]
+
+    view = load_view(kb.cfg)
+    kb.write(view.review_index_path, generate_review_index(view))
+    assert cli.main(["--root", str(kb.root), "review", "decide", "checked-use-0001", "--status", "approved",
+                     "--by", "reviewer-b", "--reason", "the excerpt really is used for the printed bytes",
+                     "--expect", subject_digest("checked-use", data)]) == 0
+    assert relation_lines(kb) == [f"{excerpt_line(kb)} same: covered by checked-use-0001"]
+
+
+def test_an_open_use_makes_a_version_unproved_line_name_the_same_decide(kb, source_repo):
+    """N1: the "version unproved" line names the open use's approving decision too, beside the new
+    challenge that version needs."""
+    installed(kb, "source-challenge", sc(source_repo))
+    source_repo.write(TRACE_PATH, NEW_TEXT)
+    add_finding(kb, "4", LINE3)
+    installed(kb, "checked-use", use(kb, status="open"))
+    assert relation_lines(kb) == [
+        f"{excerpt_line(kb)} other: error; {open_decide()}; or kblam challenge new {TRACE} --lines 4-4 --by NAME"]
 
 
 def test_a_version_unproved_excerpt_names_both_commands(kb, source_repo):

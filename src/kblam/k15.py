@@ -23,8 +23,7 @@ REBIND = "kblam review rebind {rid} --by NAME --reason TEXT --expect D"
 def task_binding_problems(view, rec: Record) -> list[str]:
     """Why a claim task's binding no longer holds, [] when it does: the finding exists, and its K3
     fingerprint and file sha256 equal claim_fingerprint and base_file_sha256. Each message names the
-    finding and ends
-    with the command that fixes it (kblam review rebind <claim-task-ID> ...)."""
+    finding and ends with the command that fixes it (kblam review rebind <claim-task-ID> ...)."""
     return [message for _key, message in _binding_problems(view, rec)]
 
 

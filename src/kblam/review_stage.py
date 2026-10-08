@@ -42,13 +42,12 @@ def _today() -> date:
 def allocate_record_id(cfg: Config, prefix: str) -> str:
     """The next ID of kind `prefix` ("source-challenge", "claim-task" or "checked-use"), four digits or
     more: one above the highest number of that prefix among the record files in the review root (any
-    file whose name matches
-    records.FILENAME_RE, in any folder under the root), the staged files in `.kblam/review-staging/`,
-    the registry (registry.read_ids; a ValueError becomes StoreError), the allocation receipts in
-    `.kblam/review-receipts/` (an abandoned draft keeps its receipt, and receipts are never rewritten),
-    and the record files in the git history of the review root on any ref (store.history_names; without
-    git it adds nothing). Numbering is per prefix: source-challenge-0001 and claim-task-0001 coexist.
-    Call it under the lock."""
+    file whose name matches records.FILENAME_RE, in any folder under the root), the staged files in
+    `.kblam/review-staging/`, the registry (registry.read_ids; a ValueError becomes StoreError), the
+    allocation receipts in `.kblam/review-receipts/` (an abandoned draft keeps its receipt, and receipts
+    are never rewritten), and the record files in the git history of the review root on any ref
+    (store.history_names; without git it adds nothing). Numbering is per prefix: source-challenge-0001
+    and claim-task-0001 coexist. Call it under the lock."""
     if prefix not in records.KINDS:
         raise StoreError(f"{prefix!r} is not a record kind (source-challenge, claim-task or checked-use)")
     numbers = []
@@ -145,24 +144,22 @@ def challenge_new(cfg: Config, source_path: str, lines: tuple[int, int], by: str
 def challenge_edit(cfg: Config, rec_id: str) -> Path:
     """`kblam challenge edit source-challenge-…`: stage a byte-for-byte copy of the installed source
     challenge and write its edit-base receipt (receipts.write_edit_base with the sha256 of the installed
-    bytes). Refuses: not a source challenge ID; no
-    installed record (`<review root>/challenges/<ID>.yaml`); a record that does not parse; an `id` that
-    differs from the file name's ID (nothing is staged: kblam validate names the step that fixes the
-    installed file); a status other than open ("source-challenge-0001 is <status>; only an open challenge
-    can be edited"); a staged copy already present (name it, and say to edit that copy and put it, or
-    delete it
-    to start again)."""
+    bytes). Refuses: not a source challenge ID; no installed record
+    (`<review root>/challenges/<ID>.yaml`); a record that does not parse; an `id` that differs from the
+    file name's ID (nothing is staged: kblam validate names the step that fixes the installed file); a
+    status other than open ("source-challenge-0001 is <status>; only an open challenge can be edited");
+    a staged copy already present (name it, and say to edit that copy and put it, or delete it to start
+    again)."""
     with writes.locked(cfg, f"challenge edit {rec_id}", mutating=False):
         return _edit(cfg, "source-challenge", rec_id)
 
 
 def challenge_show(cfg: Config, rec_id: str) -> str:
     """`kblam challenge show source-challenge-…`: the text to print (final newline included), read from
-    the installed
-    record with one sources.SourceReader over load_view(cfg). Lines, in this order: the ID and status;
-    "subject digest: <64 hex>" (decisions.subject_digest); the source path, its version (the pin's blob,
-    or the snapshot path, or "provisional") and its state (sources.State value, plus the resolver's
-    message when not available); the assertion lines and text; the proposition, scope and
+    the installed record with one sources.SourceReader over load_view(cfg). Lines, in this order: the ID
+    and status; "subject digest: <64 hex>" (decisions.subject_digest); the source path, its version (the
+    pin's blob, or the snapshot path, or "provisional") and its state (sources.State value, plus the
+    resolver's message when not available); the assertion lines and text; the proposition, scope and
     classification; each basis entry (path, state, locator, role, provenance); usable; limits; linked
     findings; each decision (date, by, status, reason, evidence paths, bind prefix of 12 hex). A
     malformed record is refused (StoreError naming the file and saying to run kblam validate)."""
@@ -199,11 +196,10 @@ def challenge_show(cfg: Config, rec_id: str) -> str:
 
 def challenge_uses(cfg: Config, rec_id: str) -> str:
     """`kblam challenge uses source-challenge-…`: one line per k14.challenge_relations entry (the text to
-    print, final
-    newline included): the finding ID and path:line, the excerpt ordinal (for an excerpt), the relation
-    and level in words (error, warning, or "covered by checked-use-0003"), and the command. When the
-    challenge is not confirmed, one line saying so ("source-challenge-0001 is open; only a confirmed
-    challenge affects findings"). Refuses an unknown or malformed record."""
+    print, final newline included): the finding ID and path:line, the excerpt ordinal (for an excerpt),
+    the relation and level in words (error, warning, or "covered by checked-use-0003"), and the command.
+    When the challenge is not confirmed, one line saying so ("source-challenge-0001 is open; only a
+    confirmed challenge affects findings"). Refuses an unknown or malformed record."""
     _check_id(rec_id, "source-challenge")
     rec = _installed(cfg, "source-challenge", rec_id)
     if rec.status != "confirmed":
@@ -265,8 +261,7 @@ def task_edit(cfg: Config, rec_id: str) -> Path:
 
 def task_show(cfg: Config, rec_id: str) -> str:
     """`kblam task show claim-task-…`: ID, status, "subject digest: <64 hex>", kind, finding, proponent,
-    the
-    binding and whether it still holds (k15.task_binding_problems: each problem printed), question,
+    the binding and whether it still holds (k15.task_binding_problems: each problem printed), question,
     method, outcomes, controls, stop, expected evidence, and the decisions as for challenge_show."""
     _check_id(rec_id, "claim-task")
     rec = _installed(cfg, "claim-task", rec_id)

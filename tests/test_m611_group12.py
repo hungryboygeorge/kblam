@@ -248,7 +248,7 @@ def _rewrite(path: Path, dotted: str, value) -> None:
 
 
 def _sc_fields(source_repo) -> dict:
-    """The blank SC fields the author fills before the first put (SPEC §5.2.5)."""
+    """The blank source-challenge fields the author fills before the first put (SPEC §5.2.5)."""
     return {"proposition": "The printed byte equality follows from the printed byte values",
             "scope": ["MX-100 capture transcription"],
             "classification": "contradicted",
@@ -260,13 +260,13 @@ def _sc_fields(source_repo) -> dict:
 
 
 def _cu_fields() -> dict:
-    """The blank CU fields the author fills before the first put."""
+    """The blank checked-use fields the author fills before the first put."""
     return {"disposition": "unaffected_raw_bytes",
             "reason": "The excerpt is cited only for the printed byte values."}
 
 
 def _ct_fields() -> dict:
-    """The blank CT fields the author fills before the first put."""
+    """The blank claim-task fields the author fills before the first put."""
     return {"question": "Does an independent measurement establish the claim?",
             "method": "Repeat the capture with the documented settings.",
             "outcomes": {"supports": "The ratio is within 0.1%.", "refutes": "The ratio differs by more.",

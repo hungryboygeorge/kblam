@@ -139,7 +139,7 @@ def test_warnings_only_validate_finding_put_and_stop_exit_zero(kb, source_repo, 
     """Acceptance 4, 6: F-0001 quotes raw row-102 bytes, not the challenged equality.
 
     Start: no records, committed source. challenge new --by reviewer-a (0, staged path):
-    {.kblam/review-staging/source-challenge-0001.yaml, .kblam/review-receipts/source-challenge-0001.json}; put SC (0,
+    {.kblam/review-staging/source-challenge-0001.yaml, .kblam/review-receipts/source-challenge-0001.json}; put source-challenge (0,
     installed path): {research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md,
     .kblam/review-ids, .kblam/tree.hash, .kblam/review-staging/source-challenge-0001.yaml}; decide confirmed
     --by reviewer-b (0, confirmed + K14 range warning): {research-review/challenges/source-challenge-0001.yaml,
@@ -188,7 +188,7 @@ def test_pending_only_validate_record_and_finding_put_and_stop_exit_zero(kb, sou
     """Acceptance 4, 6: a well-formed open claim-task-0001 binds F-0001, source committed.
 
     task new --by researcher-a --proponent researcher-a (0, path):
-    {.kblam/review-staging/claim-task-0001.yaml, .kblam/review-receipts/claim-task-0001.json}; put CT (0,
+    {.kblam/review-staging/claim-task-0001.yaml, .kblam/review-receipts/claim-task-0001.json}; put claim-task (0,
     installed path): {research-review/tasks/claim-task-0001.yaml, research-review/INDEX.md,
     .kblam/review-ids, .kblam/tree.hash, .kblam/review-staging/claim-task-0001.yaml}.
     validate (no --by, 0, claim-task-0001 open replication and OK; 1 pending task): none.
@@ -197,9 +197,9 @@ def test_pending_only_validate_record_and_finding_put_and_stop_exit_zero(kb, sou
     installed path + disabled Jev): {findings/calibration/F-0002-independent-tray-contact.md,
     findings/INDEX.md, .kblam/staging/F-0002-independent-tray-contact.md, .kblam/tree.hash,
     .kblam/pairs.sqlite, .kblam/review.jsonl, .kblam/checks.jsonl}; validate afterwards
-    (0, pending CT and OK with 2 findings): none. An out-of-band body-only edit of F-0002
+    (0, pending claim-task and OK with 2 findings): none. An out-of-band body-only edit of F-0002
     forces hook Stop to validate (no --by, 0, silent): {.kblam/checks.jsonl}, checking
-    the previously unchecked F-0001; validate afterwards (0, pending CT and OK): none. All calls preserve the committed source and Git state.
+    the previously unchecked F-0001; validate afterwards (0, pending claim-task and OK): none. All calls preserve the committed source and Git state.
     """
     kb.add("F-0001", "ratio", m.CLAIM)
     m.accept_tree(kb)
@@ -236,7 +236,7 @@ def test_matching_tree_hash_after_confirmation_leaves_stop_silent_while_validate
     """Acceptance 4, 6: installed F-0001 quotes line 3 of the committed source, no use.
 
     challenge new --by reviewer-a (0, path): {.kblam/review-staging/source-challenge-0001.yaml,
-    .kblam/review-receipts/source-challenge-0001.json}; put open SC (0, installed path):
+    .kblam/review-receipts/source-challenge-0001.json}; put open source-challenge (0, installed path):
     {research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
     .kblam/tree.hash, .kblam/review-staging/source-challenge-0001.yaml}; decide confirmed --by reviewer-b
     (0, confirmed, now affects F-0001, K14 quoted assertion, validate still fails):
@@ -268,7 +268,7 @@ def test_source_change_outside_both_roots_fails_validate_and_pre_commit_but_not_
     """Acceptance 4, 6: confirmed source-challenge-0001 at pinned line 3, F-0001 quotes unaffected line 2.
 
     challenge new --by reviewer-a (0, path): {.kblam/review-staging/source-challenge-0001.yaml,
-    .kblam/review-receipts/source-challenge-0001.json}; put open SC (0, installed path):
+    .kblam/review-receipts/source-challenge-0001.json}; put open source-challenge (0, installed path):
     {research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
     .kblam/tree.hash, .kblam/review-staging/source-challenge-0001.yaml}; decide confirmed --by reviewer-b
     (0, confirmed): {research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md,
@@ -320,15 +320,15 @@ def test_review_index_and_validate_are_byte_identical_across_runs(kb, source_rep
     """Acceptance 4, 6: open source-challenge-0001 with committed source and open claim-task-0001 bound to F-0001.
 
     challenge new --by reviewer-a (0, path): {.kblam/review-staging/source-challenge-0001.yaml,
-    .kblam/review-receipts/source-challenge-0001.json}; put SC (0, installed path):
+    .kblam/review-receipts/source-challenge-0001.json}; put source-challenge (0, installed path):
     {research-review/challenges/source-challenge-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
     .kblam/tree.hash, .kblam/review-staging/source-challenge-0001.yaml}; task new --by researcher-a
     --proponent researcher-a (0, path): {.kblam/review-staging/claim-task-0001.yaml,
-    .kblam/review-receipts/claim-task-0001.json}; put CT (0, installed path):
+    .kblam/review-receipts/claim-task-0001.json}; put claim-task (0, installed path):
     {research-review/tasks/claim-task-0001.yaml, research-review/INDEX.md, .kblam/review-ids,
     .kblam/tree.hash, .kblam/review-staging/claim-task-0001.yaml}. Three review index calls (no --by,
     0, generated path): each none, including tree.hash; index bytes equal a fixed literal.
-    Three validate calls afterwards (no --by, 0, pending CT and OK): each none, identical UTF-8
+    Three validate calls afterwards (no --by, 0, pending claim-task and OK): each none, identical UTF-8
     stdout and empty stderr. All calls preserve committed source bytes and Git state.
     """
     kb.add("F-0001", "ratio", m.CLAIM)

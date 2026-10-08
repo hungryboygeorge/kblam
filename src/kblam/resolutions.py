@@ -127,7 +127,8 @@ def _read(cfg: Config) -> bytes:
     except FileNotFoundError:
         return b""
     except OSError as exc:
-        raise ResolutionError(f"cannot read {RESOLUTIONS_NAME}: {exc.strerror}") from None
+        raise ResolutionError(f"cannot read {RESOLUTIONS_NAME}: {exc.strerror}; leave it as it is and tell "
+                              f"the user") from None
 
 
 def load(cfg: Config) -> list[Resolution]:

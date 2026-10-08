@@ -1,4 +1,4 @@
-"""The matching primitives of SPEC §5.2.3 and CU `tag_sha256` (matching.py)."""
+"""The matching primitives of SPEC §5.2.3 and checked-use `tag_sha256` (matching.py)."""
 
 from __future__ import annotations
 

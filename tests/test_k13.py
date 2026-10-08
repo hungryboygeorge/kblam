@@ -42,7 +42,7 @@ FINDING = "F-0001"
 # `kblam use review` suggestion restore it: that command reads the finding's real verbatim excerpts.
 REAL_FINDING_MATCHES = matching.finding_matches
 
-# The CU binding row's advice, as it prints for the fixture's checked-use-0001 (SPEC §5.2.5 `review rebind`).
+# The checked-use binding row's advice, as it prints for the fixture's checked-use-0001 (SPEC §5.2.5 `review rebind`).
 REBIND_FIX = "run kblam review rebind checked-use-0001 --by NAME --reason TEXT --expect D"
 
 
@@ -76,7 +76,7 @@ RESTORE_TEXT_FIX = (
     "restore the source text excerpt 1 quotes (or fix the excerpt so kblam validate verifies it), "
     f"then run kblam validate again; or retire this use ({RETIRE_USE_FIX})")
 # A citation that is no excerpt reference leaves the use structurally invalid, so every write command
-# refuses it and the only advice is to restore the installed record (SPEC §5.2.3 CU citation).
+# refuses it and the only advice is to restore the installed record (SPEC §5.2.3 checked-use citation).
 RESTORE_USE_FIX = ("restore checked-use-0001 from git (its citation is not a valid excerpt reference), then run "
                    "kblam validate again")
 # A schema records cannot check vouches for no field, so the same restore applies before the citation is
@@ -189,7 +189,7 @@ def fill(path: Path, **fields) -> None:
 
 
 def sc_fields() -> dict:
-    """The blank SC fields the author fills before the first put (SPEC §5.2.5): one basis entry on the
+    """The blank source-challenge fields the author fills before the first put (SPEC §5.2.5): one basis entry on the
     source itself, with the null sha256 and pin that put fills in from the working file."""
     return {"proposition": "The printed byte equality follows from the printed byte values",
             "scope": ["MX-100 capture transcription"],
@@ -318,7 +318,7 @@ def dangling(issues) -> list[tuple[str, str]]:
 
 
 def bindings(issues) -> list[tuple[str, str]]:
-    """The CU binding row's issues: _use_issues appends each of them at line 0, owned by checked-use-0001 (a
+    """The checked-use binding row's issues: _use_issues appends each of them at line 0, owned by checked-use-0001 (a
     dangling link carries the key's line, so it is not one of these)."""
     return [(issue.level, issue.message) for issue in issues
             if issue.code == "K13" and issue.owner == "checked-use-0001" and issue.line == 0]
@@ -408,7 +408,7 @@ def test_confirmation_row_level_by_status(kb_ready, source_repo, status):
 
 
 def test_a_ct_binding_mismatch_is_not_k13s(kb_ready, source_repo):
-    """The CT binding row belongs to K15: K13 reports nothing for a task whose binding no longer holds."""
+    """The claim-task binding row belongs to K15: K13 reports nothing for a task whose binding no longer holds."""
     put(kb_ready, "claim-task", ct(kb_ready, "confirmed", claim_fingerprint="0badf00d0000",
                            base_file_sha256=ZERO64))
     assert messages_of(kb_ready) == []
@@ -856,8 +856,8 @@ def test_a_malformed_citation_says_to_restore_the_use(kb_ready, source_repo, cit
     """A citation that is no excerpt reference at all — not a mapping, a missing key, a wrong type or
     range, an unknown key — leaves the use structurally invalid: `review decide` refuses it (K13
     structure errors), so the binding problem carries the restore rather than row i's retire. Once the
-    record is back, the use is clean and validate passes (SPEC §5.2.3 CU citation, §5.2.5 `review
-    rebind`)."""
+    record is back, the use is clean and validate passes (SPEC §5.2.3 checked-use citation, §5.2.5
+    `review rebind`)."""
     path = put(kb_ready, "checked-use", cu(kb_ready, "approved"))
     original = (kb_ready.root / path).read_bytes()
     put(kb_ready, "checked-use", cu(kb_ready, "approved", citation=citation))
@@ -1893,7 +1893,7 @@ def test_open_challenge_identity_is_restored_before_pin_and_confirm(kb_ready, so
     captured = capsys.readouterr()
     assert "creator is 'another-reviewer', but it was allocated as" in captured.out
     kb_ready.write(path, backup)
-    assert run(kb_ready, "validate") == 0             # CU binding problems are warnings, not errors
+    assert run(kb_ready, "validate") == 0             # checked-use binding problems are warnings, not errors
     captured = capsys.readouterr()
     expected = CONFIRM_USE_FIX if pinned else PIN_CONFIRM_FIX
     assert expected in captured.out

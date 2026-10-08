@@ -317,8 +317,9 @@ def _fill(path: Path, defaults: Mapping, fields: Mapping) -> dict:
 
 
 def _sc_defaults(kb, path: str, classification: str) -> dict:
-    """The blank SC fields filled the way a reviewer would: a claim, a scope, a classification and one
-    basis entry on the source itself (put hashes it and gives it the source's pin, §5.2.5)."""
+    """The blank source-challenge fields filled the way a reviewer would: a claim, a scope, a
+    classification and one basis entry on the source itself (put hashes it and gives it the source's
+    pin, §5.2.5)."""
     role = "model-mismatch" if classification == "wrong_model" else "internal-inconsistency"
     return {
         "proposition": "The printed byte equality follows from the printed byte values",
@@ -333,7 +334,7 @@ def _sc_defaults(kb, path: str, classification: str) -> dict:
 
 
 def _ct_defaults() -> dict:
-    """The blank CT fields filled the way a researcher would."""
+    """The blank claim-task fields filled the way a researcher would."""
     return {
         "question": "Does an independent measurement establish the claim?",
         "method": "Repeat the capture with the documented settings.",
@@ -346,7 +347,7 @@ def _ct_defaults() -> dict:
 
 
 def _cu_defaults() -> dict:
-    """The blank CU fields filled the way a reviewer would."""
+    """The blank checked-use fields filled the way a reviewer would."""
     return {"disposition": "unaffected_raw_bytes",
             "reason": "The excerpt is cited only for the printed byte values."}
 
@@ -370,11 +371,10 @@ def _staged_path(kb, run: Run, kind: str, what: str) -> Path:
 def stage_challenge(kb, source_repo, lines: object, *, by: str, path: str | None = None,
                     **fields) -> Staged:
     """`challenge new` plus the author's filling: a source challenge ready for `put`. Assert exit 0,
-    exactly the
-    staged SC path plus newline, empty stderr and a file with the same ID. `lines` is "A-B", (A, B) or
-    one line number; `path` is the source (default: the fixture trace); `fields` are the source
-    challenge's free
-    fields and replace the defaults (DROP drops a key, "" leaves it blank)."""
+    exactly the staged source-challenge path plus newline, empty stderr and a file with the same ID.
+    `lines` is "A-B", (A, B) or one line number; `path` is the source (default: the fixture trace);
+    `fields` are the source challenge's free fields and replace the defaults (DROP drops a key, ""
+    leaves it blank)."""
     path = path or source_repo.kb_path()
     run = kblam(kb, "challenge", "new", path, "--lines", _lines_arg(lines), "--by", by)
     staged = _staged_path(kb, run, "source-challenge", "challenge new")
@@ -385,8 +385,7 @@ def stage_challenge(kb, source_repo, lines: object, *, by: str, path: str | None
 def stage_task(kb, finding_id: str, *, kind: str = "replication", by: str, proponent: str,
                **fields) -> Staged:
     """`task new` plus the researcher's filling: a claim task ready for `put`. Assert exit 0, exactly
-    the
-    staged CT path plus newline, empty stderr and a file with the same ID."""
+    the staged claim-task path plus newline, empty stderr and a file with the same ID."""
     run = kblam(kb, "task", "new", finding_id, "--kind", kind, "--by", by,
                 "--proponent", proponent)
     staged = _staged_path(kb, run, "claim-task", "task new")
@@ -397,8 +396,7 @@ def stage_task(kb, finding_id: str, *, kind: str = "replication", by: str, propo
 def stage_use(kb, sc_id: str, finding_id: str, ordinal: int = 1, *, by: str, proponent: str,
               **fields) -> Staged:
     """`use review` plus the reviewer's filling: a checked use ready for `put`. Assert exit 0, exactly
-    the
-    staged CU path plus newline, empty stderr and a file with the same ID."""
+    the staged checked-use path plus newline, empty stderr and a file with the same ID."""
     run = kblam(kb, "use", "review", sc_id, finding_id, ordinal, "--by", by,
                 "--proponent", proponent)
     staged = _staged_path(kb, run, "checked-use", "use review")

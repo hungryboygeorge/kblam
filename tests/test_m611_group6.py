@@ -157,7 +157,7 @@ def reference(path: str) -> dict:
 
 
 def challenge_fields(kb, source_repo) -> dict:
-    """The filled SC fields: one basis entry on the source itself, with a primary provenance."""
+    """The filled source-challenge fields: one basis entry on the source itself, with a primary provenance."""
     return {"proposition": "The printed byte equality follows from the printed byte values",
             "scope": ["MX-100 capture transcription"],
             "classification": "contradicted",
@@ -169,7 +169,7 @@ def challenge_fields(kb, source_repo) -> dict:
 
 
 def task_fields() -> dict:
-    """The filled CT fields."""
+    """The filled claim-task fields."""
     return {"question": "Does an independent measurement establish the claim?",
             "method": "Repeat the capture with the documented settings.",
             "outcomes": {"supports": "The ratio is within 0.1%.", "refutes": "The ratio differs by more.",
@@ -180,7 +180,7 @@ def task_fields() -> dict:
 
 
 def use_fields() -> dict:
-    """The filled CU fields."""
+    """The filled checked-use fields."""
     return {"disposition": "unaffected_raw_bytes",
             "reason": "The excerpt is cited only for the printed byte values."}
 
